@@ -1,0 +1,41 @@
+{
+ "content": null,
+ "creation": "2026-08-25 00:00:00.000000",
+ "docstatus": 0,
+ "doctype": "Page",
+ "idx": 0,
+ "modified": "2026-08-25 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "EGC Projects",
+ "name": "egc-project-hub",
+ "owner": "Administrator",
+ "page_name": "egc-project-hub",
+ "roles": [
+  {
+   "role": "EGC Project Manager"
+  },
+  {
+   "role": "EGC Project Engineer"
+  },
+  {
+   "role": "EGC Document Controller"
+  },
+  {
+   "role": "EGC Project Viewer"
+  },
+  {
+   "role": "Projects User"
+  },
+  {
+   "role": "Projects Manager"
+  },
+  {
+   "role": "System Manager"
+  }
+ ],
+ "script": null,
+ "standard": "Yes",
+ "style": null,
+ "system_page": 0,
+ "title": "EGC Project Hub"
+}

@@ -139,6 +139,12 @@ def _activity_overview(project: str) -> dict:
 		"EGC Activity",
 		filters=[
 			["project", "=", project],
+			# The "is set" guard is load-bearing. Frappe wraps a `<` filter on a nullable field
+			# as `IFNULL(field, '') < value` (it skips this only for `>`/`>=` on dates — see
+			# frappe/database/query.py `_should_apply_ifnull`), so an activity with no planned
+			# finish would compare `'' < today()` and be counted as overdue. That contradicts
+			# `egc_activity.is_overdue()`, which is the authority: no date means not overdue.
+			["planned_end_date", "is", "set"],
 			["planned_end_date", "<", today()],
 			["status", "not in", list(c.ACTIVITY_CLOSED_STATUSES)],
 		],
@@ -167,6 +173,9 @@ def _submittal_overview(project: str) -> dict:
 		"EGC Submittal",
 		filters=[
 			["project", "=", project],
+			# Same IFNULL trap as `_activity_overview`: a submittal with no review due date is
+			# not overdue, and `get_submittals`/the Submittal Log report both already say so.
+			["current_due_date", "is", "set"],
 			["current_due_date", "<", today()],
 			["submittal_status", "in", list(c.SUBMISSION_OPEN_STATUSES)],
 		],
