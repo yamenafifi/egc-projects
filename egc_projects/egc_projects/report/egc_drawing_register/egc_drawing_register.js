@@ -28,7 +28,7 @@ frappe.query_reports["EGC Drawing Register"] = {
 				"Approved with Comments",
 				"Revise & Resubmit",
 				"Rejected",
-			],
+			].join("\n"),
 		},
 		{
 			fieldname: "document_type",
@@ -40,6 +40,11 @@ frappe.query_reports["EGC Drawing Register"] = {
 	],
 	formatter: function (value, row, column, data, default_formatter) {
 		value = default_formatter(value, row, column, data);
+
+		// Frappe's datatable invokes the formatter for rows that carry no data object (the
+		// placeholder/total rows). Dereferencing `data` there throws, and a throw inside the
+		// formatter leaves the whole table rendered as an empty skeleton.
+		if (!data) return value;
 		if (column.fieldname === "approval_status" && data.approval_status) {
 			const colors = {
 				Approved: "green",
