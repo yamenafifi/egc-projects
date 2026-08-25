@@ -1,0 +1,86 @@
+# Copyright (c) 2026, EGC and contributors
+# For license information, please see license.txt
+
+import frappe
+from frappe import _
+from frappe.model.document import Document
+
+from egc_projects.egc_projects import submittal_control, validators
+
+
+class EGCSubmittal(Document):
+	# begin: auto-generated types
+	# This code is auto-generated. Do not modify anything in this block.
+
+	from typing import TYPE_CHECKING
+
+	if TYPE_CHECKING:
+		from frappe.types import DF
+
+		current_due_date: DF.Date | None
+		current_submission: DF.Link | None
+		current_submission_label: DF.Data | None
+		description: DF.SmallText | None
+		discipline: DF.Link | None
+		last_response_date: DF.Date | None
+		project: DF.Link
+		submission_history_html: DF.HTML | None
+		submittal_number: DF.Data
+		submittal_status: DF.Literal[
+			"Draft",
+			"Submitted",
+			"Under Review",
+			"Approved",
+			"Approved with Comments",
+			"Revise & Resubmit",
+			"Rejected",
+		]
+		submittal_type: DF.Link
+		title: DF.Data
+		wbs_node: DF.Link | None
+	# end: auto-generated types
+
+	def validate(self):
+		validators.validate_unique_in_project(self, "submittal_number", _("Submittal"))
+		validators.validate_same_project(self, "wbs_node", "EGC WBS Node", _("WBS Node"))
+
+
+@frappe.whitelist()
+def get_submissions(submittal: str) -> list[dict]:
+	"""Every submission/review cycle of `submittal`, newest first, with the documents it carried.
+
+	Used by `egc_submittal.js` to render the read-only submission history table. Every cycle
+	stays visible forever — `create_next_revision` never overwrites or hides an earlier one.
+	"""
+	frappe.has_permission("EGC Submittal", "read", doc=submittal, throw=True)
+
+	current_submission = submittal_control.get_current_submission(submittal)
+	rows = frappe.get_all(
+		"EGC Submittal Revision",
+		filters={"submittal": submittal},
+		fields=[
+			"name",
+			"revision_label",
+			"submission_seq",
+			"docstatus",
+			"date_submitted",
+			"due_date",
+			"submitted_by",
+			"reviewer",
+			"submission_status",
+			"response",
+			"response_date",
+			"responded_by",
+			"response_remarks",
+		],
+		order_by="submission_seq desc",
+	)
+	for row in rows:
+		row["is_current"] = row.name == current_submission
+		row["documents"] = frappe.get_all(
+			"EGC Submittal Document Item",
+			filters={"parent": row.name},
+			fields=["document_revision", "document", "revision", "document_title"],
+			order_by="idx",
+		)
+	return rows

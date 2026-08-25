@@ -1,0 +1,189 @@
+{
+	"actions": [],
+	"allow_rename": 0,
+	"autoname": "hash",
+	"creation": "2026-08-25 00:00:00.000000",
+	"doctype": "DocType",
+	"engine": "InnoDB",
+	"field_order": [
+		"activity",
+		"project",
+		"column_break_1",
+		"link_doctype",
+		"link_name",
+		"link_title",
+		"section_break_purpose",
+		"link_purpose",
+		"is_blocking",
+		"column_break_2",
+		"required_status",
+		"stage",
+		"section_break_remarks",
+		"remarks"
+	],
+	"fields": [
+		{
+			"fieldname": "activity",
+			"fieldtype": "Link",
+			"in_list_view": 1,
+			"in_standard_filter": 1,
+			"label": "Activity",
+			"options": "EGC Activity",
+			"reqd": 1
+		},
+		{
+			"fieldname": "project",
+			"fieldtype": "Link",
+			"in_standard_filter": 1,
+			"label": "Project",
+			"options": "Project",
+			"read_only": 1,
+			"reqd": 1
+		},
+		{
+			"fieldname": "column_break_1",
+			"fieldtype": "Column Break"
+		},
+		{
+			"fieldname": "link_doctype",
+			"fieldtype": "Link",
+			"in_list_view": 1,
+			"in_standard_filter": 1,
+			"label": "Link Doctype",
+			"options": "DocType",
+			"reqd": 1
+		},
+		{
+			"fieldname": "link_name",
+			"fieldtype": "Dynamic Link",
+			"in_list_view": 1,
+			"label": "Link Name",
+			"options": "link_doctype",
+			"reqd": 1
+		},
+		{
+			"fieldname": "link_title",
+			"fieldtype": "Data",
+			"in_list_view": 1,
+			"label": "Link Title",
+			"read_only": 1
+		},
+		{
+			"fieldname": "section_break_purpose",
+			"fieldtype": "Section Break",
+			"label": "Purpose"
+		},
+		{
+			"default": "Reference",
+			"fieldname": "link_purpose",
+			"fieldtype": "Select",
+			"in_list_view": 1,
+			"in_standard_filter": 1,
+			"label": "Link Purpose",
+			"options": "Reference\nRequirement"
+		},
+		{
+			"default": "0",
+			"description": "Reserved for the future readiness engine. Not read by any code in v1.",
+			"fieldname": "is_blocking",
+			"fieldtype": "Check",
+			"label": "Is Blocking"
+		},
+		{
+			"fieldname": "column_break_2",
+			"fieldtype": "Column Break"
+		},
+		{
+			"description": "Reserved for the future readiness engine. Not read by any code in v1.",
+			"fieldname": "required_status",
+			"fieldtype": "Data",
+			"label": "Required Status"
+		},
+		{
+			"description": "Reserved for the future readiness engine. Not read by any code in v1.",
+			"fieldname": "stage",
+			"fieldtype": "Data",
+			"label": "Stage"
+		},
+		{
+			"fieldname": "section_break_remarks",
+			"fieldtype": "Section Break",
+			"label": "Remarks"
+		},
+		{
+			"fieldname": "remarks",
+			"fieldtype": "Small Text",
+			"label": "Remarks"
+		}
+	],
+	"index_web_pages_for_search": 1,
+	"links": [],
+	"module": "EGC Projects",
+	"naming_rule": "Hash",
+	"custom": 0,
+	"name": "EGC Activity Link",
+	"owner": "Administrator",
+	"permissions": [
+		{
+			"create": 1,
+			"delete": 1,
+			"email": 1,
+			"export": 1,
+			"print": 1,
+			"read": 1,
+			"report": 1,
+			"role": "System Manager",
+			"share": 1,
+			"write": 1
+		},
+		{
+			"create": 1,
+			"delete": 1,
+			"email": 1,
+			"export": 1,
+			"print": 1,
+			"read": 1,
+			"report": 1,
+			"role": "EGC Project Manager",
+			"share": 1,
+			"write": 1
+		},
+		{
+			"create": 1,
+			"delete": 1,
+			"email": 1,
+			"export": 1,
+			"print": 1,
+			"read": 1,
+			"report": 1,
+			"role": "EGC Project Engineer",
+			"share": 1,
+			"write": 1
+		},
+		{
+			"create": 1,
+			"delete": 1,
+			"email": 1,
+			"export": 1,
+			"print": 1,
+			"read": 1,
+			"report": 1,
+			"role": "EGC Document Controller",
+			"share": 1,
+			"write": 1
+		},
+		{
+			"email": 1,
+			"export": 1,
+			"print": 1,
+			"read": 1,
+			"report": 1,
+			"role": "EGC Project Viewer"
+		}
+	],
+	"search_fields": "activity,link_doctype,link_name,project",
+	"sort_field": "modified",
+	"sort_order": "DESC",
+	"states": [],
+	"track_changes": 1
+}
