@@ -1,0 +1,9 @@
+.DS_Store
+*.pyc
+__pycache__/
+*.egg-info
+node_modules/
+.venv/
+egc_projects/public/dist/
+egc_projects/docs/current
+.vscode/
