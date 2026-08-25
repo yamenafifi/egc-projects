@@ -86,3 +86,263 @@ Add tests next to their domain in `egc_projects/tests/`.
 - Prefer `frappe.get_all` / `frappe.qb` over raw SQL.
 - Every `@frappe.whitelist()` method validates permission on its `Project` before it reads
   anything. `validators.require_project_permission()` exists for exactly this.
+---
+
+## Build history — v1 technical changelog
+
+This section is the technical record of how v1 was built: what each commit did, every defect
+found in review, and the exact state the app was left in. `docs/ARCHITECTURE.md` is the binding
+design; this is the log of building to it. Commits are listed oldest first.
+
+### `3e7ed03` — WP-01: app foundation
+
+- Scaffolded `egc_projects` with `bench new-app`, installed on `dev.localhost` alongside the
+  existing `egc_hr`, `ksa_compliance`, `print_designer`, `hrms`, `erpnext`.
+- Wrote `docs/ARCHITECTURE.md` (binding design) before any implementation.
+- `egc_projects/constants.py` — every status enum (`ACTIVITY_STATUSES`, `REVISION_STATUSES`,
+  `SUBMISSION_STATUSES`, `REVIEW_RESPONSES`, `LINK_PURPOSES`, `EGC_ROLES`, `FINANCIAL_ROLES`,
+  …) defined once and imported everywhere; nothing re-types a status literal.
+- `egc_projects/validators.py` — the shared server-side project-isolation kit:
+  `validate_same_project`, `validate_unique_in_project`, `validate_unique_under_parent`,
+  `validate_tree_parent`, `validate_project_not_changed_with_children`,
+  `require_project_permission`.
+- `install.py` — idempotent `after_install`/`after_migrate` hook seeding 4 roles
+  (`EGC Project Manager`, `EGC Project Engineer`, `EGC Document Controller`,
+  `EGC Project Viewer`), 4 Disciplines, 8 Document Types, 9 Submittal Types.
+- `scripts/bench.sh` — a mutex-locked wrapper around `docker exec … bench`, so multiple
+  concurrent implementation agents sharing one bench/site could never interleave a
+  `bench migrate` or a test run.
+
+### `c5a6038` — WP-02/03/04: masters, WBS, Activity, controlled documents
+
+Three Sonnet agents ran in parallel with disjoint file ownership; each is reviewed below.
+
+**Masters + `EGC WBS Node`** (WP-02)
+- `EGC Discipline`, `EGC Document Type`, `EGC Submittal Type` — simple masters, `field:`
+  autoname. Uses `before_naming()` (not just `validate()`) to normalise the code to uppercase,
+  because Frappe's `field:` autoname reads the raw field value in `set_new_name()`, which runs
+  *before* `validate()` — normalising only in `validate` would leave `name` out of sync with a
+  differently-cased field value.
+- `EGC WBS Node` — `NestedSet` tree, `nsm_parent_field = "parent_egc_wbs_node"`, multiple roots
+  (one per project) — `validate_one_root()` is deliberately never called. `autoname:
+  format:{project}-{wbs_code}`. `get_children()`/`add_node()` whitelisted tree endpoints,
+  project-scoped server-side.
+- **Reviewed and accepted as-is.**
+
+**`EGC Activity`** (WP-03)
+- Single self-referencing `NestedSet` DocType — `Mechanical > HVAC > Ductwork > Installation >
+  MRI-01` are all the same DocType. No Sub-Activity DocType exists.
+- `is_overdue(status, planned_end_date)` module-level helper — the single definition of
+  "overdue" reused by the tree JS, the list JS, the Hub API, and the Activity Status Summary
+  report.
+- **Fixed in review** (not by the agent):
+  - `get_children()`'s WBS-node filter combined with the parent filter, so filtering by WBS
+    node returned nothing once a matching activity was not itself a tree root. Now: while
+    drilling into a real parent, the WBS filter is dropped (its job is done); at root level, a
+    WBS filter replaces the parent-is-empty filter instead of narrowing it further.
+  - Children were ordered by `lft` (insertion order) instead of `sequence`; fixed to
+    `order_by="sequence asc, activity_code asc"`.
+
+**Controlled documents — `document_control.py`** (WP-04, the integrity-critical package)
+- `EGC Project Document` (identity) / `EGC Project Document Revision` (`is_submittable: 1`,
+  history).
+- **The revision-integrity guarantee is a framework property, not application code**: `file` on
+  `EGC Project Document Revision` is not `allow_on_submit`, so Frappe itself refuses to let an
+  issued revision's file change. Verified live: `frappe.exceptions.UpdateAfterSubmitError`.
+- `_recompute_revision_statuses()` is a **pure function of the current `docstatus=1` rows**:
+  the highest `revision_seq` among them is `Issued`; every other one is `Superseded` pointing
+  at it. Called identically after submit and after cancel — this single function handles the
+  ordinary case, an out-of-order submit, and cancel-restores-the-previous-revision with no
+  special-casing, because it only ever looks at what is *currently* true.
+  `assert_engine_authorized()` guards both `validate()` (pre-submit) and
+  `on_update_after_submit()` so a REST `PUT` cannot rewrite `revision_status`/`superseded_by`
+  directly — only the engine's own `frappe.db.set_value()` calls (under an `ENGINE_FLAG`) may.
+- `get_approval_status()` — the §2.4 "anti-conflict rule": derives strictly from the *current*
+  revision's latest referencing `EGC Submittal Revision`, so an older revision's response can
+  never leak onto a newer one. Degrades to `Not Submitted` via `frappe.db.table_exists()` guards
+  while the (concurrently-built) submittal doctypes didn't exist yet.
+- **Reviewed and accepted as-is.**
+
+Independently verified end-to-end afterward (`scripts/verify_acceptance.py`, run against the
+live site, rolled back): Rev 00 issued → current; Rev 01 issued → Rev 00 becomes `Superseded`
+with its file byte-identical and `superseded_by` set; rewriting Rev 00's file after issue is
+refused by the framework.
+
+### `83616c3` — WP-05/06: submittals and the relationship layer
+
+Two agents in parallel.
+
+**Submittal domain — `submittal_control.py`** (WP-05)
+- `EGC Submittal` (identity) / `EGC Submittal Revision` (`is_submittable: 1`, one review cycle)
+  / `EGC Submittal Document Item` (child: which document revisions this cycle carries).
+- Mirrors `document_control.py`'s engine pattern: `ENGINE_FLAG`, `_engine_set_submission()`
+  bypassing hooks via `frappe.db.set_value()`, `assert_engine_authorized()`.
+- `submit()` requires ≥1 attached document revision and every one of them must be
+  `docstatus=1, revision_status=Issued` — a draft can never enter review.
+- `record_response()` is **irreversible** — calling it twice on the same submission raises.
+- `create_next_revision()` — allowed only when the latest submission is `Responded`; opens a
+  new Draft cycle with an empty `documents` table (nothing carried forward) and the next
+  sequential `revision_label`.
+- After every submission-state change, `_refresh_documents()` calls
+  `document_control.refresh_document_state()` for every distinct document the submission
+  carries — this is what keeps a document's `approval_status` honest across the two engines.
+- Verified live (see Wave B section below): a submittal's `Revise & Resubmit` on Rev 00,
+  followed by `Approved` on Rev 01, leaves **both cycles visible**, Rev 00's response
+  unchanged, and the document's `approval_status` tracking only the current revision.
+
+**Relationship layer — `relationships.py` + `EGC Activity Link`** (WP-06)
+- Standalone DocType (not a child table) implementing genuine many-to-many:
+  `ALLOWED_LINK_DOCTYPES = {"EGC Project Document", "EGC Submittal"}` — a plain dict registry,
+  so adding `EGC RFI`/`EGC MIR`/`EGC ITP` later is a one-line change with no schema change.
+- `validate()` rejects any `link_doctype` outside the registry server-side (never trusts the
+  client `get_query`), forces `project` from the activity (never client-supplied), and rejects
+  a target whose `project` differs from the activity's.
+- **Fixed in review** (not by the agent): the agent reported "Frappe has no multi-column unique
+  constraint" and enforced (`activity`, `link_doctype`, `link_name`) uniqueness in `validate()`
+  only. This is incorrect — `frappe.db.add_unique()` inside `on_doctype_update()` is the
+  supported mechanism (ERPNext's `Bin` doctype uses exactly this for
+  `item_code`+`warehouse`). Because `EGC Activity Link` is hash-named, nothing in its primary
+  key stops two concurrent `add_link()` calls from racing past the `validate()`-time duplicate
+  check. Added `on_doctype_update()` calling `frappe.db.add_unique(...,
+  constraint_name="unique_activity_link_target")`, plus
+  `patches/v1_0/add_activity_link_unique_index.py` (a `post_model_sync` patch) so a site that
+  already has the table from an earlier version also gets the constraint. Verified in MariaDB:
+  `SHOW INDEX` confirms the 3-column unique key exists.
+
+### `d4aad24` — WP-07: Project Hub read API and reports
+
+One agent hit a session limit partway through (after `hub.py`, Drawing Register and Submittal
+Log, before the Activity Status Summary report and its own test module). Recovered by the lead:
+
+- Reviewed the completed `api/hub.py` — every method gates on `require_project_permission()`
+  first; `get_financials()` requires `constants.FINANCIAL_ROLES` and raises
+  `frappe.PermissionError` rather than returning zeros; filters are checked against a
+  per-endpoint fieldname allow-list before ever reaching a query.
+- **`get_financials()` reads `total_billed_amount`, `total_purchase_cost`,
+  `total_consumed_material_cost`, `total_costing_amount`, `total_billable_amount`,
+  `total_sales_amount`, `estimated_costing`, `gross_margin`, `per_gross_margin` directly off
+  `tabProject` with a single `frappe.db.get_value()`** — no re-aggregation of Sales/Purchase
+  Invoices, Timesheets, Stock Entries or Expense Claims. `total_expense_claim` (an HRMS-added
+  field, not core ERPNext) is read defensively via `frappe.get_meta("Project").has_field(...)`,
+  returning `None` rather than a misleading `0` on a site without HRMS.
+- Wrote the missing `EGC Activity Status Summary` report myself: rows in `lft` order with a
+  per-row `indent` derived from the parent chain (so a moved activity re-indents without a
+  backfill; a row whose ancestor is filtered out falls back to depth 0 instead of indenting
+  under a row not in the result set).
+- Verified financials against MariaDB directly: `140,400.00` billed / `2,808,000.00` sales order
+  / `100%` gross margin — API output matched the raw columns exactly.
+- Documented a permission-model gap discovered while writing this package: **EGC roles are
+  additive, not standalone** — they grant nothing on the core `Project` DocType, so an EGC user
+  also needs `Projects User`/`Projects Manager`. Deliberately not solved with `Custom DocPerm`
+  rows on `Project` (would widen the upgrade surface and collide with `egc_hr`'s existing
+  fixture on the same doctype).
+
+### `e682fa4` — fix: undated records counted as overdue
+
+A **Sonnet testing agent**, writing `test_hub_api.py` against the already-accepted `hub.py`,
+found a genuine defect and correctly declined to fix it (per its mandate) or paper over it:
+
+- `_activity_overview()`/`_submittal_overview()` counted an activity/submittal with **no**
+  `planned_end_date`/`current_due_date` as overdue.
+- Root cause, verified directly in `frappe/database/query.py`
+  (`_should_apply_ifnull`/`_get_ifnull_fallback`): Frappe rewrites a `<` filter on a nullable
+  field as `IFNULL(field, '') < value` for null-safety — and it explicitly skips that rewrite
+  only for `>`/`>=` on Date fields, not for `<`. So `NULL < today()` became `'' < today()`,
+  which is always true.
+- This directly contradicted `egc_activity.is_overdue()` (`if not planned_end_date: return
+  False`) and both reports, which already guarded correctly in Python.
+- **Fix**: added an explicit `["planned_end_date", "is", "set"]` /
+  `["current_due_date", "is", "set"]` filter tuple ahead of the `<` comparison in both
+  aggregates.
+- Added `test_undated_records_are_not_counted_overdue` as a true regression test — **verified
+  it fails against the unfixed code** (`AssertionError: 2 != 1`) before confirming it passes
+  with the fix. 60/60 tests green afterward.
+
+### `5981642` — WP-08: Project Hub, workspace, and the deletion-contract fix
+
+**Project Hub** (Vue 3 desk page, modelled on Frappe's own `workflow_builder` page pattern):
+`egc_project_hub.bundle.js` → `EgcProjectHub.vue` root, one component per tab
+(`OverviewTab`/`WbsTab`/`ActivitiesTab`/`SubmittalsTab`/`DrawingsTab`/`FinancialsTab`), a
+`useHubRoute` composable syncing `/app/egc-project-hub/<project>/<tab>` with `frappe.get_route()`
+and a `localStorage` fallback. All data via `api/hub.py`; the Hub never queries a DocType
+directly and holds no business state that isn't re-derivable from the API.
+
+The agent did real browser verification (screenshots, console, network) against ~30 live
+ERPNext projects and found/fixed 4 bugs itself before reporting: `frappe.format()`/`
+frappe.datetime.comment_when()` returning HTML meant for `v-html` rendered as literal markup
+under plain interpolation (switched to `format_currency()`/`prettyDate()`, which return plain
+strings); a global `frappe.router.on("change", …)` handler misreading *any* Desk navigation as a
+Hub route change and corrupting `localStorage` (gated on `route[0] === "egc-project-hub"`); and
+a null-deref race when a Link control's own change handler fired after Vue had already
+unmounted it (deferred via `setTimeout(0)`).
+
+**Reviewed live in the browser by the lead and fixed further:**
+- Financials tab showed bare numbers with no currency indicator, because this site's `SAR`
+  Currency record has a single-space `symbol` — added an explicit "All amounts in {currency}"
+  caption above the grid rather than trusting the symbol.
+- The Activities register showed raw WBS record names (`PRJ2601050-01.02.01.01`) instead of a
+  readable label. Added `_wbs_labels()` to `hub.get_activities()` (one batched query, not
+  N+1) returning `"01.02.01 HVAC"`-style labels, and made the cell a deep link.
+
+**Deletion contract redefined** (a deliberate spec change, flagged for the user to veto):
+previously "only Draft is deletable, Cancelled/Issued rows stay" for both
+`EGC Project Document Revision` and `EGC Submittal Revision`. Changed to: Draft freely
+deletable; Issued/Submitted (`docstatus=1`) **never** deletable, cancel first; Cancelled
+(`docstatus=2`) deletable **by a System Manager only**. Rationale: Frappe's own permission
+model would otherwise let *anyone* who can delete the doctype also delete a cancelled document,
+which would let a document controller erase history simply by cancelling a revision first —
+requiring cancellation *and* an administrator makes a purge a deliberate, auditable act while
+still leaving a real escape hatch (a record nobody can ever remove is its own liability). Tests
+for both doctypes were rewritten to assert the new two-tier rule, including a
+`_make_user()`-scoped negative case proving a Document Controller is denied the purge.
+
+Also added: `egc_projects/egc_projects/workspace/egc_projects/egc_projects.json` (the app's
+Desk entry point — shortcuts to the Hub/Activities/Drawing Register/Submittal Log, cards for
+every doctype grouped by domain), and `egc_projects/demo.py`
+(`bench execute egc_projects.demo.seed` / `.purge`) — a reproducible, fully-reversible dataset
+implementing the build brief's own WBS/Activity/Drawing/Submittal acceptance scenarios, so the
+app can be explored without hand-building fixtures.
+
+### `6415706` — fix: report client scripts
+
+Discovered while independently re-verifying WP-07's reports in the browser: the Drawing
+Register's and Submittal Log's `formatter()` callbacks dereferenced `data.<field>` without a
+null check. Frappe's datatable calls the formatter for placeholder/total rows that carry no
+`data` object; the resulting throw silently blanked the entire table in some render paths.
+Added an `if (!data) return value;` guard to both, and normalised each report's `Select` filter
+`options` to a newline-joined string (the shape the Select control actually expects) instead of
+a raw JS array.
+
+## Independent verification performed by the lead (not the implementing agents)
+
+- `scripts/verify_acceptance.py` — scripted, rolled-back walk of acceptance Scenarios 4–5
+  against the live site (see WP-04 above).
+- `egc_projects/demo.py seed()` — real records for Scenarios 2, 3, and 6 (a 4-level WBS tree; a
+  6-node Activity tree using one DocType recursively; one Drawing and one Submittal each linked
+  to 3/2 Activities respectively with no duplication), plus explicit cross-project rejection
+  checks (`ValidationError` on a cross-project WBS parent, `LinkValidationError` on a
+  cross-project Activity Link target).
+- Financials cross-checked against `mysql … SHOW COLUMNS`/direct `SELECT` on `tabProject`, not
+  merely against the app's own tests.
+- Browser verification of the Hub (all 6 tabs), the native `EGC Activity` tree view, the
+  `EGC Drawing Register` report, the `EGC Projects` workspace, and the ERPNext `Project` form's
+  "Open in EGC Projects" entry point — screenshots, `read_console_messages`, and
+  `read_network_requests` were all inspected, not just "it rendered."
+- `git status` on `apps/frappe`, `apps/erpnext`, `apps/hrms` after every wave — 0 changed files
+  throughout.
+- Two consecutive `bench migrate` runs confirmed idempotent (no duplicate masters/roles).
+
+## Final state (v1)
+
+- **10 DocTypes**: `EGC Discipline`, `EGC Document Type`, `EGC Submittal Type`, `EGC WBS Node`,
+  `EGC Activity`, `EGC Project Document`, `EGC Project Document Revision`, `EGC Submittal`,
+  `EGC Submittal Revision`, `EGC Submittal Document Item`, `EGC Activity Link` (11, including
+  the link doctype).
+- **3 script reports**: `EGC Drawing Register`, `EGC Submittal Log`, `EGC Activity Status
+  Summary`.
+- **1 Desk Page** (`egc-project-hub`, Vue 3) + **1 Workspace** (`EGC Projects`).
+- **62 tests, all green** (`test_wbs.py`, `test_activity.py`, `test_document_control.py`,
+  `test_submittal.py`, `test_relationships.py`, `test_hub_api.py`).
+- `bench migrate` clean and idempotent; `frappe`/`erpnext`/`hrms` unmodified throughout.
+- No core Frappe/ERPNext/HRMS modification at any point — confirmed by `git status`, not by
+  assumption.
