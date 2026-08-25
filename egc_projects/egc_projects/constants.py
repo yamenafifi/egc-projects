@@ -134,3 +134,27 @@ FINANCIAL_ROLES = (
 	"Accounts Manager",
 	"System Manager",
 )
+# --- v2: Submittal Review Steps -----------------------------------------------------------
+
+STEP_PENDING = "Pending"
+STEP_IN_REVIEW = "In Review"
+STEP_RESPONDED = "Responded"
+STEP_SKIPPED = "Skipped"
+
+STEP_STATUSES = (STEP_PENDING, STEP_IN_REVIEW, STEP_RESPONDED, STEP_SKIPPED)
+
+# --- v2: Activity Dependencies -------------------------------------------------------------
+
+DEPENDENCY_FS = "Finish-to-Start"
+DEPENDENCY_SS = "Start-to-Start"
+DEPENDENCY_FF = "Finish-to-Finish"
+DEPENDENCY_SF = "Start-to-Finish"
+
+DEPENDENCY_TYPES = (DEPENDENCY_FS, DEPENDENCY_SS, DEPENDENCY_FF, DEPENDENCY_SF)
+
+# --- v2: Project Profile ---------------------------------------------------------------------
+
+PROJECT_STAGES = ("Design", "Procurement", "Construction", "Commissioning", "Closeout", "Warranty")
+SECTORS = ("Healthcare", "Industrial", "Commercial", "Infrastructure", "Other")
+DELIVERY_METHODS = ("Design-Bid-Build", "Design-Build", "EPC", "Turnkey", "Other")
+CONTRACT_TYPES = ("Lump Sum", "Unit Price", "Cost Plus", "Time & Material", "Other")

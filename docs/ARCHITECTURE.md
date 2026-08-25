@@ -1,5 +1,10 @@
 # EGC Projects — Authoritative Architecture (v1)
 
+> **v2 note:** `docs/ARCHITECTURE_V2.md` is a binding addendum covering the functional-depth /
+> Hub UX upgrade (Project Profile, Activity dependencies and rollup, Submittal workflows and
+> Ball in Court, Drawing Sets/Areas, financial drill-down). Read both; v2 states explicitly
+> where it revises a v1 decision and why.
+
 This document is **binding**. Implementation agents may make local implementation choices
 inside these boundaries; they may not redefine sources of truth, DocType relationships,
 revision semantics, project authorization, or application boundaries. If an instruction here
