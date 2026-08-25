@@ -243,7 +243,7 @@ class TestSubmittal(IntegrationTestCase):
 
 	# -- 9. Deletion rules ---------------------------------------------------------------------
 
-	def test_delete_draft_succeeds_submitted_and_cancelled_are_blocked(self):
+	def test_delete_draft_succeeds_and_submitted_is_never_deletable(self):
 		doc = self._make_document("DOC-009")
 		rev00 = self._make_issued_revision(doc.name, "00")
 		submittal = self._make_submittal("SUB-009")
@@ -257,10 +257,31 @@ class TestSubmittal(IntegrationTestCase):
 		with self.assertRaises(frappe.ValidationError):
 			frappe.delete_doc("EGC Submittal Revision", submitted.name, ignore_permissions=True)
 
-		submitted.reload()
-		submitted.cancel()
-		with self.assertRaises(frappe.ValidationError):
-			frappe.delete_doc("EGC Submittal Revision", submitted.name, ignore_permissions=True)
+	def test_cancelled_submission_is_purgeable_only_by_system_manager(self):
+		"""Cancelling is the audited step; only an administrator may then purge.
+
+		Without the role check a reviewer could erase a review cycle simply by cancelling it
+		first, because Frappe itself allows deleting a cancelled document.
+		"""
+		doc = self._make_document("DOC-009B")
+		rev00 = self._make_issued_revision(doc.name, "00")
+		submittal = self._make_submittal("SUB-009B")
+
+		submission = self._make_submission(submittal.name, "00", document_revisions=[rev00.name])
+		submission.submit()
+		submission.reload()
+		submission.cancel()
+
+		controller = _make_user("egc-submittal-purge@example.com", ["EGC Document Controller"])
+		frappe.set_user(controller)
+		try:
+			with self.assertRaises(frappe.PermissionError):
+				frappe.delete_doc("EGC Submittal Revision", submission.name, ignore_permissions=True)
+		finally:
+			frappe.set_user("Administrator")
+
+		frappe.delete_doc("EGC Submittal Revision", submission.name, ignore_permissions=True)
+		self.assertFalse(frappe.db.exists("EGC Submittal Revision", submission.name))
 
 	# -- 10. Duplicate revision_label on the same submittal rejected ------------------------
 
@@ -352,3 +373,17 @@ def _make_private_file():
 	)
 	doc.insert(ignore_permissions=True)
 	return doc.file_url
+
+
+def _make_user(email, roles):
+	if frappe.db.exists("User", email):
+		user = frappe.get_doc("User", email)
+	else:
+		user = frappe.get_doc(
+			{"doctype": "User", "email": email, "first_name": email.split("@")[0], "send_welcome_email": 0}
+		).insert(ignore_permissions=True)
+	user.set("roles", [])
+	for role in roles:
+		user.append("roles", {"role": role})
+	user.save(ignore_permissions=True)
+	return user.name

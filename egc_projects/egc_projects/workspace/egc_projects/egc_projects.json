@@ -1,0 +1,242 @@
+{
+ "app": "egc_projects",
+ "charts": [],
+ "content": "[{\"id\": \"egcp-header\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\"><b>EGC Projects</b></span>\", \"col\": 12}}, {\"id\": \"egcp-hub-shortcut\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Project Hub\", \"col\": 3}}, {\"id\": \"egcp-sc-activities\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Activities\", \"col\": 3}}, {\"id\": \"egcp-sc-drawings\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Drawing Register\", \"col\": 3}}, {\"id\": \"egcp-sc-submittals\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Submittal Log\", \"col\": 3}}, {\"id\": \"egcp-card-structure\", \"type\": \"card\", \"data\": {\"card_name\": \"Project Structure\", \"col\": 4}}, {\"id\": \"egcp-card-documents\", \"type\": \"card\", \"data\": {\"card_name\": \"Document Control\", \"col\": 4}}, {\"id\": \"egcp-card-submittals\", \"type\": \"card\", \"data\": {\"card_name\": \"Submittals\", \"col\": 4}}, {\"id\": \"egcp-card-reports\", \"type\": \"card\", \"data\": {\"card_name\": \"Reports\", \"col\": 4}}, {\"id\": \"egcp-card-setup\", \"type\": \"card\", \"data\": {\"card_name\": \"Setup\", \"col\": 4}}]",
+ "creation": "2026-08-25 00:00:00.000000",
+ "custom_blocks": [],
+ "docstatus": 0,
+ "doctype": "Workspace",
+ "for_user": "",
+ "hide_custom": 0,
+ "icon": "project",
+ "idx": 0,
+ "indicator_color": "blue",
+ "is_hidden": 0,
+ "label": "EGC Projects",
+ "links": [
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Project Structure",
+   "link_count": 0,
+   "onboard": 0,
+   "type": "Card Break"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Project",
+   "link_count": 0,
+   "link_to": "Project",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "WBS Node",
+   "link_count": 0,
+   "link_to": "EGC WBS Node",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Activity",
+   "link_count": 0,
+   "link_to": "EGC Activity",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Activity Link",
+   "link_count": 0,
+   "link_to": "EGC Activity Link",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Document Control",
+   "link_count": 0,
+   "onboard": 0,
+   "type": "Card Break"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Project Document",
+   "link_count": 0,
+   "link_to": "EGC Project Document",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Document Revision",
+   "link_count": 0,
+   "link_to": "EGC Project Document Revision",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Submittals",
+   "link_count": 0,
+   "onboard": 0,
+   "type": "Card Break"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Submittal",
+   "link_count": 0,
+   "link_to": "EGC Submittal",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Submittal Revision",
+   "link_count": 0,
+   "link_to": "EGC Submittal Revision",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Reports",
+   "link_count": 0,
+   "onboard": 0,
+   "type": "Card Break"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 1,
+   "label": "Drawing Register",
+   "link_count": 0,
+   "link_to": "EGC Drawing Register",
+   "link_type": "Report",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 1,
+   "label": "Submittal Log",
+   "link_count": 0,
+   "link_to": "EGC Submittal Log",
+   "link_type": "Report",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 1,
+   "label": "Activity Status Summary",
+   "link_count": 0,
+   "link_to": "EGC Activity Status Summary",
+   "link_type": "Report",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Setup",
+   "link_count": 0,
+   "onboard": 0,
+   "type": "Card Break"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Discipline",
+   "link_count": 0,
+   "link_to": "EGC Discipline",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Document Type",
+   "link_count": 0,
+   "link_to": "EGC Document Type",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Submittal Type",
+   "link_count": 0,
+   "link_to": "EGC Submittal Type",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  }
+ ],
+ "modified": "2026-08-25 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "EGC Projects",
+ "name": "EGC Projects",
+ "number_cards": [],
+ "owner": "Administrator",
+ "parent_page": "",
+ "public": 1,
+ "quick_lists": [],
+ "roles": [],
+ "sequence_id": 30.0,
+ "shortcuts": [
+  {
+   "color": "Blue",
+   "doc_view": "",
+   "label": "Project Hub",
+   "link_to": "egc-project-hub",
+   "type": "Page"
+  },
+  {
+   "color": "Grey",
+   "doc_view": "List",
+   "label": "Activities",
+   "link_to": "EGC Activity",
+   "type": "DocType"
+  },
+  {
+   "color": "Green",
+   "doc_view": "",
+   "label": "Drawing Register",
+   "link_to": "EGC Drawing Register",
+   "report_ref_doctype": "EGC Project Document",
+   "type": "Report"
+  },
+  {
+   "color": "Orange",
+   "doc_view": "",
+   "label": "Submittal Log",
+   "link_to": "EGC Submittal Log",
+   "report_ref_doctype": "EGC Submittal",
+   "type": "Report"
+  }
+ ],
+ "title": "EGC Projects"
+}

@@ -179,7 +179,9 @@ const recent_entries = computed(() => {
 						<span class="hub-recent__icon">{{ entry.icon }}</span>
 						<span class="hub-recent__text">{{ entry.text }}</span>
 						<span class="hub-recent__sub">{{ entry.sub }}</span>
-						<span class="hub-recent__time">{{ frappe.datetime.comment_when(entry.timestamp) }}</span>
+						<span class="hub-recent__time" :title="frappe.datetime.str_to_user(entry.timestamp)">
+							{{ frappe.datetime.prettyDate(entry.timestamp) }}
+						</span>
 					</li>
 				</ul>
 			</div>

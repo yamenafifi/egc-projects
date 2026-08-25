@@ -25,29 +25,40 @@ watch(
 	{ immediate: true }
 );
 
-function format_currency(value) {
+function format_amount(value) {
 	if (value === null || value === undefined) return "—";
-	return frappe.format(value, { fieldtype: "Currency", options: data.value?.currency });
+	// format_currency() returns a plain string ("AED 140,400.00"); frappe.format() wraps
+	// Currency values in a <div style="text-align:right">…</div> meant for v-html contexts,
+	// which would render as literal markup in a plain text interpolation here.
+	return format_currency(value, data.value?.currency);
 }
 
 function format_percent(value) {
 	if (value === null || value === undefined) return "—";
-	return `${frappe.format(value, { fieldtype: "Float", precision: 2 })}%`;
+	return `${flt(value, 2)}%`;
 }
+
+// A Currency record whose `symbol` is blank (SAR is a single space in some ERPNext datasets)
+// formats to a bare number. On a financials screen an amount with no currency indicator is
+// genuinely ambiguous, so state the currency once above the grid rather than trusting the
+// symbol to carry it.
+const currency_note = computed(() =>
+	data.value?.currency ? __("All amounts in {0}", [data.value.currency]) : ""
+);
 
 const rows = computed(() => {
 	if (!data.value) return [];
 	const d = data.value;
 	return [
-		{ label: __("Billed"), value: format_currency(d.billed) },
-		{ label: __("Purchase Cost"), value: format_currency(d.purchase_cost) },
-		{ label: __("Expense Claims"), value: format_currency(d.expense_claims) },
-		{ label: __("Consumed Material Cost"), value: format_currency(d.consumed_material_cost) },
-		{ label: __("Timesheet Cost"), value: format_currency(d.timesheet_cost) },
-		{ label: __("Billable"), value: format_currency(d.billable) },
-		{ label: __("Sales Order Value"), value: format_currency(d.sales_order_value) },
-		{ label: __("Estimated Costing"), value: format_currency(d.estimated_costing) },
-		{ label: __("Gross Margin"), value: format_currency(d.gross_margin), emphasis: true },
+		{ label: __("Billed"), value: format_amount(d.billed) },
+		{ label: __("Purchase Cost"), value: format_amount(d.purchase_cost) },
+		{ label: __("Expense Claims"), value: format_amount(d.expense_claims) },
+		{ label: __("Consumed Material Cost"), value: format_amount(d.consumed_material_cost) },
+		{ label: __("Timesheet Cost"), value: format_amount(d.timesheet_cost) },
+		{ label: __("Billable"), value: format_amount(d.billable) },
+		{ label: __("Sales Order Value"), value: format_amount(d.sales_order_value) },
+		{ label: __("Estimated Costing"), value: format_amount(d.estimated_costing) },
+		{ label: __("Gross Margin"), value: format_amount(d.gross_margin), emphasis: true },
 		{ label: __("% Gross Margin"), value: format_percent(d.per_gross_margin), emphasis: true },
 	];
 });
@@ -64,16 +75,25 @@ const rows = computed(() => {
 		<ErrorState v-else-if="error" :message="error" @retry="reload" />
 		<EmptyState v-else-if="!data" :title="__('No financial data yet')" />
 
-		<div v-else class="hub-financials__grid">
+		<template v-else>
+		<div v-if="currency_note" class="hub-financials__currency">{{ currency_note }}</div>
+		<div class="hub-financials__grid">
 			<div v-for="row in rows" :key="row.label" class="hub-card hub-financials__tile" :class="{ 'hub-financials__tile--emphasis': row.emphasis }">
 				<div class="hub-financials__label">{{ row.label }}</div>
 				<div class="hub-financials__value">{{ row.value }}</div>
 			</div>
 		</div>
+		</template>
 	</div>
 </template>
 
 <style scoped>
+.hub-financials__currency {
+	font-size: var(--text-xs);
+	color: var(--text-muted);
+	margin-bottom: 10px;
+}
+
 .hub-financials__grid {
 	display: grid;
 	grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));

@@ -187,7 +187,14 @@ The **same DocType recursively** — no Sub-Activity DocType.
     which is the sole writer of every `current_*`, `document_status`, `approval_status` field.
   - `on_update_after_submit` must reject any change to `revision_status`/`superseded_by` that
     did not come from the lifecycle engine (guard flag), so an API caller cannot rewrite history.
-- **Deletion:** only `Draft` (docstatus 0) revisions may be deleted. Cancelled/Issued rows stay.
+- **Deletion:** `Draft` (docstatus 0) is freely deletable — nothing was issued. `Issued`/
+    `Superseded` (docstatus 1) can **never** be deleted; cancel instead. `Cancelled`
+    (docstatus 2) may be deleted by a **System Manager only** — Frappe would otherwise let
+    anyone delete a cancelled document, which would let a document controller erase a revision
+    by cancelling it first. Requiring cancellation *and* an administrator keeps a purge
+    deliberate and auditable while still leaving an escape hatch for genuine mistakes; a record
+    that literally no one can remove is its own liability. The same rule applies to
+    `EGC Submittal Revision`.
 
 #### `approval_status` derivation — the anti-conflict rule (prompt §13)
 

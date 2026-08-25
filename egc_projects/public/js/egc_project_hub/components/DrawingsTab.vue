@@ -38,6 +38,10 @@ function open_form(row) {
 	frappe.set_route("Form", "EGC Project Document", row.document);
 }
 
+function create_document() {
+	frappe.new_doc("EGC Project Document", { project: props.project });
+}
+
 function format_date(value) {
 	return value ? frappe.datetime.str_to_user(value) : "—";
 }
@@ -102,6 +106,8 @@ async function open_revision_history(row, event) {
 			v-else-if="!(data || []).length"
 			:title="__('No drawings yet')"
 			:description="__('The drawing register lists every controlled document flagged as a drawing.')"
+			:action-label="__('New Document')"
+			@action="create_document"
 		/>
 
 		<template v-else>

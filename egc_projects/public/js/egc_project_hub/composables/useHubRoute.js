@@ -21,6 +21,11 @@ function read_route() {
 }
 
 export function syncRouteFromBrowser() {
+	// frappe.router fires "change" for every Desk navigation, not just ones inside the Hub —
+	// e.g. clicking a table row sets the route to ["Form", "EGC Activity", name]. Reacting to
+	// that would misread "EGC Activity" as the project and clobber state/localStorage.
+	if (frappe.get_route()[0] !== "egc-project-hub") return;
+
 	const { project, tab } = read_route();
 
 	if (!project && !restoring) {

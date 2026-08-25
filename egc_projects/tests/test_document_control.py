@@ -120,7 +120,7 @@ class TestDocumentControl(IntegrationTestCase):
 
 	# -- 5. Deletion rules -------------------------------------------------------------------
 
-	def test_delete_draft_succeeds_issued_and_cancelled_are_blocked(self):
+	def test_delete_draft_succeeds_and_issued_is_never_deletable(self):
 		doc = self._make_document("DOC-005")
 
 		draft = self._make_revision(doc.name, "00")
@@ -132,10 +132,28 @@ class TestDocumentControl(IntegrationTestCase):
 		with self.assertRaises(frappe.ValidationError):
 			frappe.delete_doc("EGC Project Document Revision", issued.name, ignore_permissions=True)
 
-		issued.reload()
-		issued.cancel()
-		with self.assertRaises(frappe.ValidationError):
-			frappe.delete_doc("EGC Project Document Revision", issued.name, ignore_permissions=True)
+	def test_cancelled_revision_is_purgeable_only_by_system_manager(self):
+		"""Cancelling is the audited step; only an administrator may then purge.
+
+		Without the role check a document controller could erase a revision simply by
+		cancelling it first, because Frappe itself allows deleting a cancelled document.
+		"""
+		doc = self._make_document("DOC-005C")
+		revision = self._make_revision(doc.name, "00")
+		revision.submit()
+		revision.reload()
+		revision.cancel()
+
+		controller = _make_user("egc-purge-test@example.com", ["EGC Document Controller"])
+		frappe.set_user(controller)
+		try:
+			with self.assertRaises(frappe.PermissionError):
+				frappe.delete_doc("EGC Project Document Revision", revision.name, ignore_permissions=True)
+		finally:
+			frappe.set_user("Administrator")
+
+		frappe.delete_doc("EGC Project Document Revision", revision.name, ignore_permissions=True)
+		self.assertFalse(frappe.db.exists("EGC Project Document Revision", revision.name))
 
 	def test_deleting_last_draft_reverts_document_to_no_revision(self):
 		doc = self._make_document("DOC-005B")
@@ -305,3 +323,17 @@ def _make_private_file():
 	)
 	doc.insert(ignore_permissions=True)
 	return doc.file_url
+
+
+def _make_user(email, roles):
+	if frappe.db.exists("User", email):
+		user = frappe.get_doc("User", email)
+	else:
+		user = frappe.get_doc(
+			{"doctype": "User", "email": email, "first_name": email.split("@")[0], "send_welcome_email": 0}
+		).insert(ignore_permissions=True)
+	user.set("roles", [])
+	for role in roles:
+		user.append("roles", {"role": role})
+	user.save(ignore_permissions=True)
+	return user.name

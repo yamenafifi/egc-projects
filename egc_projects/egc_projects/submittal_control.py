@@ -227,14 +227,23 @@ def on_submission_trash(doc, method=None) -> None:
 	framework does not block by default. Uses `exclude` rather than `refresh_submittal_state`
 	directly because this hook runs before the row is actually removed from the database.
 	"""
-	if doc.docstatus != 0:
+	if doc.docstatus == 1:
 		frappe.throw(
 			_(
-				"{0} is {1} and cannot be deleted. Submittal review history is never erased —"
-				" only a Draft submission may be removed."
+				"{0} is {1} and cannot be deleted. A submitted review cycle is history — cancel"
+				" it instead if it was raised in error."
 			).format(frappe.bold(doc.name), _(doc.submission_status)),
 			title=_("Cannot Delete Submission"),
 			exc=frappe.ValidationError,
+		)
+
+	# Same rule as document revisions: cancelling is the audited step, and only an
+	# administrator may then purge, so a reviewer cannot erase a cycle by cancelling it first.
+	if doc.docstatus == 2 and "System Manager" not in frappe.get_roles():
+		frappe.throw(
+			_("Only a System Manager may delete the cancelled submission {0}.").format(frappe.bold(doc.name)),
+			title=_("Cannot Delete Submission"),
+			exc=frappe.PermissionError,
 		)
 
 	documents = _referenced_documents(doc)

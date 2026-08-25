@@ -7,7 +7,12 @@ const selected = ref("");
 
 function on_change(value) {
 	selected.value = value;
-	if (value) emit("select", value);
+	// Selecting a project here causes the parent to swap this whole picker out for the header
+	// + tabs (see EgcProjectHub.vue's v-if="!route.project"), unmounting ProjectLinkControl's
+	// DOM. Frappe's own Link control keeps running async validation after invoking our change
+	// handler, so emit on the next macrotask to let that finish first — see the identical fix
+	// in HubHeader.vue's on_switch for the full explanation.
+	if (value) setTimeout(() => emit("select", value), 0);
 }
 </script>
 

@@ -335,10 +335,24 @@ def get_activities(project: str, filters=None) -> list[dict]:
 		return []
 
 	link_counts = _activity_link_counts([row.name for row in rows])
+	wbs_labels = _wbs_labels({row.wbs_node for row in rows if row.wbs_node})
 	for row in rows:
 		row["is_overdue"] = activity_is_overdue(row.status, row.planned_end_date)
 		row["link_counts"] = link_counts.get(row.name, {})
+		# The raw WBS record name is `{project}-{code}`, which reads as noise in a register
+		# that is already scoped to one project. Send the code and name so the client can show
+		# "01.02.01 HVAC" and still deep-link by `wbs_node`.
+		row["wbs_label"] = wbs_labels.get(row.wbs_node)
 	return rows
+
+
+def _wbs_labels(names: set[str]) -> dict[str, str]:
+	if not names:
+		return {}
+	rows = frappe.get_all(
+		"EGC WBS Node", filters={"name": ("in", list(names))}, fields=["name", "wbs_code", "wbs_name"]
+	)
+	return {row.name: f"{row.wbs_code} {row.wbs_name}".strip() for row in rows}
 
 
 # --- get_submittals ------------------------------------------------------------------------------

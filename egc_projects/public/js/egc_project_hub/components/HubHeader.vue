@@ -13,7 +13,13 @@ const emit = defineEmits(["switch-project"]);
 const switching = ref(false);
 
 function on_switch(value) {
-	switching.value = false;
+	// Deferred to a macrotask: this fires from inside Frappe's own Link control change
+	// handler, which keeps running its own async validation after calling ours. Unmounting
+	// ProjectLinkControl's DOM synchronously here races that in-flight work and throws inside
+	// Frappe's control code. A setTimeout(0) lets that finish before we tear the control down.
+	setTimeout(() => {
+		switching.value = false;
+	}, 0);
 	if (value && value !== props.project) emit("switch-project", value);
 }
 

@@ -245,20 +245,33 @@ def on_revision_cancel(doc, method=None) -> None:
 
 
 def on_revision_trash(doc, method=None) -> None:
-	"""Only a Draft (docstatus 0) revision may be deleted — controlled history is never erased.
+	"""Guard deletion so an issued revision can never be quietly erased.
 
-	The framework already blocks deleting a submitted (docstatus 1) document before `on_trash`
-	runs; this asserts the same for a cancelled (docstatus 2) one, which the framework does not
-	block by default.
+	- Draft (docstatus 0): deletable by anyone who can delete the doctype. Nothing was issued.
+	- Issued/Superseded (docstatus 1): never deletable. The framework blocks this before
+	  `on_trash` even runs; the explicit check documents the rule and covers any path that
+	  reaches here another way.
+	- Cancelled (docstatus 2): deletable by a System Manager only. The framework would allow
+	  anyone to delete a cancelled document, which would let a document controller erase a
+	  revision by cancelling it first. Requiring cancellation *and* an administrator keeps a
+	  purge deliberate and auditable, while still leaving a real escape hatch for genuine
+	  mistakes and for test data — a record no one can ever remove is its own liability.
 	"""
-	if doc.docstatus != 0:
+	if doc.docstatus == 1:
 		frappe.throw(
 			_(
-				"{0} is {1} and cannot be deleted. Controlled document history is never erased —"
-				" only a Draft revision may be removed."
+				"{0} is {1} and cannot be deleted. An issued revision is history — cancel it"
+				" instead if it was raised in error."
 			).format(frappe.bold(doc.name), _(doc.revision_status)),
 			title=_("Cannot Delete Revision"),
 			exc=frappe.ValidationError,
+		)
+
+	if doc.docstatus == 2 and "System Manager" not in frappe.get_roles():
+		frappe.throw(
+			_("Only a System Manager may delete the cancelled revision {0}.").format(frappe.bold(doc.name)),
+			title=_("Cannot Delete Revision"),
+			exc=frappe.PermissionError,
 		)
 
 	_refresh_from_revisions(doc.document, _load_revisions(doc.document, exclude=doc.name))

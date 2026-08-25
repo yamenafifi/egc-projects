@@ -44,6 +44,10 @@ function open_form(row) {
 	frappe.set_route("Form", "EGC Submittal", row.name);
 }
 
+function create_submittal() {
+	frappe.new_doc("EGC Submittal", { project: props.project });
+}
+
 function format_date(value) {
 	return value ? frappe.datetime.str_to_user(value) : "—";
 }
@@ -62,6 +66,8 @@ function days_overdue(row) {
 			v-else-if="!(data || []).length"
 			:title="__('No submittals yet')"
 			:description="__('Submittals track review cycles for controlled documents on this project.')"
+			:action-label="__('New Submittal')"
+			@action="create_submittal"
 		/>
 
 		<template v-else>

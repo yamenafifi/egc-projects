@@ -45,6 +45,10 @@ function open_form(row) {
 	frappe.set_route("Form", "EGC Activity", row.name);
 }
 
+function create_activity() {
+	frappe.new_doc("EGC Activity", { project: props.project });
+}
+
 function format_date(value) {
 	return value ? frappe.datetime.str_to_user(value) : "—";
 }
@@ -58,6 +62,8 @@ function format_date(value) {
 			v-else-if="!(data || []).length"
 			:title="__('No activities yet')"
 			:description="__('Activities describe the execution breakdown of this project.')"
+			:action-label="__('New Activity')"
+			@action="create_activity"
 		/>
 
 		<template v-else>
@@ -102,7 +108,15 @@ function format_date(value) {
 						>
 							<td>{{ row.activity_code }}</td>
 							<td>{{ row.activity_name }}</td>
-							<td>{{ row.wbs_node || "—" }}</td>
+							<td>
+								<a
+									v-if="row.wbs_node"
+									:href="`/app/egc-wbs-node/${encodeURIComponent(row.wbs_node)}`"
+									:title="row.wbs_node"
+									>{{ row.wbs_label || row.wbs_node }}</a
+								>
+								<span v-else>—</span>
+							</td>
 							<td>{{ row.discipline || "—" }}</td>
 							<td :class="{ 'hub-table__overdue': row.is_overdue }">{{ format_date(row.planned_start_date) }}</td>
 							<td :class="{ 'hub-table__overdue': row.is_overdue }">
