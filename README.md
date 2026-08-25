@@ -1,33 +1,32 @@
-### EGC Projects
+## EGC Projects
 
-Construction project management for EGC: WBS, Activities, controlled Documents, Drawing Register and Submittals on top of ERPNext Projects
+Construction project management for EGC, built on Frappe v16 and ERPNext v16.
 
-### Installation
+EGC Projects extends the standard ERPNext `Project` — it does not replace it — with the
+document-control and work-breakdown semantics a specialty healthcare contractor needs:
 
-You can install this app using the [bench](https://github.com/frappe/bench) CLI:
+- **WBS** — a project-scoped hierarchy of arbitrary depth and shape, independent of discipline.
+- **Activities** — a separate execution hierarchy using one self-referencing DocType at every
+  level, classified by WBS node and discipline.
+- **Controlled Documents** — a document identity with an accumulating, immutable revision
+  history. Issuing a revision supersedes the previous one; it never overwrites it.
+- **Drawing Register** — drawings presented as a construction register, with the current
+  revision and its true approval state.
+- **Submittals** — a persistent submittal identity whose submission/review cycles are kept as
+  history, so a *Revise & Resubmit* creates a new cycle instead of erasing the old one.
+- **Project Hub** — one project-centric workspace covering Overview, WBS, Activities,
+  Submittals, Drawings and Financials without losing project context.
+- **Financials** — read live from the ERPNext Project. EGC Projects keeps no second ledger.
+
+See `docs/ARCHITECTURE.md` for the design and `CLAUDE.md` for contributor guidance.
+
+#### Installation
 
 ```bash
-cd $PATH_TO_YOUR_BENCH
-bench get-app $URL_OF_THIS_REPO --branch n
-bench install-app egc_projects
+bench get-app https://github.com/yamenafifi/egc-projects.git
+bench --site <site> install-app egc_projects
 ```
 
-### Contributing
+#### License
 
-This app uses `pre-commit` for code formatting and linting. Please [install pre-commit](https://pre-commit.com/#installation) and enable it for this repository:
-
-```bash
-cd apps/egc_projects
-pre-commit install
-```
-
-Pre-commit is configured to use the following tools for checking and formatting your code:
-
-- ruff
-- eslint
-- prettier
-- pyupgrade
-
-### License
-
-mit
+MIT

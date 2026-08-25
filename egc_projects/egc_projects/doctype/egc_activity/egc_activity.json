@@ -1,0 +1,260 @@
+{
+ "actions": [],
+ "autoname": "format:{project}-{activity_code}",
+ "creation": "2026-08-25 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "project",
+  "activity_code",
+  "column_break_1",
+  "activity_name",
+  "section_break_hierarchy",
+  "parent_egc_activity",
+  "is_group",
+  "column_break_2",
+  "sequence",
+  "wbs_node",
+  "discipline",
+  "section_break_schedule",
+  "planned_start_date",
+  "column_break_3",
+  "planned_end_date",
+  "section_break_status",
+  "status",
+  "percent_complete",
+  "column_break_4",
+  "responsible_user",
+  "section_break_description",
+  "description",
+  "lft",
+  "rgt",
+  "old_parent"
+ ],
+ "fields": [
+  {
+   "bold": 1,
+   "fieldname": "project",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Project",
+   "options": "Project",
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
+   "bold": 1,
+   "fieldname": "activity_code",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Activity Code",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "activity_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Activity Name",
+   "reqd": 1
+  },
+  {
+   "fieldname": "section_break_hierarchy",
+   "fieldtype": "Section Break",
+   "label": "Hierarchy"
+  },
+  {
+   "fieldname": "parent_egc_activity",
+   "fieldtype": "Link",
+   "label": "Parent Activity",
+   "options": "EGC Activity"
+  },
+  {
+   "default": "0",
+   "fieldname": "is_group",
+   "fieldtype": "Check",
+   "label": "Is Group"
+  },
+  {
+   "fieldname": "column_break_2",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "fieldname": "sequence",
+   "fieldtype": "Int",
+   "label": "Sequence"
+  },
+  {
+   "fieldname": "wbs_node",
+   "fieldtype": "Link",
+   "label": "WBS Node",
+   "options": "EGC WBS Node"
+  },
+  {
+   "fieldname": "discipline",
+   "fieldtype": "Link",
+   "label": "Discipline",
+   "options": "EGC Discipline"
+  },
+  {
+   "fieldname": "section_break_schedule",
+   "fieldtype": "Section Break",
+   "label": "Schedule"
+  },
+  {
+   "fieldname": "planned_start_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Planned Start Date"
+  },
+  {
+   "fieldname": "column_break_3",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "planned_end_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Planned End Date"
+  },
+  {
+   "fieldname": "section_break_status",
+   "fieldtype": "Section Break",
+   "label": "Status"
+  },
+  {
+   "default": "Not Started",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Not Started\nIn Progress\nOn Hold\nCompleted\nCancelled"
+  },
+  {
+   "default": "0",
+   "fieldname": "percent_complete",
+   "fieldtype": "Percent",
+   "label": "% Complete"
+  },
+  {
+   "fieldname": "column_break_4",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "responsible_user",
+   "fieldtype": "Link",
+   "label": "Responsible User",
+   "options": "User"
+  },
+  {
+   "fieldname": "section_break_description",
+   "fieldtype": "Section Break",
+   "label": "Description"
+  },
+  {
+   "fieldname": "description",
+   "fieldtype": "Text Editor",
+   "label": "Description"
+  },
+  {
+   "fieldname": "lft",
+   "fieldtype": "Int",
+   "hidden": 1,
+   "label": "lft",
+   "read_only": 1
+  },
+  {
+   "fieldname": "rgt",
+   "fieldtype": "Int",
+   "hidden": 1,
+   "label": "rgt",
+   "read_only": 1
+  },
+  {
+   "fieldname": "old_parent",
+   "fieldtype": "Data",
+   "hidden": 1,
+   "label": "Old Parent",
+   "read_only": 1
+  }
+ ],
+ "icon": "fa fa-sitemap",
+ "idx": 0,
+ "is_tree": 1,
+ "links": [],
+ "modified": "2026-08-25 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "EGC Projects",
+ "name": "EGC Activity",
+ "naming_rule": "Expression",
+ "nsm_parent_field": "parent_egc_activity",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "EGC Project Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "EGC Project Engineer",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "EGC Document Controller"
+  },
+  {
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "EGC Project Viewer"
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "search_fields": "activity_code,activity_name,project",
+ "show_title_field_in_link": 1,
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "activity_name",
+ "track_changes": 1
+}

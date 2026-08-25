@@ -1,0 +1,200 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "format:{project}-{wbs_code}",
+ "creation": "2026-08-25 00:00:00.000000",
+ "default_view": "Tree",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "project",
+  "wbs_code",
+  "wbs_name",
+  "column_break_wbs_1",
+  "parent_egc_wbs_node",
+  "is_group",
+  "sequence",
+  "discipline",
+  "section_break_wbs_2",
+  "status",
+  "description",
+  "lft",
+  "rgt",
+  "old_parent"
+ ],
+ "fields": [
+  {
+   "fieldname": "project",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Project",
+   "options": "Project",
+   "reqd": 1
+  },
+  {
+   "fieldname": "wbs_code",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "WBS Code",
+   "reqd": 1
+  },
+  {
+   "fieldname": "wbs_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "WBS Name",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_wbs_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "parent_egc_wbs_node",
+   "fieldtype": "Link",
+   "ignore_user_permissions": 0,
+   "label": "Parent WBS Node",
+   "options": "EGC WBS Node"
+  },
+  {
+   "default": "0",
+   "fieldname": "is_group",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Is Group"
+  },
+  {
+   "default": "0",
+   "fieldname": "sequence",
+   "fieldtype": "Int",
+   "label": "Sequence"
+  },
+  {
+   "fieldname": "discipline",
+   "fieldtype": "Link",
+   "label": "Discipline",
+   "options": "EGC Discipline"
+  },
+  {
+   "fieldname": "section_break_wbs_2",
+   "fieldtype": "Section Break"
+  },
+  {
+   "default": "Active",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Active\nOn Hold\nCompleted\nCancelled"
+  },
+  {
+   "fieldname": "description",
+   "fieldtype": "Small Text",
+   "label": "Description"
+  },
+  {
+   "fieldname": "lft",
+   "fieldtype": "Int",
+   "hidden": 1,
+   "label": "lft",
+   "no_copy": 1,
+   "print_hide": 1,
+   "report_hide": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "rgt",
+   "fieldtype": "Int",
+   "hidden": 1,
+   "label": "rgt",
+   "no_copy": 1,
+   "print_hide": 1,
+   "report_hide": 1,
+   "search_index": 1
+  },
+  {
+   "fieldname": "old_parent",
+   "fieldtype": "Data",
+   "hidden": 1,
+   "label": "old_parent",
+   "no_copy": 1,
+   "print_hide": 1,
+   "report_hide": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "is_tree": 1,
+ "links": [],
+ "modified": "2026-08-25 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "EGC Projects",
+ "name": "EGC WBS Node",
+ "naming_rule": "Expression",
+ "nsm_parent_field": "parent_egc_wbs_node",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "EGC Project Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "EGC Project Engineer",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "EGC Document Controller",
+   "share": 1
+  },
+  {
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "EGC Project Viewer",
+   "share": 1
+  }
+ ],
+ "search_fields": "wbs_code,wbs_name,project",
+ "show_title_field_in_link": 1,
+ "sort_field": "creation",
+ "sort_order": "ASC",
+ "states": [],
+ "title_field": "wbs_name",
+ "track_changes": 1
+}
