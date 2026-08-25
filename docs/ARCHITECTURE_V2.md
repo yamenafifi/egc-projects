@@ -473,6 +473,16 @@ implements exactly these, and no more:
 | `egc_projects/notifications.py` (new) | Submittal Workflow package |
 | every new DocType directory | the package that introduces it, listed per-package at delegation time |
 
+**Frontend wrapper convention (settled during Wave A, applies to every later wave):** each new
+`api/<domain>.py` module gets its own thin frontend wrapper file next to the Vue components that
+use it (e.g. `components/documents_api.js` for `api/documents.py`), following `api.js`'s exact
+`frappe.call`/error-extraction pattern, rather than every package appending to the shared
+`api.js`. This is deliberate, not a shortcut left for later cleanup: `api.js` would otherwise
+become exactly the same concurrent-edit bottleneck the backend split was designed to avoid, just
+moved to the frontend. `api.js` itself keeps only what already existed before this upgrade,
+plus Project Information's two methods (that package's backend lived in `hub.py`, so its
+wrapper does too, consistently).
+
 Splitting `api/hub.py`'s growth into per-domain modules (`api/documents.py`,
 `api/activities.py`, `api/submittals.py`, `api/drawings.py`) is itself a deliberate, disclosed
 decision: v1's single `hub.py` was already large before this upgrade, and letting every wave

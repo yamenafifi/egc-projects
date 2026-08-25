@@ -28,6 +28,41 @@ DOCUMENT_TYPES = (
 	("Other", "OTH", 0),
 )
 
+#: (role_name, is_egc_internal) — ARCHITECTURE_V2.md §2
+STAKEHOLDER_ROLES = (
+	("Client", 0),
+	("Main Contractor", 0),
+	("Consultant", 0),
+	("Architect", 0),
+	("OEM", 0),
+	("EGC Project Manager", 1),
+	("EGC Site Manager", 1),
+	("Project Engineer", 1),
+	("Document Controller", 1),
+	("QA/QC", 1),
+	("HSE", 1),
+	("Commercial", 1),
+)
+
+MODALITIES = (
+	"MRI",
+	"CT",
+	"X-Ray",
+	"Ultrasound",
+	"Cath Lab",
+	"Linear Accelerator",
+	"Nuclear Medicine",
+	"Other",
+)
+
+EQUIPMENT_MANUFACTURERS = (
+	"Siemens Healthineers",
+	"Philips Healthcare",
+	"GE HealthCare",
+	"Canon Medical",
+	"Other",
+)
+
 #: (name, abbreviation)
 SUBMITTAL_TYPES = (
 	("Shop Drawing", "SD"),
@@ -55,6 +90,9 @@ def setup() -> None:
 	create_disciplines()
 	create_document_types()
 	create_submittal_types()
+	create_stakeholder_roles()
+	create_modalities()
+	create_equipment_manufacturers()
 	frappe.db.commit()
 
 
@@ -118,3 +156,45 @@ def create_submittal_types() -> None:
 				"abbreviation": abbreviation,
 			}
 		).insert(ignore_permissions=True)
+
+
+def create_stakeholder_roles() -> None:
+	if not frappe.db.table_exists("EGC Stakeholder Role"):
+		return
+
+	for index, (role_name, is_egc_internal) in enumerate(STAKEHOLDER_ROLES):
+		# `EGC Stakeholder Role` is named `field:role_name`, so a row created ad hoc by a user
+		# or another agent under the same name is found and left untouched here rather than
+		# duplicated or silently overwritten.
+		if frappe.db.exists("EGC Stakeholder Role", role_name):
+			continue
+		frappe.get_doc(
+			{
+				"doctype": "EGC Stakeholder Role",
+				"role_name": role_name,
+				"is_egc_internal": is_egc_internal,
+				"sequence": index,
+			}
+		).insert(ignore_permissions=True)
+
+
+def create_modalities() -> None:
+	if not frappe.db.table_exists("EGC Modality"):
+		return
+
+	for name in MODALITIES:
+		if frappe.db.exists("EGC Modality", name):
+			continue
+		frappe.get_doc({"doctype": "EGC Modality", "modality_name": name}).insert(ignore_permissions=True)
+
+
+def create_equipment_manufacturers() -> None:
+	if not frappe.db.table_exists("EGC Equipment Manufacturer"):
+		return
+
+	for name in EQUIPMENT_MANUFACTURERS:
+		if frappe.db.exists("EGC Equipment Manufacturer", name):
+			continue
+		frappe.get_doc({"doctype": "EGC Equipment Manufacturer", "manufacturer_name": name}).insert(
+			ignore_permissions=True
+		)

@@ -68,3 +68,11 @@ export function get_document_revisions(document) {
 export function get_financials(project) {
 	return call_hub("get_financials", { project });
 }
+
+export function get_project_profile(project) {
+	return call_hub("get_project_profile", { project });
+}
+
+export function save_project_profile(project, data) {
+	return call_hub("save_project_profile", { project, data });
+}

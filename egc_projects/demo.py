@@ -171,5 +171,11 @@ def purge(project_name: str | None = None) -> None:
 		for name in frappe.get_all(doctype, filters={"project": project}, pluck="name", order_by="lft desc"):
 			frappe.delete_doc(doctype, name)
 
+	# EGC Project Profile links to Project by name (its own `name` field IS the project's), so
+	# it must go before the Project itself or `delete_doc("Project", ...)` raises a
+	# LinkExistsError — new v2 doctypes that reference Project the same way belong in this list.
+	if frappe.db.exists("EGC Project Profile", project):
+		frappe.delete_doc("EGC Project Profile", project)
+
 	frappe.delete_doc("Project", project)
 	frappe.db.commit()

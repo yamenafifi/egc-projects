@@ -1,0 +1,317 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "field:project",
+ "creation": "2026-08-25 00:00:00.000000",
+ "custom": 0,
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "project",
+  "section_break_general",
+  "project_code",
+  "project_stage",
+  "column_break_general_1",
+  "sector",
+  "delivery_method",
+  "contract_type",
+  "project_description",
+  "work_scope",
+  "column_break_general_2",
+  "contract_value",
+  "project_image",
+  "section_break_parties",
+  "stakeholders",
+  "section_break_site",
+  "country",
+  "region",
+  "city",
+  "column_break_site_1",
+  "address",
+  "latitude",
+  "longitude",
+  "time_zone",
+  "section_break_site_contact",
+  "site_contact_name",
+  "column_break_site_contact_1",
+  "site_contact_phone",
+  "site_contact_email",
+  "section_break_dates",
+  "contract_date",
+  "forecast_completion_date",
+  "column_break_dates_1",
+  "warranty_start_date",
+  "dlp_end_date",
+  "section_break_equipment",
+  "equipment_items"
+ ],
+ "fields": [
+  {
+   "fieldname": "project",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Project",
+   "options": "Project",
+   "reqd": 1
+  },
+  {
+   "fieldname": "section_break_general",
+   "fieldtype": "Section Break",
+   "label": "General"
+  },
+  {
+   "fieldname": "project_code",
+   "fieldtype": "Data",
+   "label": "Project Code"
+  },
+  {
+   "fieldname": "project_stage",
+   "fieldtype": "Select",
+   "in_standard_filter": 1,
+   "label": "Project Stage",
+   "options": "\nDesign\nProcurement\nConstruction\nCommissioning\nCloseout\nWarranty"
+  },
+  {
+   "fieldname": "column_break_general_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "sector",
+   "fieldtype": "Select",
+   "label": "Sector",
+   "options": "\nHealthcare\nIndustrial\nCommercial\nInfrastructure\nOther"
+  },
+  {
+   "fieldname": "delivery_method",
+   "fieldtype": "Select",
+   "label": "Delivery Method",
+   "options": "\nDesign-Bid-Build\nDesign-Build\nEPC\nTurnkey\nOther"
+  },
+  {
+   "fieldname": "contract_type",
+   "fieldtype": "Select",
+   "label": "Contract Type",
+   "options": "\nLump Sum\nUnit Price\nCost Plus\nTime & Material\nOther"
+  },
+  {
+   "fieldname": "project_description",
+   "fieldtype": "Small Text",
+   "label": "Project Description"
+  },
+  {
+   "fieldname": "work_scope",
+   "fieldtype": "Text Editor",
+   "label": "Work Scope"
+  },
+  {
+   "fieldname": "column_break_general_2",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Contract-sourced value. Not an ERPNext actual \u2014 see the Financials tab for sales/billing figures.",
+   "fieldname": "contract_value",
+   "fieldtype": "Currency",
+   "label": "Contract Value"
+  },
+  {
+   "fieldname": "project_image",
+   "fieldtype": "Attach Image",
+   "label": "Project Image"
+  },
+  {
+   "fieldname": "section_break_parties",
+   "fieldtype": "Section Break",
+   "label": "Parties"
+  },
+  {
+   "fieldname": "stakeholders",
+   "fieldtype": "Table",
+   "label": "Stakeholders",
+   "options": "EGC Project Stakeholder"
+  },
+  {
+   "fieldname": "section_break_site",
+   "fieldtype": "Section Break",
+   "label": "Site"
+  },
+  {
+   "fieldname": "country",
+   "fieldtype": "Link",
+   "label": "Country",
+   "options": "Country"
+  },
+  {
+   "fieldname": "region",
+   "fieldtype": "Data",
+   "label": "Region"
+  },
+  {
+   "fieldname": "city",
+   "fieldtype": "Data",
+   "label": "City"
+  },
+  {
+   "fieldname": "column_break_site_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "address",
+   "fieldtype": "Small Text",
+   "label": "Address"
+  },
+  {
+   "fieldname": "latitude",
+   "fieldtype": "Float",
+   "label": "Latitude",
+   "precision": "6"
+  },
+  {
+   "fieldname": "longitude",
+   "fieldtype": "Float",
+   "label": "Longitude",
+   "precision": "6"
+  },
+  {
+   "fieldname": "time_zone",
+   "fieldtype": "Data",
+   "label": "Time Zone"
+  },
+  {
+   "fieldname": "section_break_site_contact",
+   "fieldtype": "Section Break",
+   "label": "Site Contact"
+  },
+  {
+   "fieldname": "site_contact_name",
+   "fieldtype": "Data",
+   "label": "Site Contact Name"
+  },
+  {
+   "fieldname": "column_break_site_contact_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "site_contact_phone",
+   "fieldtype": "Data",
+   "label": "Site Contact Phone",
+   "options": "Phone"
+  },
+  {
+   "fieldname": "site_contact_email",
+   "fieldtype": "Data",
+   "label": "Site Contact Email",
+   "options": "Email"
+  },
+  {
+   "fieldname": "section_break_dates",
+   "fieldtype": "Section Break",
+   "label": "Dates"
+  },
+  {
+   "fieldname": "contract_date",
+   "fieldtype": "Date",
+   "label": "Contract Date"
+  },
+  {
+   "fieldname": "forecast_completion_date",
+   "fieldtype": "Date",
+   "label": "Forecast Completion Date"
+  },
+  {
+   "fieldname": "column_break_dates_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "warranty_start_date",
+   "fieldtype": "Date",
+   "label": "Warranty Start Date"
+  },
+  {
+   "fieldname": "dlp_end_date",
+   "fieldtype": "Date",
+   "label": "DLP End Date"
+  },
+  {
+   "fieldname": "section_break_equipment",
+   "fieldtype": "Section Break",
+   "label": "Healthcare / Equipment"
+  },
+  {
+   "fieldname": "equipment_items",
+   "fieldtype": "Table",
+   "label": "Equipment Items",
+   "options": "EGC Project Equipment Item"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-08-25 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "EGC Projects",
+ "name": "EGC Project Profile",
+ "naming_rule": "By fieldname",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "EGC Project Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "EGC Project Engineer",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "EGC Document Controller",
+   "share": 1
+  },
+  {
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "EGC Project Viewer",
+   "share": 1
+  }
+ ],
+ "search_fields": "project,project_code",
+ "show_title_field_in_link": 1,
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "project",
+ "track_changes": 1
+}

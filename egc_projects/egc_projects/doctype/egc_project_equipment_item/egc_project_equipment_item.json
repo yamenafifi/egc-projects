@@ -1,0 +1,102 @@
+{
+ "actions": [],
+ "creation": "2026-08-25 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "facility",
+  "department",
+  "modality",
+  "wbs_node",
+  "equipment_manufacturer",
+  "equipment_model",
+  "oem_reference",
+  "equipment_delivery_target",
+  "room_ready_target",
+  "oem_installation_target",
+  "commissioning_target",
+  "notes"
+ ],
+ "fields": [
+  {
+   "fieldname": "facility",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Facility"
+  },
+  {
+   "fieldname": "department",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Department"
+  },
+  {
+   "fieldname": "modality",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Modality",
+   "options": "EGC Modality"
+  },
+  {
+   "fieldname": "wbs_node",
+   "fieldtype": "Link",
+   "label": "WBS Node",
+   "options": "EGC WBS Node"
+  },
+  {
+   "fieldname": "equipment_manufacturer",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Equipment Manufacturer",
+   "options": "EGC Equipment Manufacturer"
+  },
+  {
+   "fieldname": "equipment_model",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Equipment Model"
+  },
+  {
+   "fieldname": "oem_reference",
+   "fieldtype": "Data",
+   "label": "OEM Reference"
+  },
+  {
+   "fieldname": "equipment_delivery_target",
+   "fieldtype": "Date",
+   "label": "Equipment Delivery Target"
+  },
+  {
+   "fieldname": "room_ready_target",
+   "fieldtype": "Date",
+   "label": "Room Ready Target"
+  },
+  {
+   "fieldname": "oem_installation_target",
+   "fieldtype": "Date",
+   "label": "OEM Installation Target"
+  },
+  {
+   "fieldname": "commissioning_target",
+   "fieldtype": "Date",
+   "label": "Commissioning Target"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 1,
+ "links": [],
+ "module": "EGC Projects",
+ "custom": 0,
+ "name": "EGC Project Equipment Item",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

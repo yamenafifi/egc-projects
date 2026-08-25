@@ -5,7 +5,19 @@
 
 import { reactive, readonly } from "vue";
 
-export const TABS = ["overview", "wbs", "activities", "submittals", "drawings", "financials"];
+// "documents" (Documents register) and "project-info" (Project Information) were added in
+// WP-11 alongside the WP-10/WP-09 packages that own their tab content. Order here drives
+// TabNav's display order via EgcProjectHub.vue's tab_defs.
+export const TABS = [
+	"overview",
+	"wbs",
+	"activities",
+	"submittals",
+	"documents",
+	"drawings",
+	"financials",
+	"project-info",
+];
 const DEFAULT_TAB = TABS[0];
 const STORAGE_KEY = "egc_project_hub:last_project";
 
