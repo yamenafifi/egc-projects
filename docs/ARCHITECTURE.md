@@ -337,6 +337,15 @@ Roles created by `install.py` (idempotent, exported as fixtures):
 | `EGC Document Controller` | full control of Documents, Revisions, Submittals |
 | `EGC Project Viewer` | read-only, no financials |
 
+**EGC roles are additive to ERPNext's own project roles.** They grant access to *EGC* DocTypes
+only; they deliberately do **not** grant any permission on the core `Project` DocType. An EGC
+user must therefore also hold a standard ERPNext project role (`Projects User` or
+`Projects Manager`). This is a deliberate choice over adding `Custom DocPerm` rows to `Project`:
+it keeps the core permission surface untouched on upgrade, and it avoids colliding with
+`egc_hr`, whose fixture already exports `Custom DocPerm` rows matching `role like "EGC %"` on
+`Project`. Because `require_project_permission()` gates every endpoint on `Project` read, a user
+missing that role gets an explicit permission error, never a silently empty Hub.
+
 - Every EGC DocType carries a `project` Link field, so **standard Frappe User Permissions on
   `Project` cascade automatically** — no custom `permission_query_conditions` needed for
   project isolation of our own DocTypes. This is deliberate and must not be replaced with a

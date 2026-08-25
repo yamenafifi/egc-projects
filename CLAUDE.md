@@ -49,6 +49,10 @@ Enforced by code — you will get a `ValidationError`, not a silent wrong answer
   setting one of those anywhere else, stop.
 - **A document's `approval_status` describes only its current revision.** Rev 03 must never
   inherit Rev 02's approval. See `docs/ARCHITECTURE.md` §2.4.
+- **EGC roles are additive, not standalone.** They grant access to EGC DocTypes only. An EGC
+  user must also hold `Projects User` or `Projects Manager`, because every Hub endpoint gates
+  on `Project` read permission. We deliberately do not add `Custom DocPerm` rows to the core
+  `Project` DocType — see `docs/ARCHITECTURE.md` §4 for why.
 - **No second ledger.** Project financials are read straight off the ERPNext `Project` fields
   that ERPNext/HRMS already maintain (`docs/ARCHITECTURE.md` §6). Never re-aggregate invoices.
 - **Do not edit Frappe/ERPNext/HRMS core, ever.** Extend only via this app's DocTypes and
