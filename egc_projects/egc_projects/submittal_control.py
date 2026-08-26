@@ -452,11 +452,18 @@ def _close_step_assignment(step: str, reviewer_user: str | None) -> None:
 
 
 def _refresh_ball_in_court(submission: str) -> None:
-	"""Recomputes `ball_in_court_label` on the submission from its CURRENT `In Review` steps.
+	"""Recomputes `ball_in_court_label` on the submission from its CURRENT `In Review` steps, then
+	propagates it up to the parent Submittal's own `ball_in_court` (which is what the Hub's
+	register column and detail-drawer header actually read).
 
 	Never stored independently of this — a submission with no `In Review` steps (nothing open,
 	or the step machinery was never used) gets a null label, matching the "derive, don't store"
-	rule everywhere else in this app.
+	rule everywhere else in this app. The propagation step is not optional: without it, a
+	mid-workflow stage transition (e.g. stage 0 responds and stage 1 opens) would leave the
+	Submittal-level Ball in Court stuck on the PREVIOUS stage's reviewer until the submission's
+	overall response finally resolves — `refresh_submittal_state` is otherwise only called from
+	the terminal/lifecycle paths (submit, mark under review, response recorded, next revision),
+	none of which fire on an intermediate stage advance.
 	"""
 	rows = frappe.get_all(
 		"EGC Submittal Review Step",
@@ -474,6 +481,10 @@ def _refresh_ball_in_court(submission: str) -> None:
 		label = ", ".join(parts)
 
 	_engine_set_submission(submission, {"ball_in_court_label": label})
+
+	submittal = frappe.db.get_value("EGC Submittal Revision", submission, "submittal")
+	if submittal:
+		refresh_submittal_state(submittal)
 
 
 @frappe.whitelist()

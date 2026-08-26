@@ -460,6 +460,9 @@ def get_submittals(project: str, filters=None) -> list[dict]:
 			"submittal_status",
 			"current_due_date",
 			"last_response_date",
+			"ball_in_court",
+			"responsible_party",
+			"submittal_manager",
 		],
 		order_by="submittal_number asc",
 	)

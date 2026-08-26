@@ -291,6 +291,29 @@ class TestSubmittalWorkflow(IntegrationTestCase):
 		submittal.reload()
 		self.assertEqual(submittal.ball_in_court, submission.ball_in_court_label)
 
+	def test_ball_in_court_propagates_to_submittal_on_stage_transition(self):
+		"""Regression: `_refresh_ball_in_court` used to write only the submission's own
+		`ball_in_court_label` — the Submittal-level `ball_in_court` (what the Hub register and
+		detail drawer actually display) was refreshed only by the terminal/lifecycle paths, so a
+		mid-workflow stage advance left it stuck on the PREVIOUS stage's reviewer until the whole
+		submission resolved. Found live: stage 0 (Project Engineer) approved, stage 1 (Consultant
+		+ optional OEM) correctly opened, but the Submittal header kept showing stage 0's name."""
+		submittal, submission, steps = self._build_submission_with_two_stage_workflow()
+		submission.submit()
+
+		submittal.reload()
+		self.assertIn("Ahmed Al-Otaibi", submittal.ball_in_court)
+
+		stage0_step = next(
+			s.name for s in steps if frappe.db.get_value("EGC Submittal Review Step", s.name, "sequence") == 0
+		)
+		frappe.set_user(self.manager_user)
+		submittal_control.record_step_response(stage0_step, c.RESPONSE_APPROVED)
+
+		submittal.reload()
+		self.assertNotIn("Ahmed Al-Otaibi", submittal.ball_in_court)
+		self.assertIn("Consultant Co", submittal.ball_in_court)
+
 	def test_stage_advances_only_after_all_required_steps_respond(self):
 		submittal, submission, steps = self._build_submission_with_two_stage_workflow()
 		submission.submit()

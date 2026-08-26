@@ -16,6 +16,99 @@ from frappe import _
 
 from egc_projects.egc_projects import relationships, submittal_control, validators
 
+# --- add/remove a controlled document revision on a Draft submission --------------------------
+
+
+@frappe.whitelist()
+def add_submission_document(submission: str, document_revision: str) -> dict:
+	"""Appends `document_revision` to a Draft submission's `documents` child table and saves —
+	the proper path for mutating a child table (`frappe.client.insert` does not support
+	inserting a standalone child row against an existing parent; the row must go through the
+	parent document's own save cycle, which is what this does)."""
+	doc = frappe.get_doc("EGC Submittal Revision", submission)
+	frappe.has_permission("EGC Submittal Revision", "write", doc=doc, throw=True)
+
+	if doc.docstatus != 0:
+		frappe.throw(
+			_("Documents can only be added while the submission is Draft; {0} is {1}.").format(
+				frappe.bold(doc.name), _(doc.submission_status)
+			),
+			exc=frappe.ValidationError,
+		)
+
+	doc.append("documents", {"document_revision": document_revision})
+	doc.save()
+	return {"name": doc.name}
+
+
+@frappe.whitelist()
+def remove_submission_document(submission: str, row_name: str) -> dict:
+	doc = frappe.get_doc("EGC Submittal Revision", submission)
+	frappe.has_permission("EGC Submittal Revision", "write", doc=doc, throw=True)
+
+	if doc.docstatus != 0:
+		frappe.throw(
+			_("Documents can only be removed while the submission is Draft; {0} is {1}.").format(
+				frappe.bold(doc.name), _(doc.submission_status)
+			),
+			exc=frappe.ValidationError,
+		)
+
+	doc.documents = [row for row in doc.documents if row.name != row_name]
+	doc.save()
+	return {"name": doc.name}
+
+
+# --- create_first_submission -------------------------------------------------------------------
+
+
+@frappe.whitelist()
+def create_first_submission(submittal: str, revision_label: str = "00") -> dict:
+	"""Creates the FIRST `EGC Submittal Revision` cycle for a Submittal that has none yet.
+
+	Deliberately a separate function from `submittal_control.create_next_revision`, which is
+	documented (docs/ARCHITECTURE_V2.md §7 / v1 §2.5) as "allowed only when the latest
+	submission is Responded" — that contract stays exactly as written and tested; this covers
+	the one case it explicitly does not (nothing exists yet), so a brand-new Submittal has a
+	Hub-native path into its first cycle instead of only the native form.
+	"""
+	validators.require_project_permission(validators.get_project_of("EGC Submittal", submittal), "write")
+	frappe.has_permission("EGC Submittal Revision", "create", throw=True)
+
+	if frappe.db.exists("EGC Submittal Revision", {"submittal": submittal}):
+		frappe.throw(
+			_("{0} already has a submission. Use the current submission's own actions instead.").format(
+				frappe.bold(submittal)
+			),
+			exc=frappe.ValidationError,
+		)
+
+	doc = frappe.get_doc({"doctype": "EGC Submittal Revision", "submittal": submittal, "revision_label": revision_label})
+	doc.insert()
+	return {"name": doc.name}
+
+
+# --- submit_submission ---------------------------------------------------------------------
+
+
+@frappe.whitelist()
+def submit_submission(submission: str) -> dict:
+	"""Submits a Draft `EGC Submittal Revision` — the only place this happens from the Hub,
+	mirroring `api/documents.py`'s `submit_document_revision`. `on_submission_submit` (wired in
+	hooks.py) is what actually moves the submission into review; this function is the thin,
+	permission-checked entry point into that framework action."""
+	if not submission or not frappe.db.exists("EGC Submittal Revision", submission):
+		frappe.throw(_("Submission {0} not found.").format(submission), exc=frappe.DoesNotExistError)
+
+	doc = frappe.get_doc("EGC Submittal Revision", submission)
+	project = validators.get_project_of("EGC Submittal", doc.submittal)
+	validators.require_project_permission(project, "write")
+	frappe.has_permission("EGC Submittal Revision", "submit", doc=doc, throw=True)
+
+	doc.submit()
+	return {"name": doc.name, "submission_status": doc.submission_status}
+
+
 # --- create_submittal ("+ New Submittal" from the Hub) ----------------------------------------
 
 _CREATE_FIELDS = ("submittal_number", "title", "submittal_type", "discipline", "wbs_node", "description",

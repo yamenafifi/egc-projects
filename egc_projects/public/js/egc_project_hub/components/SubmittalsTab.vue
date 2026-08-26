@@ -1,12 +1,14 @@
 <script setup>
 import { computed, ref, watch, onMounted } from "vue";
 import { get_submittals } from "../api";
+import { create_submittal } from "./submittals_api";
 import { useHubResource } from "../composables/useHubResource";
 import { consumeOverdueIntent } from "../composables/useOverdueIntent";
 import LoadingState from "./LoadingState.vue";
 import ErrorState from "./ErrorState.vue";
 import EmptyState from "./EmptyState.vue";
 import StatusPill from "./StatusPill.vue";
+import SubmittalDetail from "./SubmittalDetail.vue";
 
 const props = defineProps({
 	project: { type: String, required: true },
@@ -15,6 +17,17 @@ const props = defineProps({
 
 const { data, loading, error, reload } = useHubResource(() => get_submittals(props.project));
 watch(() => props.project, reload, { immediate: true });
+
+const WRITE_ROLES = ["EGC Project Manager", "EGC Project Engineer", "EGC Document Controller", "System Manager"];
+const can_write = computed(() => (frappe.user_roles || []).some((role) => WRITE_ROLES.includes(role)));
+
+const selected_submittal = ref(null);
+function open_detail(name) {
+	selected_submittal.value = name;
+}
+function close_detail() {
+	selected_submittal.value = null;
+}
 
 const status_filter = ref("");
 const type_filter = ref("");
@@ -40,12 +53,50 @@ const filtered = computed(() => {
 	});
 });
 
-function open_form(row) {
-	frappe.set_route("Form", "EGC Submittal", row.name);
+function open_create_dialog() {
+	const dialog = new frappe.ui.Dialog({
+		title: __("New Submittal"),
+		fields: [
+			{ fieldname: "submittal_number", fieldtype: "Data", label: __("Submittal Number"), reqd: 1 },
+			{ fieldname: "title", fieldtype: "Data", label: __("Title"), reqd: 1 },
+			{
+				fieldname: "submittal_type",
+				fieldtype: "Link",
+				label: __("Submittal Type"),
+				options: "EGC Submittal Type",
+				reqd: 1,
+			},
+			{ fieldname: "discipline", fieldtype: "Link", label: __("Discipline"), options: "EGC Discipline" },
+			{
+				fieldname: "wbs_node",
+				fieldtype: "Link",
+				label: __("WBS Node"),
+				options: "EGC WBS Node",
+				get_query: () => ({ filters: { project: props.project } }),
+			},
+			{ fieldname: "responsible_party", fieldtype: "Data", label: __("Responsible Party") },
+			{ fieldname: "received_from", fieldtype: "Data", label: __("Received From") },
+			{ fieldname: "submittal_manager", fieldtype: "Link", label: __("Submittal Manager"), options: "User" },
+			{ fieldname: "description", fieldtype: "Small Text", label: __("Description") },
+		],
+		primary_action_label: __("Create"),
+		primary_action(values) {
+			create_submittal(props.project, values)
+				.then((result) => {
+					dialog.hide();
+					reload();
+					open_detail(result.name);
+				})
+				.catch((e) => {
+					frappe.msgprint({ title: __("Could Not Create Submittal"), message: e.message, indicator: "red" });
+				});
+		},
+	});
+	dialog.show();
 }
 
-function create_submittal() {
-	frappe.new_doc("EGC Submittal", { project: props.project });
+function on_detail_changed() {
+	reload();
 }
 
 function format_date(value) {
@@ -66,8 +117,8 @@ function days_overdue(row) {
 			v-else-if="!(data || []).length"
 			:title="__('No submittals yet')"
 			:description="__('Submittals track review cycles for controlled documents on this project.')"
-			:action-label="__('New Submittal')"
-			@action="create_submittal"
+			:action-label="__('+ New Submittal')"
+			@action="open_create_dialog"
 		/>
 
 		<template v-else>
@@ -84,6 +135,14 @@ function days_overdue(row) {
 					<input v-model="overdue_only" type="checkbox" />
 					{{ __("Overdue only") }}
 				</label>
+				<button
+					v-if="can_write"
+					type="button"
+					class="btn btn-sm btn-primary hub-submittals__new"
+					@click="open_create_dialog"
+				>
+					{{ __("+ New Submittal") }}
+				</button>
 			</div>
 
 			<EmptyState v-if="!filtered.length" :title="__('No submittals match these filters')" />
@@ -97,6 +156,7 @@ function days_overdue(row) {
 							<th>{{ __("Discipline") }}</th>
 							<th>{{ __("Current Submission") }}</th>
 							<th>{{ __("Status") }}</th>
+							<th>{{ __("Ball in Court") }}</th>
 							<th>{{ __("Due Date") }}</th>
 							<th>{{ __("Days Overdue") }}</th>
 						</tr>
@@ -106,7 +166,7 @@ function days_overdue(row) {
 							v-for="row in filtered"
 							:key="row.name"
 							class="hub-table__row--clickable"
-							@click="open_form(row)"
+							@click="open_detail(row.name)"
 						>
 							<td>{{ row.submittal_number }}</td>
 							<td>{{ row.title }}</td>
@@ -114,6 +174,7 @@ function days_overdue(row) {
 							<td>{{ row.discipline || "—" }}</td>
 							<td>{{ row.current_submission_label || "—" }}</td>
 							<td><StatusPill :status="row.submittal_status" /></td>
+							<td>{{ row.ball_in_court || "—" }}</td>
 							<td>{{ format_date(row.current_due_date) }}</td>
 							<td :class="{ 'hub-table__overdue': row.is_overdue }">{{ days_overdue(row) }}</td>
 						</tr>
@@ -121,10 +182,23 @@ function days_overdue(row) {
 				</table>
 			</div>
 		</template>
+
+		<SubmittalDetail
+			v-if="selected_submittal"
+			:submittal="selected_submittal"
+			:project="project"
+			:can-write="can_write"
+			@close="close_detail"
+			@changed="on_detail_changed"
+		/>
 	</div>
 </template>
 
 <style scoped>
+.hub-submittals__new {
+	margin-left: auto;
+}
+
 .hub-toolbar__check {
 	display: flex;
 	align-items: center;
