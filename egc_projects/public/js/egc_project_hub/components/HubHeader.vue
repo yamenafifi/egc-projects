@@ -16,12 +16,19 @@ const emit = defineEmits(["switch-project"]);
 const { setTab } = useHubRoute();
 const switching = ref(false);
 
-// ARCHITECTURE_V2.md §4: `profile` is null when no EGC Project Profile row exists yet for this
-// project — an ordinary new-project state, not an error.
+// ARCHITECTURE_V2.md §1: Project Information lives directly on `Project`'s own custom fields
+// now, so `context.profile` is always a dict, never null — `has_profile_data` (not `profile`
+// itself) is what distinguishes "nothing filled in yet" from a populated project, since every
+// key still resolves to `undefined`/`""`/`[]` on a fresh Project either way.
 const profile = computed(() => props.context?.profile || null);
 const key_stakeholders = computed(() => (profile.value?.key_stakeholders || []).slice(0, 3));
+const has_profile_data = computed(() => {
+	const p = profile.value;
+	if (!p) return false;
+	return Boolean(p.project_code || p.project_stage || p.sector || p.contract_value) || key_stakeholders.value.length > 0;
+});
 const project_details_label = computed(() =>
-	profile.value ? __("Project Details") : __("+ Add Project Information")
+	has_profile_data.value ? __("Project Details") : __("+ Add Project Information")
 );
 
 function on_switch(value) {
@@ -68,11 +75,11 @@ function format_date_range(dates) {
 					<span v-if="context.customer">{{ context.customer }}</span>
 				</div>
 
-				<StakeholderChips v-if="profile" :stakeholders="key_stakeholders" />
+				<StakeholderChips v-if="key_stakeholders.length" :stakeholders="key_stakeholders" />
 
-				<div v-if="profile || format_date_range(context.dates)" class="hub-header__meta hub-header__meta--secondary">
-					<span v-if="profile && profile.project_stage">{{ __("Stage") }}: {{ profile.project_stage }}</span>
-					<span v-if="profile && profile.project_stage && format_date_range(context.dates)" class="hub-header__sep">·</span>
+				<div v-if="profile.project_stage || format_date_range(context.dates)" class="hub-header__meta hub-header__meta--secondary">
+					<span v-if="profile.project_stage">{{ __("Stage") }}: {{ profile.project_stage }}</span>
+					<span v-if="profile.project_stage && format_date_range(context.dates)" class="hub-header__sep">·</span>
 					<span v-if="format_date_range(context.dates)">{{ format_date_range(context.dates) }}</span>
 				</div>
 			</template>
@@ -93,7 +100,7 @@ function format_date_range(dates) {
 				v-if="context"
 				type="button"
 				class="btn btn-sm btn-default"
-				:class="{ 'hub-header__profile-cta': !profile }"
+				:class="{ 'hub-header__profile-cta': !has_profile_data }"
 				@click="goto_project_info"
 			>
 				{{ project_details_label }}

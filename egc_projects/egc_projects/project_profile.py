@@ -1,11 +1,14 @@
 """Project Information domain helpers (ARCHITECTURE_V2.md §1/§2).
 
-`resolve_role_user` and `get_stakeholders` are a binding contract: the (concurrently-built)
-Submittal Workflow package resolves a workflow step's `reviewer_role` through
-`resolve_role_user()`, so neither signature may change. Both degrade gracefully to `None`/`[]`
-when a project has no `EGC Project Profile` row yet — that is a normal state, not an error,
-since a fresh install seeds zero roles/modalities/manufacturers and a project may never get a
-Profile at all.
+Project Information lives directly on the core `Project` doctype as Custom Fields (see
+`project_custom_fields.py`) — edited on the native `Project` form, not through a separate
+doctype or a Hub-side form. `custom_egc_stakeholders` is a Table field on `Project`, so its rows
+carry `parenttype="Project"`.
+
+`resolve_role_user` and `get_stakeholders` are a binding contract: the Submittal Workflow engine
+resolves a workflow step's `reviewer_role` through `resolve_role_user()`, so neither signature
+may change. Both degrade gracefully to `None`/`[]` when a project has no stakeholders yet — that
+is a normal state, not an error.
 """
 
 from __future__ import annotations
@@ -21,17 +24,17 @@ KEY_STAKEHOLDER_ROLES = ("EGC Project Manager", "EGC Site Manager", "Client", "C
 def resolve_role_user(project: str, role_name: str) -> str | None:
 	"""The `user` of the project's stakeholder row for `role_name`, or None.
 
-	None covers three distinct cases uniformly, by design: no Profile row exists yet, the role
-	isn't represented among this project's stakeholders, or it is but the stakeholder is a pure
-	external party with no Frappe login (ARCHITECTURE_V2.md §2). A caller that needs to tell
-	these apart should use `get_stakeholders` directly.
+	None covers two distinct cases uniformly, by design: the role isn't represented among this
+	project's stakeholders, or it is but the stakeholder is a pure external party with no Frappe
+	login (ARCHITECTURE_V2.md §2). A caller that needs to tell these apart should use
+	`get_stakeholders` directly.
 	"""
 	if not project or not role_name:
 		return None
 
 	rows = frappe.get_all(
 		"EGC Project Stakeholder",
-		filters={"parent": project, "parenttype": "EGC Project Profile", "role": role_name},
+		filters={"parent": project, "parenttype": "Project", "role": role_name},
 		fields=["user"],
 		order_by="is_primary desc, idx asc",
 		limit=1,
@@ -40,13 +43,13 @@ def resolve_role_user(project: str, role_name: str) -> str | None:
 
 
 def get_stakeholders(project: str) -> list[dict]:
-	"""Every stakeholder row for `project`, or `[]` if it has no Profile yet."""
+	"""Every stakeholder row for `project`, or `[]` if it has none yet."""
 	if not project:
 		return []
 
 	return frappe.get_all(
 		"EGC Project Stakeholder",
-		filters={"parent": project, "parenttype": "EGC Project Profile"},
+		filters={"parent": project, "parenttype": "Project"},
 		fields=["role", "party_name", "organization", "user", "contact", "email", "phone", "is_primary"],
 		order_by="idx asc",
 	)

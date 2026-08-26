@@ -51,6 +51,12 @@ doc_events = {
 		"on_cancel": "egc_projects.egc_projects.submittal_control.on_submission_cancel",
 		"on_trash": "egc_projects.egc_projects.submittal_control.on_submission_trash",
 	},
+	# `Project` is core — this validates the Healthcare/Equipment custom fields
+	# (project_custom_fields.py) the same way a doctype-owned `validate()` would if we owned
+	# the doctype outright.
+	"Project": {
+		"validate": "egc_projects.egc_projects.project_custom_fields.validate_project",
+	},
 }
 
 # Scheduled Tasks

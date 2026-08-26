@@ -76,23 +76,16 @@ def _require_financial_access() -> None:
 		)
 
 
-# --- project profile edit gate --------------------------------------------------------------
-
-#: ARCHITECTURE_V2.md §4 — who may call `save_project_profile`.
-_PROFILE_EDIT_ROLES = (c.ROLE_PROJECT_MANAGER, c.ROLE_PROJECT_ENGINEER, "System Manager")
-
-
-def _has_profile_edit_access() -> bool:
-	return bool(set(frappe.get_roles()) & set(_PROFILE_EDIT_ROLES))
+# --- project info edit gate ------------------------------------------------------------------
+#
+# Project Information is edited on the native `Project` form now (ARCHITECTURE_V2.md §1), not
+# through a Hub-side API — so "can edit" is exactly "can this user write to this Project",
+# nothing bespoke layered on top. Kept as a named helper only because `get_project_context`
+# surfaces it as a UI hint (show/hide the "Edit on Project" link).
 
 
-def _require_profile_edit_access() -> None:
-	if not _has_profile_edit_access():
-		frappe.throw(
-			_("You do not have permission to edit project information."),
-			title=_("Not Permitted"),
-			exc=frappe.PermissionError,
-		)
+def _has_profile_edit_access(project: str) -> bool:
+	return bool(frappe.has_permission("Project", "write", doc=project))
 
 
 # --- drawings helper (shared with the Drawing Register report) ----------------------------
@@ -113,22 +106,32 @@ def _user_full_names(names: set[str]) -> dict[str, str]:
 	return {row.name: row.full_name for row in rows}
 
 
-def _project_profile_summary(project: str) -> dict | None:
-	"""The header-relevant slice of `EGC Project Profile`, or None (ARCHITECTURE_V2.md §4).
+def _project_profile_summary(project: str) -> dict:
+	"""The header-relevant slice of Project Information (ARCHITECTURE_V2.md §1/§4).
 
-	None means no Profile row exists yet for this project — a normal, error-free state the Hub
-	must render as an invitation to create one, never as a failure. The full field set and full
-	stakeholder/equipment lists are fetched separately via `get_project_profile()`.
+	Always a dict, never None — the fields live directly on `Project` now, so there is no
+	separate row whose absence would need representing. The full field set and full
+	stakeholder/equipment lists are fetched separately via `get_project_info()`.
 	"""
-	if not frappe.db.exists("EGC Project Profile", project):
-		return None
-
-	row = frappe.db.get_value(
-		"EGC Project Profile",
+	raw = frappe.db.get_value(
+		"Project",
 		project,
-		["project_code", "project_stage", "sector", "project_image", "contract_value"],
+		[
+			"custom_egc_project_code",
+			"custom_egc_project_stage",
+			"custom_egc_sector",
+			"custom_egc_project_image",
+			"custom_egc_contract_value",
+		],
 		as_dict=True,
 	)
+	row = {
+		"project_code": raw.custom_egc_project_code,
+		"project_stage": raw.custom_egc_project_stage,
+		"sector": raw.custom_egc_sector,
+		"project_image": raw.custom_egc_project_image,
+		"contract_value": raw.custom_egc_contract_value,
+	}
 
 	stakeholders = project_profile.get_stakeholders(project)
 	key_roles = set(project_profile.KEY_STAKEHOLDER_ROLES)
@@ -181,7 +184,7 @@ def get_project_context(project: str) -> dict:
 		"percent_complete": row.percent_complete,
 		"company": row.company,
 		"currency": currency,
-		"permissions": {"financials": _has_financial_access(), "edit_profile": _has_profile_edit_access()},
+		"permissions": {"financials": _has_financial_access(), "edit_profile": _has_profile_edit_access(project)},
 		"profile": _project_profile_summary(project),
 	}
 
@@ -895,39 +898,39 @@ def get_financial_transactions(project: str, metric: str) -> list[dict]:
 	return fn(project)
 
 
-# --- Project Information: get_project_profile / save_project_profile (ARCHITECTURE_V2.md §4) --
+# --- Project Information: get_project_info, read-only (ARCHITECTURE_V2.md §1) -----------------
+#
+# There is no `save_project_info` — this data is edited on the native `Project` form, the same
+# way egc_hr's Supervisors/Project Location fields already are. This endpoint exists only to
+# give the Hub's own read-side (a curated summary view, not a duplicate edit form) a single call
+# instead of one `frappe.db.get_value` per field.
 
-#: Every plain `EGC Project Profile` field except `project` itself, which is never caller-set
-#: (naming already binds it to the Project this method was gated on).
-_PROFILE_SIMPLE_FIELDS = (
-	"project_code",
-	"project_stage",
-	"sector",
-	"delivery_method",
-	"contract_type",
-	"project_description",
-	"work_scope",
-	"contract_value",
-	"project_image",
-	"country",
-	"region",
-	"city",
-	"address",
-	"latitude",
-	"longitude",
-	"time_zone",
-	"site_contact_name",
-	"site_contact_phone",
-	"site_contact_email",
-	"contract_date",
-	"forecast_completion_date",
-	"warranty_start_date",
-	"dlp_end_date",
-)
-_PROFILE_CHILD_FIELDS = ("stakeholders", "equipment_items")
-#: Allow-list for `save_project_profile`'s `data` payload — never trust caller-supplied keys
-#: outright, same discipline as the filter allow-lists above.
-_PROFILE_SAVABLE_FIELDS = set(_PROFILE_SIMPLE_FIELDS) | set(_PROFILE_CHILD_FIELDS)
+#: External name -> the actual `custom_egc_*` fieldname on `Project`. Keeps the Hub-facing
+#: contract stable and free of Frappe's custom-field naming convention, and is the one place
+#: that would need editing if a field were ever renamed on `Project` itself.
+_PROFILE_FIELD_MAP = {
+	"project_code": "custom_egc_project_code",
+	"project_stage": "custom_egc_project_stage",
+	"sector": "custom_egc_sector",
+	"delivery_method": "custom_egc_delivery_method",
+	"contract_type": "custom_egc_contract_type",
+	"project_description": "custom_egc_project_description",
+	"work_scope": "custom_egc_work_scope",
+	"contract_value": "custom_egc_contract_value",
+	"project_image": "custom_egc_project_image",
+	"country": "custom_egc_country",
+	"region": "custom_egc_region",
+	"city": "custom_egc_city",
+	"address": "custom_egc_address",
+	"time_zone": "custom_egc_time_zone",
+	"site_contact_name": "custom_egc_site_contact_name",
+	"site_contact_phone": "custom_egc_site_contact_phone",
+	"site_contact_email": "custom_egc_site_contact_email",
+	"contract_date": "custom_egc_contract_date",
+	"forecast_completion_date": "custom_egc_forecast_completion_date",
+	"warranty_start_date": "custom_egc_warranty_start_date",
+	"dlp_end_date": "custom_egc_dlp_end_date",
+}
 
 _STAKEHOLDER_ROW_FIELDS = ("role", "party_name", "organization", "user", "contact", "email", "phone", "is_primary")
 _EQUIPMENT_ROW_FIELDS = (
@@ -946,59 +949,18 @@ _EQUIPMENT_ROW_FIELDS = (
 )
 
 
-def _empty_project_profile(project: str) -> dict:
-	"""The sane default shape `get_project_profile` returns for a project with no Profile row.
-
-	A missing Profile is a normal, error-free state (ARCHITECTURE_V2.md §4) — the caller gets
-	every field as null and empty child tables, not an exception, so the Hub can render its
-	"Add Project Information" empty state from the same shape it would use to render a real one.
-	"""
-	empty = dict.fromkeys(_PROFILE_SIMPLE_FIELDS)
-	empty["project"] = project
-	empty["stakeholders"] = []
-	empty["equipment_items"] = []
-	return empty
-
-
 @frappe.whitelist()
-def get_project_profile(project: str) -> dict:
+def get_project_info(project: str) -> dict:
 	validators.require_project_permission(project)
 
-	if not frappe.db.exists("EGC Project Profile", project):
-		return _empty_project_profile(project)
-
-	doc = frappe.get_doc("EGC Project Profile", project)
-	data = {field: doc.get(field) for field in _PROFILE_SIMPLE_FIELDS}
+	raw = frappe.db.get_value("Project", project, list(_PROFILE_FIELD_MAP.values()), as_dict=True)
+	data = {external: raw[internal] for external, internal in _PROFILE_FIELD_MAP.items()}
 	data["project"] = project
-	data["stakeholders"] = [{field: row.get(field) for field in _STAKEHOLDER_ROW_FIELDS} for row in doc.stakeholders]
-	data["equipment_items"] = [{field: row.get(field) for field in _EQUIPMENT_ROW_FIELDS} for row in doc.equipment_items]
+	data["stakeholders"] = project_profile.get_stakeholders(project)
+	data["equipment_items"] = frappe.get_all(
+		"EGC Project Equipment Item",
+		filters={"parent": project, "parenttype": "Project"},
+		fields=list(_EQUIPMENT_ROW_FIELDS),
+		order_by="idx asc",
+	)
 	return data
-
-
-@frappe.whitelist()
-def save_project_profile(project: str, data=None) -> dict:
-	validators.require_project_permission(project)
-	_require_profile_edit_access()
-
-	if isinstance(data, str):
-		data = frappe.parse_json(data)
-	if not isinstance(data, dict):
-		frappe.throw(_("Profile data must be a JSON object."), exc=frappe.ValidationError)
-
-	update = {key: value for key, value in data.items() if key in _PROFILE_SAVABLE_FIELDS}
-
-	if frappe.db.exists("EGC Project Profile", project):
-		doc = frappe.get_doc("EGC Project Profile", project)
-	else:
-		doc = frappe.new_doc("EGC Project Profile")
-		doc.project = project
-
-	# `doc.update()` + `doc.save()` reuses native Frappe document validation (child-table
-	# replace-in-place included) rather than hand-rolling field-by-field diffing, per
-	# ARCHITECTURE_V2.md §4. `project` is reasserted after `update()` so a caller can never use
-	# the payload to redirect the 1:1 binding onto a different project.
-	doc.update(update)
-	doc.project = project
-	doc.save()
-
-	return get_project_profile(project)

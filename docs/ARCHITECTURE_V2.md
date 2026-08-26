@@ -37,61 +37,89 @@ Everything below addresses one of these eight findings.
 
 ---
 
-## 1. Project Information — `EGC Project Profile`
+## 1. Project Information — Custom Fields on `Project`, revised from v1's own design
 
-**Decision: a 1:1 satellite DocType, not custom fields on `Project`.** A field list this large
-(general/parties/site/dates/healthcare) sprinkled onto core `Project` via Custom Field would be
-unmaintainable and would collide with `egc_hr`'s existing `custom_egc_*` fields on the same
-doctype. A satellite keeps the v1 achievement — **zero custom fields on core `Project`** — intact.
+**Superseded decision, and why.** V1 originally chose a 1:1 satellite DocType
+(`EGC Project Profile`), reasoning that Custom Fields on core `Project` "would collide with
+`egc_hr`'s existing `custom_egc_*` fields." Live investigation while building this section
+proved that reasoning wrong: `egc_hr` already extends `Project` with its own Custom Fields
+(`custom_egc_supervisors_section`/`custom_egc_supervisors`, plus a pre-existing production set —
+`custom_project_location`/`custom_latitude`/`custom_longitude`/`custom_geofence_radius`/
+`custom_site_coordinates_dms`, predating `egc_hr` itself, which its own
+`setup/bootstrap_custom_fields.py` deliberately does not redefine — see that file's comment),
+and Frappe's own `insert_after`-chained Custom Field model composes two apps' fields on the same
+doctype without conflict as long as fieldnames are namespaced and neither app assumes it owns
+the field immediately before/after its own. There was never a real collision risk — only an
+unverified assumption.
 
-`EGC Project Profile` is named `autoname: "field:project"`, i.e. **its `name` IS the project's
-name.** `frappe.get_doc("EGC Project Profile", project)` needs no lookup, and the 1:1 constraint
-is enforced by naming itself, not a separate uniqueness check. This is not a second Project
-master — it is one row of satellite data per Project, exactly the "EGC Projects extends the
-project environment around it" principle from v1 §1.
+More importantly: a satellite DocType meant Project Information was **edited through a bespoke
+Hub-side form** (`get_project_profile`/`save_project_profile`, a custom Vue editor) — which
+reads, to anyone used to how `egc_hr`'s own Supervisors/Project Location fields already work on
+the *native* `Project` form, like the Hub re-implementing a worse version of a form Frappe
+already provides for free. **Project Information now lives directly on `Project` as Custom
+Fields** (`egc_projects/egc_projects/project_custom_fields.py`), edited on the native `Project`
+form's own **"EGC Project Info" tab** — the same place, the same mechanism, as `egc_hr`'s
+fields. The Hub still has a "Project Details" view, but it is now **read-only**: a curated
+summary with a link out to the native form, never a second place the same data can be edited.
 
-Do not duplicate a field ERPNext `Project` already owns. Specifically **not** duplicated:
-`expected_start_date`/`expected_end_date` (= contractual start/completion),
-`actual_start_date`/`actual_end_date`, `status`, `project_type` (reuse core's Select),
-`customer` (= Client — see §2).
+Do not duplicate a field ERPNext `Project` (or `egc_hr`) already owns. Specifically **not**
+duplicated: `expected_start_date`/`expected_end_date`, `actual_start_date`/`actual_end_date`,
+`status`, `project_type`, `customer` (= Client — see §2), and — critically — **latitude/
+longitude/geofencing**, which is `egc_hr`'s Project Location section's job, not this app's.
+(v1's field list included its own `latitude`/`longitude` in the satellite doctype; that was
+itself an undetected duplicate of the pre-existing production fields, caught and dropped during
+this migration, not carried forward.)
 
-### Fields
+### Fields — `custom_egc_*` Custom Fields on `Project`, in a dedicated `Tab Break`
 
-**General**
-- `project_code` (Data) — distinct from the Project's own name/number when the two differ.
-- `project_stage` (Select: `Design`, `Procurement`, `Construction`, `Commissioning`,
+All under one native-form tab, `custom_egc_project_info_tab` ("EGC Project Info"), inserted
+after the core "More Info" tab's content (`insert_after: notes`) so it never has to reason about
+`egc_hr`'s own field positions, or vice versa — each app only anchors to core fields.
+
+**Classification**
+- `custom_egc_project_code` (Data) — distinct from the Project's own name/number when the two
+  differ.
+- `custom_egc_project_stage` (Select: `Design`, `Procurement`, `Construction`, `Commissioning`,
   `Closeout`, `Warranty`) — a construction-lifecycle stage, a different axis from core
   `Project.status` (Open/Completed/Cancelled/On Hold).
-- `sector` (Select: `Healthcare`, `Industrial`, `Commercial`, `Infrastructure`, `Other`).
-- `delivery_method` (Select: `Design-Bid-Build`, `Design-Build`, `EPC`, `Turnkey`, `Other`).
-- `contract_type` (Select: `Lump Sum`, `Unit Price`, `Cost Plus`, `Time & Material`, `Other`).
-- `project_description` (Small Text), `work_scope` (Text Editor).
-- `contract_value` (Currency) — **explicitly labelled and documented as contract-sourced, not
-  an ERPNext actual.** Never conflated with `total_sales_amount` in the Financials tab; shown
-  only in Project Information.
-- `project_image` (Attach Image).
+- `custom_egc_sector` (Select: `Healthcare`, `Industrial`, `Commercial`, `Infrastructure`,
+  `Other`).
+- `custom_egc_delivery_method` (Select: `Design-Bid-Build`, `Design-Build`, `EPC`, `Turnkey`,
+  `Other`).
+- `custom_egc_contract_type` (Select: `Lump Sum`, `Unit Price`, `Cost Plus`, `Time & Material`,
+  `Other`).
+- `custom_egc_project_description` (Small Text), `custom_egc_work_scope` (Text Editor).
 
-**Site**
-- `country` (Link `Country` — reuse core Frappe doctype), `region`, `city`, `address`
-  (Small Text), `latitude`/`longitude` (Float, optional), `time_zone` (Data),
-  `site_contact_name`, `site_contact_phone`, `site_contact_email`.
+**Commercial**
+- `custom_egc_contract_value` (Currency) — **explicitly labelled and documented as
+  contract-sourced, not an ERPNext actual.** Never conflated with `total_sales_amount` in the
+  Financials tab; shown only in Project Information.
+- `custom_egc_project_image` (Attach Image).
 
-**Dates** — only what core `Project` doesn't already carry:
-- `contract_date`, `forecast_completion_date`, `warranty_start_date`, `dlp_end_date`.
+**Stakeholders** — Table field `custom_egc_stakeholders` (`EGC Project Stakeholder`), see §2.
 
-**Stakeholders** — child table `stakeholders` (`EGC Project Stakeholder`), see §2.
+**Address** — postal/administrative address, distinct from `egc_hr`'s GPS/geofence Project
+Location section above it on the same form: `custom_egc_country` (Link `Country`),
+`custom_egc_region`, `custom_egc_city`, `custom_egc_address` (Small Text), `custom_egc_time_zone`.
 
-**Healthcare / Equipment** — child table `equipment_items` (`EGC Project Equipment Item`),
-see §3. Deliberately a *child table*, not singular fields, because the v1 brief's own example
-(`Radiology Department > MRI-01, MRI-02, CT-01`) already implies multiple pieces of equipment
-per project — a fixed set of singular fields would overfit the very first real project.
+**Site Contact** — `custom_egc_site_contact_name`, `custom_egc_site_contact_phone`,
+`custom_egc_site_contact_email`.
+
+**Contract Dates** — only what core `Project` doesn't already carry: `custom_egc_contract_date`,
+`custom_egc_forecast_completion_date`, `custom_egc_warranty_start_date`,
+`custom_egc_dlp_end_date`.
+
+**Healthcare / Equipment** — Table field `custom_egc_equipment_items`
+(`EGC Project Equipment Item`), see §3. Deliberately a *child table*, not singular fields,
+because the v1 brief's own example (`Radiology Department > MRI-01, MRI-02, CT-01`) already
+implies multiple pieces of equipment per project.
 
 ### Validation
-- `validate()` rejects a `project` value that doesn't exist (defensive; the naming already
-  guarantees uniqueness).
-- Every child row is validated project-consistent where it references another EGC record
-  (e.g. an equipment item's `wbs_node` must belong to the same project) via the existing
-  `validators.validate_same_project` helper — no new validation pattern invented.
+- `Project`'s `validate` doc_event (`hooks.py` → `project_custom_fields.validate_project`,
+  since `Project` is core and can't carry its own `validate()` override) checks every
+  Healthcare/Equipment row's `wbs_node` belongs to the same project, via the existing
+  `validators.validate_same_project` helper — no new validation pattern invented, same rule v1
+  had, just relocated from a doctype-controller `validate()` to a hook.
 
 ---
 
@@ -106,11 +134,12 @@ Seeded (idempotent, in `install.py`, `is_egc_internal` marked as noted): `Client
 `EGC Site Manager` (internal), `Project Engineer` (internal), `Document Controller` (internal),
 `QA/QC` (internal), `HSE` (internal), `Commercial` (internal).
 
-`EGC Project Stakeholder` — child table on `EGC Project Profile`: `role` (Link, reqd),
-`party_name` (Data, reqd — the org or person's display name), `organization` (Data, optional),
-`user` (Link `User`, optional — set for internal roles so the person can be assigned/notified),
-`contact` (Link `Contact`, optional), `email`/`phone` (Data, fetched from `contact`/`user` when
-present, else manual), `is_primary` (Check).
+`EGC Project Stakeholder` — child table, now on `Project` itself (`custom_egc_stakeholders`,
+`parenttype="Project"`), not a satellite doctype: `role` (Link, reqd), `party_name` (Data, reqd
+— the org or person's display name), `organization` (Data, optional), `user` (Link `User`,
+optional — set for internal roles so the person can be assigned/notified), `contact` (Link
+`Contact`, optional), `email`/`phone` (Data, fetched from `contact`/`user` when present, else
+manual), `is_primary` (Check).
 
 **"Siemens / Philips / GE" become data, never schema**: role = `OEM`, `party_name` = whichever
 manufacturer applies to that project. No manufacturer is ever a role, a Select option, or a
@@ -123,7 +152,8 @@ project's actual `EGC Project Stakeholder` row with `role="Consultant"` and read
 is recorded against `party_name` for display but cannot be a live in-app reviewer; the UI must
 make this distinction obvious rather than silently failing to notify anyone).
 
-`egc_projects/egc_projects/project_profile.py` exposes:
+`egc_projects/egc_projects/project_profile.py` exposes (signatures unchanged since v1 — only
+the internal `parenttype` filter moved from `"EGC Project Profile"` to `"Project"`):
 ```python
 def resolve_role_user(project: str, role_name: str) -> str | None: ...
 def get_stakeholders(project: str) -> list[dict]: ...
@@ -142,10 +172,11 @@ user can still type any name via a Data field fallback if truly novel — do not
 the master list; the field on the child row itself stays a Link so the register stays clean,
 but the master is trivially added to, unlike a hard-coded Select).
 
-`EGC Project Equipment Item` — child table on `EGC Project Profile`: `facility` (Data),
-`department` (Data), `modality` (Link `EGC Modality`), `wbs_node` (Link `EGC WBS Node`, optional
-— ties the equipment to its physical WBS location, e.g. `MRI-01`), `equipment_manufacturer`
-(Link `EGC Equipment Manufacturer`), `equipment_model` (Data), `oem_reference` (Data),
+`EGC Project Equipment Item` — child table, now on `Project` itself
+(`custom_egc_equipment_items`, `parenttype="Project"`): `facility` (Data), `department` (Data),
+`modality` (Link `EGC Modality`), `wbs_node` (Link `EGC WBS Node`, optional — ties the equipment
+to its physical WBS location, e.g. `MRI-01`), `equipment_manufacturer` (Link
+`EGC Equipment Manufacturer`), `equipment_model` (Data), `oem_reference` (Data),
 `equipment_delivery_target` (Date), `room_ready_target` (Date), `oem_installation_target`
 (Date), `commissioning_target` (Date), `notes` (Small Text).
 
@@ -159,26 +190,25 @@ get_project_context(project) -> {
     actual_start_date, actual_end_date},
   percent_complete, company, currency,
   permissions: {financials: bool, edit_profile: bool},
+    # edit_profile is exactly frappe.has_permission("Project", "write", doc=project) — a UI
+    # hint, not a bespoke gate, since editing now happens on the native Project form.
   profile: {
-    project_code, project_stage, sector, project_image, contract_value,   # or null fields
+    project_code, project_stage, sector, project_image, contract_value,   # never null fields
     key_stakeholders: [{role, role_label, party_name, organization, user, user_full_name}],
       # capped to a header-relevant subset (PM, Site Manager, Client, Consultant, OEM) —
-      # the FULL stakeholder/equipment list is fetched separately via get_project_profile()
-  } | null   # null ⇒ no EGC Project Profile row exists yet for this project (new-project
-             # empty state; the Hub must invite the user to create one, never error)
+      # the FULL stakeholder/equipment list is fetched separately via get_project_info()
+  }   # ALWAYS a dict now — the fields live directly on Project, so there is no separate row
+      # whose absence needs representing. An untouched project's fields simply read as blank
+      # (None / "" / []), same as any other fresh Project field.
 }
 ```
 
-New, separate whitelisted methods (added to `api/hub.py` by the Project Information package —
-see Wave A ownership below):
+One whitelisted read method (added to `api/hub.py`):
 ```python
-get_project_profile(project) -> full profile dict incl. every field + full stakeholders[] +
-  equipment_items[]   # gated on Project read permission
-save_project_profile(project, data: dict) -> saved profile dict   # gated on `edit_profile`
-  permission (EGC Project Manager / EGC Project Engineer / System Manager); loads-or-creates
-  the EGC Project Profile doc and applies `data` via doc.update()+doc.save() — reuses native
-  Frappe document validation rather than hand-rolling field-by-field writes.
+get_project_info(project) -> full info dict incl. every field + full stakeholders[] +
+  equipment_items[]   # gated on Project read permission only — read-only, no save counterpart.
 ```
+There is no `save_project_info`. Project Information is edited on the native `Project` form.
 
 ---
 

@@ -176,7 +176,7 @@ def reorder_wbs_nodes(parent: str | None, ordered_names) -> None:
 	# annotation with Pydantic's `validate_python`, not `validate_json`, so a `list[str]`
 	# annotation here would reject the raw string before this function body ever runs (500,
 	# `FrappeTypeError`). Deliberately untyped and parsed manually, matching the same pattern
-	# `api/hub.py`'s `save_project_profile` already uses for its own `data` argument.
+	# `api/submittals.py`'s `create_workflow_template` already uses for its `steps` argument.
 	if isinstance(ordered_names, str):
 		ordered_names = frappe.parse_json(ordered_names)
 	if not ordered_names:

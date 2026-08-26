@@ -112,13 +112,9 @@ class TestSubmittalWorkflow(IntegrationTestCase):
 	# -- fixtures ------------------------------------------------------------------------------
 
 	def _set_stakeholder(self, project, role, user, party_name):
-		if not frappe.db.exists("EGC Project Profile", project):
-			profile = frappe.new_doc("EGC Project Profile")
-			profile.project = project
-		else:
-			profile = frappe.get_doc("EGC Project Profile", project)
-		profile.append("stakeholders", {"role": role, "party_name": party_name, "user": user})
-		profile.save(ignore_permissions=True)
+		doc = frappe.get_doc("Project", project)
+		doc.append("custom_egc_stakeholders", {"role": role, "party_name": party_name, "user": user})
+		doc.save(ignore_permissions=True)
 
 	def _make_document(self, document_number="DOC-001"):
 		doc = frappe.get_doc(

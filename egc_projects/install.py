@@ -93,7 +93,14 @@ def setup() -> None:
 	create_stakeholder_roles()
 	create_modalities()
 	create_equipment_manufacturers()
+	create_project_custom_fields()
 	frappe.db.commit()
+
+
+def create_project_custom_fields() -> None:
+	from egc_projects.egc_projects import project_custom_fields
+
+	project_custom_fields.create()
 
 
 def create_roles() -> None:
