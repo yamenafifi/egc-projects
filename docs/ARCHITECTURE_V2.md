@@ -370,6 +370,29 @@ same "one writer per derived value" rule as document approval status.
   "Siemens Material Approval" style reuse lives — apply a template rather than rebuilding a
   reviewer sequence by hand, exactly per the brief.
 
+### 7a. Expanded Submittal metadata
+
+Per the brief's "Expand Submittal Information": fields that manage a real construction
+submission, not a bare identity. Added where they don't already exist and don't duplicate
+something derivable — `related Activities` is not a field, it is the existing
+`EGC Activity Link` relationship (§ v1 doc), and is not repeated here.
+
+New on **`EGC Submittal`**: `responsible_party` (Data — the contractor/vendor responsible for
+the submission; free text, matching the same "don't force a bad Customer/Supplier shoehorn"
+call made for stakeholders in §2), `received_from` (Data), `submittal_manager` (Link `User`),
+`ball_in_court` (Data, **read-only, engine-set** — mirrors `current_submission_label`'s pattern,
+see §7's Ball in Court subsection), `specification_section` (Data, optional, reserved for future
+spec-section cross-referencing — not used by any logic in v2).
+
+New on **`EGC Submittal Revision`**: `required_submission_date`, `required_approval_date`,
+`final_due_date`, `required_on_site_date` (all Date), `lead_time_days` (Int, optional,
+informational only — no scheduling logic reads it), `ball_in_court_label` (Data, **read-only,
+engine-set**, per §7's Ball in Court subsection).
+
+`current_due_date` on `EGC Submittal` (already existed, fetched from the current submission's
+`due_date`) continues to mean "when a response is due" — `final_due_date` is a distinct,
+contract-level date and is never conflated with it.
+
 ---
 
 ## 8. My Open Items — an extensible action-item registry

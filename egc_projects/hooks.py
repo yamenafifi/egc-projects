@@ -53,6 +53,17 @@ doc_events = {
 	},
 }
 
+# Scheduled Tasks
+# ---------------
+# Mirrors egc_hr's own alert_expiring_documents pattern: a daily digest, deduped per
+# reviewer/step/day inside the function itself (see notifications.py), not a real-time job.
+
+scheduler_events = {
+	"daily": [
+		"egc_projects.egc_projects.notifications.send_due_date_reminders",
+	],
+}
+
 # Fixtures
 # --------
 # Roles are also created by install.py; the fixture keeps them exportable/importable for

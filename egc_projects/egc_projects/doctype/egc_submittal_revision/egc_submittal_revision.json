@@ -1,240 +1,280 @@
 {
-	"actions": [],
-	"allow_rename": 0,
-	"autoname": "format:{submittal}-S{revision_label}",
-	"creation": "2026-08-25 00:00:00.000000",
-	"doctype": "DocType",
-	"editable_grid": 1,
-	"engine": "InnoDB",
-	"field_order": [
-		"submittal",
-		"project",
-		"column_break_1",
-		"revision_label",
-		"submission_seq",
-		"section_break_dates",
-		"date_submitted",
-		"due_date",
-		"column_break_2",
-		"submitted_by",
-		"reviewer",
-		"section_break_documents",
-		"documents",
-		"section_break_status",
-		"submission_status",
-		"column_break_3",
-		"response",
-		"response_date",
-		"responded_by",
-		"response_remarks"
-	],
-	"fields": [
-		{
-			"fieldname": "submittal",
-			"fieldtype": "Link",
-			"in_list_view": 1,
-			"in_standard_filter": 1,
-			"label": "Submittal",
-			"options": "EGC Submittal",
-			"reqd": 1
-		},
-		{
-			"fetch_from": "submittal.project",
-			"fetch_if_empty": 0,
-			"fieldname": "project",
-			"fieldtype": "Link",
-			"in_standard_filter": 1,
-			"label": "Project",
-			"options": "Project",
-			"read_only": 1
-		},
-		{
-			"fieldname": "column_break_1",
-			"fieldtype": "Column Break"
-		},
-		{
-			"fieldname": "revision_label",
-			"fieldtype": "Data",
-			"in_list_view": 1,
-			"label": "Revision Label",
-			"reqd": 1
-		},
-		{
-			"fieldname": "submission_seq",
-			"fieldtype": "Int",
-			"in_list_view": 1,
-			"label": "Submission Sequence",
-			"read_only": 1
-		},
-		{
-			"fieldname": "section_break_dates",
-			"fieldtype": "Section Break",
-			"label": "Dates"
-		},
-		{
-			"fieldname": "date_submitted",
-			"fieldtype": "Date",
-			"label": "Date Submitted"
-		},
-		{
-			"fieldname": "due_date",
-			"fieldtype": "Date",
-			"label": "Due Date"
-		},
-		{
-			"fieldname": "column_break_2",
-			"fieldtype": "Column Break"
-		},
-		{
-			"fieldname": "submitted_by",
-			"fieldtype": "Link",
-			"label": "Submitted By",
-			"options": "User"
-		},
-		{
-			"fieldname": "reviewer",
-			"fieldtype": "Link",
-			"label": "Reviewer",
-			"options": "User"
-		},
-		{
-			"fieldname": "section_break_documents",
-			"fieldtype": "Section Break",
-			"label": "Documents"
-		},
-		{
-			"fieldname": "documents",
-			"fieldtype": "Table",
-			"label": "Documents",
-			"options": "EGC Submittal Document Item"
-		},
-		{
-			"fieldname": "section_break_status",
-			"fieldtype": "Section Break",
-			"label": "Status"
-		},
-		{
-			"allow_on_submit": 1,
-			"default": "Draft",
-			"fieldname": "submission_status",
-			"fieldtype": "Select",
-			"in_list_view": 1,
-			"in_standard_filter": 1,
-			"label": "Submission Status",
-			"options": "Draft\nSubmitted\nUnder Review\nResponded\nCancelled",
-			"read_only": 1
-		},
-		{
-			"fieldname": "column_break_3",
-			"fieldtype": "Column Break"
-		},
-		{
-			"allow_on_submit": 1,
-			"fieldname": "response",
-			"fieldtype": "Select",
-			"in_list_view": 1,
-			"in_standard_filter": 1,
-			"label": "Response",
-			"options": "\nApproved\nApproved with Comments\nRevise & Resubmit\nRejected",
-			"read_only": 1
-		},
-		{
-			"allow_on_submit": 1,
-			"fieldname": "response_date",
-			"fieldtype": "Date",
-			"label": "Response Date",
-			"read_only": 1
-		},
-		{
-			"allow_on_submit": 1,
-			"fieldname": "responded_by",
-			"fieldtype": "Link",
-			"label": "Responded By",
-			"options": "User",
-			"read_only": 1
-		},
-		{
-			"allow_on_submit": 1,
-			"fieldname": "response_remarks",
-			"fieldtype": "Text",
-			"label": "Response Remarks",
-			"read_only": 1
-		}
-	],
-	"index_web_pages_for_search": 1,
-	"is_submittable": 1,
-	"links": [],
-	"module": "EGC Projects",
-	"naming_rule": "Expression",
-	"custom": 0,
-	"name": "EGC Submittal Revision",
-	"owner": "Administrator",
-	"permissions": [
-		{
-			"amend": 1,
-			"cancel": 1,
-			"create": 1,
-			"delete": 1,
-			"email": 1,
-			"export": 1,
-			"print": 1,
-			"read": 1,
-			"report": 1,
-			"role": "System Manager",
-			"share": 1,
-			"submit": 1,
-			"write": 1
-		},
-		{
-			"amend": 1,
-			"cancel": 1,
-			"create": 1,
-			"delete": 1,
-			"email": 1,
-			"export": 1,
-			"print": 1,
-			"read": 1,
-			"report": 1,
-			"role": "EGC Document Controller",
-			"share": 1,
-			"submit": 1,
-			"write": 1
-		},
-		{
-			"amend": 1,
-			"cancel": 1,
-			"create": 1,
-			"delete": 1,
-			"email": 1,
-			"export": 1,
-			"print": 1,
-			"read": 1,
-			"report": 1,
-			"role": "EGC Project Manager",
-			"share": 1,
-			"submit": 1,
-			"write": 1
-		},
-		{
-			"email": 1,
-			"export": 1,
-			"print": 1,
-			"read": 1,
-			"report": 1,
-			"role": "EGC Project Engineer"
-		},
-		{
-			"email": 1,
-			"export": 1,
-			"print": 1,
-			"read": 1,
-			"report": 1,
-			"role": "EGC Project Viewer"
-		}
-	],
-	"search_fields": "submittal,revision_label,project",
-	"sort_field": "modified",
-	"sort_order": "DESC",
-	"states": [],
-	"track_changes": 1
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "format:{submittal}-S{revision_label}",
+ "creation": "2026-08-25 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "submittal",
+  "project",
+  "column_break_1",
+  "revision_label",
+  "submission_seq",
+  "section_break_dates",
+  "date_submitted",
+  "due_date",
+  "required_submission_date",
+  "required_approval_date",
+  "final_due_date",
+  "required_on_site_date",
+  "lead_time_days",
+  "column_break_2",
+  "submitted_by",
+  "reviewer",
+  "section_break_documents",
+  "documents",
+  "section_break_status",
+  "submission_status",
+  "ball_in_court_label",
+  "column_break_3",
+  "response",
+  "response_date",
+  "responded_by",
+  "response_remarks"
+ ],
+ "fields": [
+  {
+   "fieldname": "submittal",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Submittal",
+   "options": "EGC Submittal",
+   "reqd": 1
+  },
+  {
+   "fetch_from": "submittal.project",
+   "fetch_if_empty": 0,
+   "fieldname": "project",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Project",
+   "options": "Project",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "revision_label",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Revision Label",
+   "reqd": 1
+  },
+  {
+   "fieldname": "submission_seq",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Submission Sequence",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_break_dates",
+   "fieldtype": "Section Break",
+   "label": "Dates"
+  },
+  {
+   "fieldname": "date_submitted",
+   "fieldtype": "Date",
+   "label": "Date Submitted"
+  },
+  {
+   "fieldname": "due_date",
+   "fieldtype": "Date",
+   "label": "Due Date"
+  },
+  {
+   "fieldname": "column_break_2",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "submitted_by",
+   "fieldtype": "Link",
+   "label": "Submitted By",
+   "options": "User"
+  },
+  {
+   "fieldname": "reviewer",
+   "fieldtype": "Link",
+   "label": "Reviewer",
+   "options": "User"
+  },
+  {
+   "fieldname": "section_break_documents",
+   "fieldtype": "Section Break",
+   "label": "Documents"
+  },
+  {
+   "fieldname": "documents",
+   "fieldtype": "Table",
+   "label": "Documents",
+   "options": "EGC Submittal Document Item"
+  },
+  {
+   "fieldname": "section_break_status",
+   "fieldtype": "Section Break",
+   "label": "Status"
+  },
+  {
+   "allow_on_submit": 1,
+   "default": "Draft",
+   "fieldname": "submission_status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Submission Status",
+   "options": "Draft\nSubmitted\nUnder Review\nResponded\nCancelled",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_3",
+   "fieldtype": "Column Break"
+  },
+  {
+   "allow_on_submit": 1,
+   "fieldname": "response",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Response",
+   "options": "\nApproved\nApproved with Comments\nRevise & Resubmit\nRejected",
+   "read_only": 1
+  },
+  {
+   "allow_on_submit": 1,
+   "fieldname": "response_date",
+   "fieldtype": "Date",
+   "label": "Response Date",
+   "read_only": 1
+  },
+  {
+   "allow_on_submit": 1,
+   "fieldname": "responded_by",
+   "fieldtype": "Link",
+   "label": "Responded By",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "allow_on_submit": 1,
+   "fieldname": "response_remarks",
+   "fieldtype": "Text",
+   "label": "Response Remarks",
+   "read_only": 1
+  },
+  {
+   "fieldname": "required_submission_date",
+   "fieldtype": "Date",
+   "label": "Required Submission Date"
+  },
+  {
+   "fieldname": "required_approval_date",
+   "fieldtype": "Date",
+   "label": "Required Approval Date"
+  },
+  {
+   "fieldname": "final_due_date",
+   "fieldtype": "Date",
+   "label": "Final Due Date"
+  },
+  {
+   "fieldname": "required_on_site_date",
+   "fieldtype": "Date",
+   "label": "Required On Site Date"
+  },
+  {
+   "fieldname": "lead_time_days",
+   "fieldtype": "Int",
+   "label": "Lead Time (Days)",
+   "description": "Informational only; no scheduling logic reads this."
+  },
+  {
+   "fieldname": "ball_in_court_label",
+   "fieldtype": "Data",
+   "label": "Ball in Court",
+   "read_only": 1,
+   "allow_on_submit": 1,
+   "description": "System-derived from the current review step(s). Never editable directly."
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "is_submittable": 1,
+ "links": [],
+ "module": "EGC Projects",
+ "naming_rule": "Expression",
+ "custom": 0,
+ "name": "EGC Submittal Revision",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "amend": 1,
+   "cancel": 1,
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  },
+  {
+   "amend": 1,
+   "cancel": 1,
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "EGC Document Controller",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  },
+  {
+   "amend": 1,
+   "cancel": 1,
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "EGC Project Manager",
+   "share": 1,
+   "submit": 1,
+   "write": 1
+  },
+  {
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "EGC Project Engineer"
+  },
+  {
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "EGC Project Viewer"
+  }
+ ],
+ "search_fields": "submittal,revision_label,project",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
 }

@@ -1,0 +1,201 @@
+{
+	"actions": [],
+	"allow_rename": 0,
+	"autoname": "hash",
+	"creation": "2026-08-26 00:00:00.000000",
+	"doctype": "DocType",
+	"engine": "InnoDB",
+	"field_order": [
+		"submittal_revision",
+		"project",
+		"column_break_1",
+		"sequence",
+		"is_required",
+		"section_break_reviewer",
+		"reviewer_role",
+		"reviewer_user",
+		"reviewer_label",
+		"section_break_response",
+		"status",
+		"response",
+		"response_date",
+		"responded_by",
+		"response_remarks"
+	],
+	"fields": [
+		{
+			"fieldname": "submittal_revision",
+			"fieldtype": "Link",
+			"in_list_view": 1,
+			"in_standard_filter": 1,
+			"label": "Submission",
+			"options": "EGC Submittal Revision",
+			"reqd": 1
+		},
+		{
+			"fetch_from": "submittal_revision.project",
+			"fieldname": "project",
+			"fieldtype": "Link",
+			"in_standard_filter": 1,
+			"label": "Project",
+			"options": "Project",
+			"read_only": 1,
+			"reqd": 1
+		},
+		{
+			"fieldname": "column_break_1",
+			"fieldtype": "Column Break"
+		},
+		{
+			"description": "Steps sharing the same Sequence are the current parallel review stage.",
+			"fieldname": "sequence",
+			"fieldtype": "Int",
+			"in_list_view": 1,
+			"label": "Sequence",
+			"reqd": 1
+		},
+		{
+			"default": "1",
+			"fieldname": "is_required",
+			"fieldtype": "Check",
+			"label": "Required"
+		},
+		{
+			"fieldname": "section_break_reviewer",
+			"fieldtype": "Section Break",
+			"label": "Reviewer"
+		},
+		{
+			"fieldname": "reviewer_role",
+			"fieldtype": "Link",
+			"in_standard_filter": 1,
+			"label": "Reviewer Role",
+			"options": "EGC Stakeholder Role"
+		},
+		{
+			"description": "Empty when this role's stakeholder has no Frappe login — a valid state (a pure external party), not an error. See reviewer_label for what to display instead.",
+			"fieldname": "reviewer_user",
+			"fieldtype": "Link",
+			"in_list_view": 1,
+			"in_standard_filter": 1,
+			"label": "Reviewer User",
+			"options": "User"
+		},
+		{
+			"description": "Display name to use when there is no reviewer_user — system-set at instantiation, e.g. the external party's name.",
+			"fieldname": "reviewer_label",
+			"fieldtype": "Data",
+			"label": "Reviewer Label",
+			"read_only": 1
+		},
+		{
+			"fieldname": "section_break_response",
+			"fieldtype": "Section Break",
+			"label": "Response"
+		},
+		{
+			"default": "Pending",
+			"fieldname": "status",
+			"fieldtype": "Select",
+			"in_list_view": 1,
+			"in_standard_filter": 1,
+			"label": "Status",
+			"options": "Pending\nIn Review\nResponded\nSkipped",
+			"read_only": 1
+		},
+		{
+			"fieldname": "response",
+			"fieldtype": "Select",
+			"in_list_view": 1,
+			"label": "Response",
+			"options": "\nApproved\nApproved with Comments\nRevise & Resubmit\nRejected",
+			"read_only": 1
+		},
+		{
+			"fieldname": "response_date",
+			"fieldtype": "Date",
+			"label": "Response Date",
+			"read_only": 1
+		},
+		{
+			"fieldname": "responded_by",
+			"fieldtype": "Link",
+			"label": "Responded By",
+			"options": "User",
+			"read_only": 1
+		},
+		{
+			"fieldname": "response_remarks",
+			"fieldtype": "Small Text",
+			"label": "Response Remarks",
+			"read_only": 1
+		}
+	],
+	"index_web_pages_for_search": 1,
+	"links": [],
+	"module": "EGC Projects",
+	"naming_rule": "Hash",
+	"custom": 0,
+	"name": "EGC Submittal Review Step",
+	"owner": "Administrator",
+	"permissions": [
+		{
+			"create": 1,
+			"delete": 1,
+			"email": 1,
+			"export": 1,
+			"print": 1,
+			"read": 1,
+			"report": 1,
+			"role": "System Manager",
+			"share": 1,
+			"write": 1
+		},
+		{
+			"create": 1,
+			"delete": 1,
+			"email": 1,
+			"export": 1,
+			"print": 1,
+			"read": 1,
+			"report": 1,
+			"role": "EGC Document Controller",
+			"share": 1,
+			"write": 1
+		},
+		{
+			"create": 1,
+			"delete": 1,
+			"email": 1,
+			"export": 1,
+			"print": 1,
+			"read": 1,
+			"report": 1,
+			"role": "EGC Project Manager",
+			"share": 1,
+			"write": 1
+		},
+		{
+			"email": 1,
+			"export": 1,
+			"print": 1,
+			"read": 1,
+			"report": 1,
+			"role": "EGC Project Engineer",
+			"write": 1
+		},
+		{
+			"email": 1,
+			"export": 1,
+			"print": 1,
+			"read": 1,
+			"report": 1,
+			"role": "EGC Project Viewer"
+		}
+	],
+	"search_fields": "submittal_revision,project,reviewer_user",
+	"sort_field": "modified",
+	"sort_order": "DESC",
+	"states": [],
+	"track_changes": 1
+}
