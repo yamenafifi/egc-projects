@@ -391,6 +391,13 @@ def get_activities(project: str, filters=None) -> list[dict]:
 			"status",
 			"percent_complete",
 			"responsible_user",
+			"responsible_supplier",
+			"duration_days",
+			"is_milestone",
+			"actual_start_date",
+			"actual_end_date",
+			"forecast_start_date",
+			"forecast_end_date",
 		],
 		order_by="lft asc",
 	)
@@ -399,7 +406,15 @@ def get_activities(project: str, filters=None) -> list[dict]:
 
 	link_counts = _activity_link_counts([row.name for row in rows])
 	wbs_labels = _wbs_labels({row.wbs_node for row in rows if row.wbs_node})
+
+	# Depth from the parent chain, exactly like the EGC Activity Status Summary report — `lft`
+	# order guarantees a row's parent was already assigned its depth by the time this row is
+	# visited, so one pass is enough; no need to re-walk the tree per row.
+	depth_by_name: dict[str, int] = {}
 	for row in rows:
+		parent = row.parent_egc_activity
+		row["indent"] = depth_by_name.get(parent, -1) + 1 if parent in depth_by_name else 0
+		depth_by_name[row.name] = row["indent"]
 		row["is_overdue"] = activity_is_overdue(row.status, row.planned_end_date)
 		row["link_counts"] = link_counts.get(row.name, {})
 		# The raw WBS record name is `{project}-{code}`, which reads as noise in a register

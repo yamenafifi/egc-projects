@@ -1,12 +1,14 @@
 <script setup>
 import { computed, ref, watch, onMounted } from "vue";
 import { get_activities } from "../api";
+import { create_activity as create_activity_record } from "./activities_api";
 import { useHubResource } from "../composables/useHubResource";
 import { consumeOverdueIntent } from "../composables/useOverdueIntent";
 import LoadingState from "./LoadingState.vue";
 import ErrorState from "./ErrorState.vue";
 import EmptyState from "./EmptyState.vue";
 import StatusPill from "./StatusPill.vue";
+import ActivityDetail from "./ActivityDetail.vue";
 
 const props = defineProps({
 	project: { type: String, required: true },
@@ -15,6 +17,27 @@ const props = defineProps({
 
 const { data, loading, error, reload } = useHubResource(() => get_activities(props.project));
 watch(() => props.project, reload, { immediate: true });
+
+// A client-side hint only, same discipline as every write action elsewhere in this Hub — the
+// server's own permission checks (validators.require_project_permission +
+// frappe.has_permission in api/activities.py) are the actual boundary; this just avoids
+// showing a button a Viewer would immediately get rejected for.
+const WRITE_ROLES = ["EGC Project Manager", "EGC Project Engineer", "System Manager"];
+const can_write = computed(() => (frappe.user_roles || []).some((role) => WRITE_ROLES.includes(role)));
+
+const selected_activity = ref(null);
+
+function open_detail(name) {
+	selected_activity.value = name;
+}
+
+function close_detail() {
+	selected_activity.value = null;
+}
+
+function on_detail_changed() {
+	reload();
+}
 
 const status_filter = ref("");
 const discipline_filter = ref("");
@@ -41,16 +64,61 @@ const filtered = computed(() => {
 	});
 });
 
-function open_form(row) {
-	frappe.set_route("Form", "EGC Activity", row.name);
-}
-
 function create_activity() {
+	// Empty-state action for a project with no activities at all yet — a bare top-level
+	// creation still goes to the native "New" form (there is no sensible quick-add target
+	// without an existing group to attach to). Once at least one activity exists, the
+	// per-row "+" quick-add and the detail drawer's "Add Child Activity" cover routine growth
+	// of the tree without leaving the Hub.
 	frappe.new_doc("EGC Activity", { project: props.project });
 }
 
 function format_date(value) {
 	return value ? frappe.datetime.str_to_user(value) : "—";
+}
+
+// duration_days is an Int field with no nullable representation in Frappe (see
+// activity_control.py) — 0 is the documented "not computed" sentinel, never a real duration.
+function format_duration(value) {
+	return value ? __("{0}d", [value]) : "—";
+}
+
+function open_quick_add(row) {
+	const dialog = new frappe.ui.Dialog({
+		title: __("Add Child Activity"),
+		fields: [
+			{ fieldname: "activity_code", fieldtype: "Data", label: __("Activity Code"), reqd: 1 },
+			{ fieldname: "activity_name", fieldtype: "Data", label: __("Activity Name"), reqd: 1 },
+			{ fieldname: "is_group", fieldtype: "Check", label: __("Is Group") },
+			{
+				fieldname: "wbs_node",
+				fieldtype: "Link",
+				label: __("WBS Node"),
+				options: "EGC WBS Node",
+				default: row.wbs_node,
+				get_query: () => ({ filters: { project: props.project } }),
+			},
+			{
+				fieldname: "discipline",
+				fieldtype: "Link",
+				label: __("Discipline"),
+				options: "EGC Discipline",
+				default: row.discipline,
+			},
+		],
+		primary_action_label: __("Create"),
+		primary_action(values) {
+			create_activity_record({ ...values, project: props.project, parent_egc_activity: row.name })
+				.then(() => {
+					dialog.hide();
+					reload();
+				})
+				.catch((e) => {
+					frappe.msgprint({ title: __("Could Not Create Activity"), message: e.message, indicator: "red" });
+				});
+		},
+	});
+	dialog.show();
 }
 </script>
 
@@ -94,9 +162,12 @@ function format_date(value) {
 							<th>{{ __("Discipline") }}</th>
 							<th>{{ __("Planned Start") }}</th>
 							<th>{{ __("Planned Finish") }}</th>
+							<th>{{ __("Duration") }}</th>
+							<th>{{ __("Actual Finish") }}</th>
 							<th>{{ __("Status") }}</th>
 							<th>{{ __("% Complete") }}</th>
 							<th>{{ __("Responsible") }}</th>
+							<th v-if="can_write"></th>
 						</tr>
 					</thead>
 					<tbody>
@@ -104,15 +175,22 @@ function format_date(value) {
 							v-for="row in filtered"
 							:key="row.name"
 							class="hub-table__row--clickable"
-							@click="open_form(row)"
+							@click="open_detail(row.name)"
 						>
-							<td>{{ row.activity_code }}</td>
-							<td>{{ row.activity_name }}</td>
+							<td>
+								<span class="hub-activities__indent" :style="{ width: (row.indent || 0) * 18 + 'px' }" />
+								{{ row.activity_code }}
+							</td>
+							<td>
+								{{ row.activity_name }}
+								<span v-if="row.is_milestone" class="hub-activities__milestone" :title="__('Milestone')" />
+							</td>
 							<td>
 								<a
 									v-if="row.wbs_node"
 									:href="`/app/egc-wbs-node/${encodeURIComponent(row.wbs_node)}`"
 									:title="row.wbs_node"
+									@click.stop
 									>{{ row.wbs_label || row.wbs_node }}</a
 								>
 								<span v-else>—</span>
@@ -123,6 +201,8 @@ function format_date(value) {
 								{{ format_date(row.planned_end_date) }}
 								<span v-if="row.is_overdue" class="hub-table__overdue-tag">{{ __("Overdue") }}</span>
 							</td>
+							<td>{{ format_duration(row.duration_days) }}</td>
+							<td>{{ format_date(row.actual_end_date) }}</td>
 							<td><StatusPill :status="row.status" /></td>
 							<td>
 								<div class="hub-percent">
@@ -132,16 +212,51 @@ function format_date(value) {
 									<span class="hub-percent__value">{{ Math.round(row.percent_complete || 0) }}%</span>
 								</div>
 							</td>
-							<td>{{ row.responsible_user || "—" }}</td>
+							<td>{{ row.responsible_user || row.responsible_supplier || "—" }}</td>
+							<td v-if="can_write">
+								<button
+									type="button"
+									class="btn btn-xs btn-default"
+									:title="__('Add child activity')"
+									@click.stop="open_quick_add(row)"
+								>
+									+
+								</button>
+							</td>
 						</tr>
 					</tbody>
 				</table>
 			</div>
 		</template>
+
+		<ActivityDetail
+			v-if="selected_activity"
+			:activity="selected_activity"
+			:project="project"
+			:can-write="can_write"
+			@close="close_detail"
+			@changed="on_detail_changed"
+			@open-activity="open_detail"
+		/>
 	</div>
 </template>
 
 <style scoped>
+.hub-activities__indent {
+	display: inline-block;
+	vertical-align: middle;
+}
+
+.hub-activities__milestone {
+	display: inline-block;
+	width: 8px;
+	height: 8px;
+	margin-left: 6px;
+	transform: rotate(45deg);
+	background: var(--blue-500, var(--text-color));
+	vertical-align: middle;
+}
+
 .hub-toolbar__check {
 	display: flex;
 	align-items: center;

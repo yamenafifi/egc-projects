@@ -47,6 +47,8 @@ _ACTIVITY_DETAIL_FIELDS = (
 	"responsible_user",
 	"responsible_supplier",
 	"description",
+	"creation",
+	"modified",
 )
 
 _CHILD_ROW_FIELDS = (
