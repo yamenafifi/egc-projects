@@ -1,8 +1,12 @@
+<!-- The Hub's slim top identity bar — everything that used to live in the old boxed
+"HubHeader" card except the project switcher (now HubSidebar.vue, since switching projects is a
+navigation act, not identity) and the stakeholder chips (now the Project Info tool's own job —
+a header trying to show the full key-stakeholder list is exactly the "crammed form" look this
+redesign moves away from; a name/status/stage/progress strip is what a persistent top bar in an
+independent tool actually needs). -->
 <script setup>
-import { computed, ref } from "vue";
+import { computed } from "vue";
 import StatusPill from "./StatusPill.vue";
-import ProjectLinkControl from "./ProjectLinkControl.vue";
-import StakeholderChips from "./StakeholderChips.vue";
 import QuickActions from "./QuickActions.vue";
 import { useHubRoute } from "../composables/useHubRoute";
 
@@ -11,36 +15,23 @@ const props = defineProps({
 	context: { type: Object, default: null },
 	loading: { type: Boolean, default: false },
 });
-const emit = defineEmits(["switch-project"]);
+defineEmits(["toggle-sidebar"]);
 
 const { setTab } = useHubRoute();
-const switching = ref(false);
 
 // ARCHITECTURE_V2.md §1: Project Information lives directly on `Project`'s own custom fields
 // now, so `context.profile` is always a dict, never null — `has_profile_data` (not `profile`
 // itself) is what distinguishes "nothing filled in yet" from a populated project, since every
 // key still resolves to `undefined`/`""`/`[]` on a fresh Project either way.
 const profile = computed(() => props.context?.profile || null);
-const key_stakeholders = computed(() => (profile.value?.key_stakeholders || []).slice(0, 3));
 const has_profile_data = computed(() => {
 	const p = profile.value;
 	if (!p) return false;
-	return Boolean(p.project_code || p.project_stage || p.sector || p.contract_value) || key_stakeholders.value.length > 0;
+	return Boolean(p.project_code || p.project_stage || p.sector || p.contract_value || p.key_stakeholders?.length);
 });
 const project_details_label = computed(() =>
 	has_profile_data.value ? __("Project Details") : __("+ Add Project Information")
 );
-
-function on_switch(value) {
-	// Deferred to a macrotask: this fires from inside Frappe's own Link control change
-	// handler, which keeps running its own async validation after calling ours. Unmounting
-	// ProjectLinkControl's DOM synchronously here races that in-flight work and throws inside
-	// Frappe's control code. A setTimeout(0) lets that finish before we tear the control down.
-	setTimeout(() => {
-		switching.value = false;
-	}, 0);
-	if (value && value !== props.project) emit("switch-project", value);
-}
 
 function open_form() {
 	frappe.set_route("Form", "Project", props.project);
@@ -61,141 +52,117 @@ function format_date_range(dates) {
 </script>
 
 <template>
-	<div class="hub-header">
-		<div class="hub-header__identity">
-			<div class="hub-header__title-row">
-				<a class="hub-header__project" href="#" @click.prevent="open_form">{{ project }}</a>
-				<StatusPill v-if="context" :status="context.status" />
-			</div>
+	<div class="egc-topbar">
+		<button
+			type="button"
+			class="egc-topbar__menu-btn"
+			:aria-label="__('Open navigation')"
+			@click="$emit('toggle-sidebar')"
+		>
+			<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+				<path d="M3 6h18M3 12h18M3 18h18" />
+			</svg>
+		</button>
+
+		<div class="egc-topbar__identity">
+			<a class="egc-topbar__project-name" href="#" @click.prevent="open_form">
+				{{ context ? context.project_name : project }}
+			</a>
+			<StatusPill v-if="context" :status="context.status" />
 
 			<template v-if="context">
-				<div class="hub-header__meta">
-					<span class="hub-header__project-name">{{ context.project_name }}</span>
-					<span v-if="context.customer" class="hub-header__sep">·</span>
-					<span v-if="context.customer">{{ context.customer }}</span>
-				</div>
-
-				<StakeholderChips v-if="key_stakeholders.length" :stakeholders="key_stakeholders" />
-
-				<div v-if="profile.project_stage || format_date_range(context.dates)" class="hub-header__meta hub-header__meta--secondary">
-					<span v-if="profile.project_stage">{{ __("Stage") }}: {{ profile.project_stage }}</span>
-					<span v-if="profile.project_stage && format_date_range(context.dates)" class="hub-header__sep">·</span>
-					<span v-if="format_date_range(context.dates)">{{ format_date_range(context.dates) }}</span>
-				</div>
+				<span v-if="context.customer" class="egc-topbar__sep">·</span>
+				<span v-if="context.customer" class="egc-topbar__meta">{{ context.customer }}</span>
+				<template v-if="profile && profile.project_stage">
+					<span class="egc-topbar__sep">·</span>
+					<span class="egc-topbar__meta">{{ __("Stage") }}: {{ profile.project_stage }}</span>
+				</template>
+				<template v-if="format_date_range(context.dates)">
+					<span class="egc-topbar__sep">·</span>
+					<span class="egc-topbar__meta">{{ format_date_range(context.dates) }}</span>
+				</template>
 			</template>
-
-			<div v-else-if="loading" class="hub-header__meta hub-header__meta--loading">{{ __("Loading…") }}</div>
+			<span v-else-if="loading" class="egc-topbar__meta egc-topbar__meta--loading">{{ __("Loading…") }}</span>
 		</div>
 
-		<div class="hub-header__complete" v-if="context && context.percent_complete !== null && context.percent_complete !== undefined">
-			<div class="hub-header__complete-label">{{ __("Complete") }}</div>
-			<div class="hub-header__progress">
-				<div class="hub-header__progress-bar" :style="{ width: (context.percent_complete || 0) + '%' }" />
+		<div
+			class="egc-topbar__complete"
+			v-if="context && context.percent_complete !== null && context.percent_complete !== undefined"
+		>
+			<div class="egc-topbar__progress">
+				<div class="egc-topbar__progress-bar" :style="{ width: (context.percent_complete || 0) + '%' }" />
 			</div>
-			<div class="hub-header__complete-value">{{ Math.round(context.percent_complete || 0) }}%</div>
+			<div class="egc-topbar__complete-value">{{ Math.round(context.percent_complete || 0) }}%</div>
 		</div>
 
-		<div class="hub-header__actions">
+		<div class="egc-topbar__actions">
 			<button
 				v-if="context"
 				type="button"
 				class="btn btn-sm btn-default"
-				:class="{ 'hub-header__profile-cta': !has_profile_data }"
+				:class="{ 'egc-topbar__profile-cta': !has_profile_data }"
 				@click="goto_project_info"
 			>
 				{{ project_details_label }}
 			</button>
-
 			<QuickActions v-if="context" />
-
-			<div class="hub-header__switch">
-				<button
-					v-if="!switching"
-					class="btn btn-sm btn-default"
-					@click="switching = true"
-				>
-					{{ __("Switch Project") }}
-				</button>
-				<ProjectLinkControl
-					v-else
-					:model-value="project"
-					:placeholder="__('Search projects…')"
-					@update:model-value="on_switch"
-				/>
-			</div>
 		</div>
 	</div>
 </template>
 
 <style scoped>
-.hub-header {
+.egc-topbar {
 	display: flex;
-	align-items: flex-start;
-	gap: 20px;
-	padding: 14px 18px;
-	border: 1px solid var(--border-color);
-	border-radius: var(--border-radius-lg);
+	align-items: center;
+	gap: 18px;
+	padding: 12px 24px;
+	border-bottom: 1px solid var(--border-color);
 	background: var(--fg-color);
-	margin-bottom: 14px;
 	flex-wrap: wrap;
 }
 
-.hub-header__identity {
-	flex: 1 1 260px;
-	min-width: 220px;
-}
-
-.hub-header__title-row {
+.egc-topbar__identity {
 	display: flex;
 	align-items: center;
-	gap: 10px;
+	flex-wrap: wrap;
+	gap: 8px;
+	flex: 1 1 320px;
+	min-width: 0;
 }
 
-.hub-header__project {
-	font-size: var(--text-lg);
+.egc-topbar__project-name {
+	font-size: var(--text-md);
 	font-weight: 600;
 	color: var(--text-color);
 }
 
-.hub-header__project:hover {
+.egc-topbar__project-name:hover {
 	color: var(--text-color);
 	text-decoration: underline;
 }
 
-.hub-header__meta {
-	margin-top: 4px;
+.egc-topbar__meta {
 	font-size: var(--text-sm);
-	color: var(--text-muted);
-}
-
-.hub-header__meta--loading {
-	font-style: italic;
-}
-
-.hub-header__meta--secondary {
-	display: flex;
-	flex-wrap: wrap;
-	gap: 4px 0;
-}
-
-.hub-header__sep {
-	margin: 0 6px;
-}
-
-.hub-header__complete {
-	display: flex;
-	align-items: center;
-	gap: 8px;
-	flex: 0 0 220px;
-}
-
-.hub-header__complete-label {
-	font-size: var(--text-xs);
 	color: var(--text-muted);
 	white-space: nowrap;
 }
 
-.hub-header__progress {
+.egc-topbar__meta--loading {
+	font-style: italic;
+}
+
+.egc-topbar__sep {
+	color: var(--text-muted);
+}
+
+.egc-topbar__complete {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex: 0 0 160px;
+}
+
+.egc-topbar__progress {
 	flex: 1;
 	height: 6px;
 	border-radius: var(--border-radius-full);
@@ -203,33 +170,50 @@ function format_date_range(dates) {
 	overflow: hidden;
 }
 
-.hub-header__progress-bar {
+.egc-topbar__progress-bar {
 	height: 100%;
 	background: var(--dark-green-500, var(--green-500));
 	border-radius: var(--border-radius-full);
 }
 
-.hub-header__complete-value {
+.egc-topbar__complete-value {
 	font-size: var(--text-xs);
 	color: var(--text-muted);
 	width: 34px;
 	text-align: right;
 }
 
-.hub-header__actions {
+.egc-topbar__actions {
 	display: flex;
 	align-items: center;
 	gap: 8px;
-	flex-wrap: wrap;
 	flex: 0 0 auto;
 }
 
-.hub-header__profile-cta {
+.egc-topbar__profile-cta {
 	color: var(--text-muted);
 	border-style: dashed;
 }
 
-.hub-header__switch {
+.egc-topbar__menu-btn {
+	display: none;
+	appearance: none;
+	border: none;
+	background: none;
+	cursor: pointer;
+	padding: 4px;
+	color: var(--text-color);
 	flex: 0 0 auto;
+}
+
+.egc-topbar__menu-btn svg {
+	width: 22px;
+	height: 22px;
+}
+
+@media (max-width: 900px) {
+	.egc-topbar__menu-btn {
+		display: block;
+	}
 }
 </style>

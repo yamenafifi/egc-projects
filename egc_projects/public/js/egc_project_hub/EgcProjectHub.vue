@@ -3,7 +3,7 @@ import { ref, computed, watch } from "vue";
 import { useHubRoute, TABS } from "./composables/useHubRoute";
 import { get_project_context } from "./api";
 import HubHeader from "./components/HubHeader.vue";
-import TabNav from "./components/TabNav.vue";
+import HubSidebar from "./components/HubSidebar.vue";
 import ProjectPicker from "./components/ProjectPicker.vue";
 import LoadingState from "./components/LoadingState.vue";
 import ErrorState from "./components/ErrorState.vue";
@@ -35,6 +35,7 @@ const TAB_LABELS = {
 const context = ref(null);
 const context_loading = ref(false);
 const context_error = ref("");
+const sidebar_open = ref(false);
 
 // The Financials tab is hidden entirely (not just its content) when the user lacks financial
 // visibility — the tab list only shows it once get_project_context() confirms
@@ -91,39 +92,90 @@ watch(context, (ctx) => {
 </script>
 
 <template>
-	<div class="hub">
+	<div class="egc-shell">
 		<ProjectPicker v-if="!route.project" @select="setProject" />
 
 		<template v-else>
-			<HubHeader
+			<HubSidebar
 				:project="route.project"
-				:context="context"
-				:loading="context_loading"
+				:project-name="context ? context.project_name : ''"
+				:tabs="tab_defs"
+				:active="route.tab"
+				:open="sidebar_open"
+				@select="setTab"
 				@switch-project="setProject"
+				@close="sidebar_open = false"
 			/>
 
-			<ErrorState v-if="context_error" :message="context_error" @retry="load_context" />
-
-			<template v-else>
-				<TabNav :tabs="tab_defs" :active="route.tab" @select="setTab" />
-
-				<LoadingState v-if="context_loading && !context" :rows="6" />
-
-				<component
-					:is="tab_component"
-					v-else-if="context"
-					:key="route.tab + ':' + route.project"
+			<div class="egc-shell__main">
+				<HubHeader
 					:project="route.project"
 					:context="context"
+					:loading="context_loading"
+					@toggle-sidebar="sidebar_open = !sidebar_open"
 				/>
-			</template>
+
+				<div class="egc-shell__content">
+					<ErrorState v-if="context_error" :message="context_error" @retry="load_context" />
+
+					<template v-else>
+						<LoadingState v-if="context_loading && !context" :rows="6" />
+
+						<component
+							:is="tab_component"
+							v-else-if="context"
+							:key="route.tab + ':' + route.project"
+							:project="route.project"
+							:context="context"
+						/>
+					</template>
+				</div>
+			</div>
 		</template>
 	</div>
 </template>
 
 <style>
-.hub {
-	padding: 4px 2px 24px;
+/* Design tokens for the Hub's own shell chrome (sidebar/topbar) — deliberately built from
+   Frappe's existing semantic CSS variables (--control-bg, --border-color, --primary, ...)
+   rather than a hand-rolled parallel light/dark palette, so the shell tracks Desk's theme
+   automatically instead of drifting out of sync with it. */
+:root {
+	--egc-sidebar-bg: var(--fg-color);
+	--egc-sidebar-border: var(--border-color);
+	--egc-sidebar-text: var(--text-color);
+	--egc-sidebar-text-muted: var(--text-muted);
+	--egc-sidebar-hover: var(--control-bg);
+	--egc-sidebar-active-bg: var(--bg-light-blue, var(--control-bg));
+	--egc-accent: var(--primary, var(--blue-500));
+	--egc-accent-contrast: white;
+}
+
+/* Takes over the full Desk content area below the navbar (egc_project_hub.js hides the
+   standard page-head bar) — a fixed-height flex row: sidebar + a scrollable main column, not a
+   page that grows and scrolls as a whole the way a themed DocType view does. */
+.egc-shell {
+	display: flex;
+	/* `.layout-main-section` (this component's own mount point) is already sized by Frappe's
+	   own layout CSS to exactly the space available below Desk's chrome — inheriting `100%` is
+	   correct; independently subtracting `--navbar-height` here double-counts it. */
+	height: 100%;
+	background: var(--bg-color);
+}
+
+.egc-shell__main {
+	flex: 1 1 auto;
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+	height: 100%;
+}
+
+.egc-shell__content {
+	flex: 1 1 auto;
+	min-height: 0;
+	overflow-y: auto;
+	padding: 20px 24px 32px;
 }
 
 /* Shared table shell used by every register tab (WBS excluded — it renders a tree). Tables

@@ -469,3 +469,49 @@ a future source is a new function plus one line here, not a schema change. Expos
 
 10 new tests (`test_financial_transactions.py`) plus 12 more in `test_hub_api.py`
 (health + My Open Items); full suite at 161.
+
+### Post-Wave-E: user-directed rework — Project Information relocation and shell redesign
+
+Two changes driven directly by explicit user feedback on the shipped v2 Hub, not from the
+brief's own Wave plan:
+
+**Project Information moved off a satellite doctype onto `Project` itself as Custom Fields.**
+Full rationale in `docs/ARCHITECTURE_V2.md` §1 — the short version: v1's own `EGC Project
+Profile` doctype was built on an unverified assumption that Custom Fields on `Project` would
+collide with `egc_hr`'s. They don't (`egc_hr` already extends `Project` with `custom_egc_*`
+fields the exact same way), and the satellite doctype meant Project Information was edited
+through a bespoke Hub-side Vue form instead of the *native* `Project` form — which is exactly
+where `egc_hr`'s own Supervisors/Project Location fields already live. `project_custom_fields.py`
+(new) defines the whole field set under one `Tab Break` ("EGC Project Info"); `ProjectInfoTab.vue`
+is now read-only with a link out to the native form. `EGC Project Profile` doctype deleted
+entirely (one near-empty demo row migrated, not lost).
+
+**The Hub's shell was rebuilt as a sidebar-navigated independent app, replacing the horizontal
+tab bar.** The old shell — a boxed header card + a Bootstrap-style tab strip, all sitting inside
+Desk's own page-head/breadcrumb bar — read as "a themed DocType view," not a distinct tool. Now:
+`egc_project_hub.js` calls `wrapper.page.page_head.hide()` (the same technique Print Designer
+uses, `frappe.ui.pages["print-designer"]`) so the Hub owns the entire content area below Desk's
+navbar. `HubSidebar.vue` (new) is a persistent left icon rail — Procore's own "tool switcher"
+pattern — replacing `TabNav.vue` (deleted), with the project switcher and brand mark folded into
+it too (project switching is a navigation act, not header identity). `HubHeader.vue` shrank to a
+single-row top bar (name/status/stage/dates/progress/actions only — no more project switcher, no
+more stakeholder chips, both redundant with the sidebar/Project Info tool). New `--egc-*` CSS
+tokens for the shell chrome are aliased to Frappe's own existing semantic variables
+(`--control-bg`, `--border-color`, `--primary`, ...) rather than a hand-rolled parallel palette,
+so the shell tracks Desk's light/dark theme automatically — verified live in both. Below ~900px
+the sidebar becomes an off-canvas drawer behind a hamburger button (`HubSidebar.vue`'s own
+`@media` block) rather than staying a fixed 232px column that would eat most of a phone screen.
+
+Two real layout bugs found and fixed via live browser + DOM introspection while building this,
+not caught by eyeballing alone: (1) a `margin: calc(-1 * var(--page-head-height))` meant to
+reclaim the hidden page-head's space applied to *all four sides* via shorthand, shoving the
+whole shell 48px left as well as up — removed; `page_head.hide()` already leaves no gap to
+reclaim. (2) `.egc-shell { height: calc(100vh - var(--navbar-height)) }` double-subtracted the
+navbar height — `.layout-main-section` (the Hub's own mount point) is already sized by Frappe's
+own layout CSS to exactly the space available below Desk's chrome, navbar included, whether or
+not a navbar is actually visible in a given runtime (traced via `getComputedStyle`/
+`getBoundingClientRect` on every ancestor up to `#body` to confirm) — fixed to `height: 100%`.
+
+No backend changes in this pass — `docs/ARCHITECTURE_V2.md` §1-§4 rewritten to match the new
+Project Information model; full suite still 161 (9 of which moved from `test_project_profile.py`
+to `test_project_info.py`, testing the new field-based model instead of the deleted doctype).

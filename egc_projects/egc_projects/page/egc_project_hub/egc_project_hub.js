@@ -3,7 +3,13 @@ frappe.pages["egc-project-hub"].on_page_load = function (wrapper) {
 		parent: wrapper,
 		title: __("EGC Project Hub"),
 		single_column: true,
+		hide_sidebar: true,
 	});
+	// The Hub owns its own header/navigation shell (a sidebar tool switcher, not Desk's
+	// generic breadcrumb+title+buttons bar) — same technique Print Designer uses
+	// (frappe.ui.pages["print-designer"], print_designer.js) to read as an independent app
+	// rather than a themed Desk page.
+	wrapper.page.page_head.hide();
 
 	// hot reload in development
 	if (frappe.boot.developer_mode) {
