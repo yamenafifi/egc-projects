@@ -33,6 +33,20 @@ def get_columns():
 			"options": "EGC Discipline",
 			"width": 110,
 		},
+		{
+			"fieldname": "drawing_set",
+			"label": _("Set"),
+			"fieldtype": "Link",
+			"options": "EGC Drawing Set",
+			"width": 120,
+		},
+		{
+			"fieldname": "drawing_area",
+			"label": _("Area"),
+			"fieldtype": "Link",
+			"options": "EGC Drawing Area",
+			"width": 120,
+		},
 		{"fieldname": "current_revision_label", "label": _("Current Rev"), "fieldtype": "Data", "width": 100},
 		{"fieldname": "approval_status", "label": _("Approval Status"), "fieldtype": "Data", "width": 160},
 		{"fieldname": "current_revision_date", "label": _("Revision Date"), "fieldtype": "Date", "width": 110},
@@ -64,6 +78,10 @@ def get_data(filters):
 		query_filters["discipline"] = filters.discipline
 	if filters.get("approval_status"):
 		query_filters["approval_status"] = filters.approval_status
+	if filters.get("drawing_set"):
+		query_filters["drawing_set"] = filters.drawing_set
+	if filters.get("drawing_area"):
+		query_filters["drawing_area"] = filters.drawing_area
 
 	return frappe.get_all(
 		"EGC Project Document",
@@ -73,6 +91,8 @@ def get_data(filters):
 			"document_number",
 			"title",
 			"discipline",
+			"drawing_set",
+			"drawing_area",
 			"current_revision_label",
 			"approval_status",
 			"current_revision_date",

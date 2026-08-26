@@ -422,3 +422,20 @@ asserted the engine's own field writes rather than what the UI actually reads):
   so a mid-workflow stage advance left the header showing the *previous* stage's reviewer until
   the whole submission resolved. Fixed by propagating on every Ball in Court recompute; covered by
   a regression test asserting the Submittal's field changes mid-workflow, not just at the end.
+
+### Wave D: Drawing Sets/Areas and publish readiness
+
+`EGC Drawing Set`/`EGC Drawing Area` (new, project-scoped, flat — deliberately not a tree, and
+not the future full Project Location hierarchy). New fields on `EGC Project Document`
+(`drawing_set`, `drawing_area`, `drawing_date`, `received_date`, same-project validated) and on
+`EGC Project Document Revision` (`readiness`: Uploaded/Reviewed/Ready to Publish — internal
+pre-issue metadata only; `submit()` remains the one and only act of publishing, `readiness` adds
+no new lifecycle state and is not `allow_on_submit`, so the framework itself locks it once
+Issued). `api/documents.py` gains `update_revision_readiness` (own endpoint, since `readiness`
+can change repeatedly before a Draft revision is ever issued, unlike the create-once fields).
+`get_document_detail` gains an `is_drawing` flag (looked up from `document_type`) so
+`DocumentDetail.vue` shows the Drawing metadata block and the readiness column only for
+documents whose type is actually flagged as a drawing — reused as the drawing detail workspace
+rather than building a parallel component, per "a Drawing is a Document with drawing-specific
+semantics." `DrawingsTab.vue`/`EGC Drawing Register` both gain Set/Area columns and filters.
+12 new tests (`test_drawings.py`).

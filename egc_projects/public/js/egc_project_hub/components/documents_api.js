@@ -60,3 +60,7 @@ export function create_document_revision(args) {
 export function submit_document_revision(revision) {
 	return call_documents("submit_document_revision", { revision });
 }
+
+export function update_revision_readiness(revision, readiness) {
+	return call_documents("update_revision_readiness", { revision, readiness });
+}

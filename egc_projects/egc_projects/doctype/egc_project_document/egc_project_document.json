@@ -18,6 +18,12 @@
 		"column_break_2",
 		"wbs_node",
 		"description",
+		"section_break_drawing",
+		"drawing_set",
+		"drawing_area",
+		"column_break_drawing",
+		"drawing_date",
+		"received_date",
 		"section_break_current",
 		"current_revision",
 		"current_revision_label",
@@ -98,6 +104,37 @@
 			"fieldname": "description",
 			"fieldtype": "Small Text",
 			"label": "Description"
+		},
+		{
+			"fieldname": "section_break_drawing",
+			"fieldtype": "Section Break",
+			"label": "Drawing"
+		},
+		{
+			"fieldname": "drawing_set",
+			"fieldtype": "Link",
+			"label": "Drawing Set",
+			"options": "EGC Drawing Set"
+		},
+		{
+			"fieldname": "drawing_area",
+			"fieldtype": "Link",
+			"label": "Drawing Area",
+			"options": "EGC Drawing Area"
+		},
+		{
+			"fieldname": "column_break_drawing",
+			"fieldtype": "Column Break"
+		},
+		{
+			"fieldname": "drawing_date",
+			"fieldtype": "Date",
+			"label": "Drawing Date"
+		},
+		{
+			"fieldname": "received_date",
+			"fieldtype": "Date",
+			"label": "Received Date"
 		},
 		{
 			"fieldname": "section_break_current",

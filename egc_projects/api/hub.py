@@ -478,7 +478,7 @@ def get_submittals(project: str, filters=None) -> list[dict]:
 
 # --- get_drawings --------------------------------------------------------------------------------
 
-_DRAWING_FILTER_FIELDS = {"discipline", "approval_status", "document_type"}
+_DRAWING_FILTER_FIELDS = {"discipline", "approval_status", "document_type", "drawing_set", "drawing_area"}
 
 
 @frappe.whitelist()
@@ -510,6 +510,10 @@ def get_drawings(project: str, filters=None) -> list[dict]:
 			"document_number as number",
 			"title",
 			"discipline",
+			"drawing_set",
+			"drawing_area",
+			"drawing_date",
+			"received_date",
 			"current_revision_label",
 			"approval_status",
 			"current_revision_date",

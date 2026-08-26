@@ -21,6 +21,7 @@ class EGCProjectDocumentRevision(Document):
 		file: DF.Attach
 		issue_date: DF.Date | None
 		project: DF.Link | None
+		readiness: DF.Literal["Uploaded", "Reviewed", "Ready to Publish"]
 		reason_for_revision: DF.Data | None
 		remarks: DF.SmallText | None
 		revision: DF.Data

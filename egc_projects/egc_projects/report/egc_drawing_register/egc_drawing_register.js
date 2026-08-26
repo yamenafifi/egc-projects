@@ -37,6 +37,20 @@ frappe.query_reports["EGC Drawing Register"] = {
 			options: "EGC Document Type",
 			get_query: () => ({ filters: { is_drawing: 1 } }),
 		},
+		{
+			fieldname: "drawing_set",
+			label: __("Set"),
+			fieldtype: "Link",
+			options: "EGC Drawing Set",
+			get_query: () => ({ filters: { project: frappe.query_report.get_filter_value("project") } }),
+		},
+		{
+			fieldname: "drawing_area",
+			label: __("Area"),
+			fieldtype: "Link",
+			options: "EGC Drawing Area",
+			get_query: () => ({ filters: { project: frappe.query_report.get_filter_value("project") } }),
+		},
 	],
 	formatter: function (value, row, column, data, default_formatter) {
 		value = default_formatter(value, row, column, data);

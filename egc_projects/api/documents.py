@@ -100,6 +100,10 @@ _DOCUMENT_DETAIL_FIELDS = (
 	"originator",
 	"wbs_node",
 	"description",
+	"drawing_set",
+	"drawing_area",
+	"drawing_date",
+	"received_date",
 	"current_revision",
 	"current_revision_label",
 	"current_revision_date",
@@ -110,7 +114,9 @@ _DOCUMENT_DETAIL_FIELDS = (
 
 
 def _document_dict(name: str) -> dict:
-	return frappe.db.get_value("EGC Project Document", name, _DOCUMENT_DETAIL_FIELDS, as_dict=True)
+	row = frappe.db.get_value("EGC Project Document", name, _DOCUMENT_DETAIL_FIELDS, as_dict=True)
+	row["is_drawing"] = bool(frappe.db.get_value("EGC Document Type", row.document_type, "is_drawing"))
+	return row
 
 
 def _related_submittals(document: str) -> list[dict]:
@@ -212,6 +218,10 @@ def create_document(
 	originator: str | None = None,
 	wbs_node: str | None = None,
 	description: str | None = None,
+	drawing_set: str | None = None,
+	drawing_area: str | None = None,
+	drawing_date: str | None = None,
+	received_date: str | None = None,
 ) -> dict:
 	# Two gates, deliberately: `require_project_permission` proves the caller may act on this
 	# Project at all; `has_permission("create")` proves they specifically hold one of the EGC
@@ -231,6 +241,10 @@ def create_document(
 			"originator": originator,
 			"wbs_node": wbs_node,
 			"description": description,
+			"drawing_set": drawing_set,
+			"drawing_area": drawing_area,
+			"drawing_date": drawing_date,
+			"received_date": received_date,
 		}
 	)
 	doc.insert()
@@ -252,6 +266,7 @@ _REVISION_FIELDS = (
 	"superseded_by",
 	"reason_for_revision",
 	"remarks",
+	"readiness",
 	"docstatus",
 )
 
@@ -268,6 +283,7 @@ def create_document_revision(
 	revision_date: str | None = None,
 	reason_for_revision: str | None = None,
 	remarks: str | None = None,
+	readiness: str | None = None,
 ) -> dict:
 	"""Insert a Draft revision. Never submits it — issuing is a separate, deliberate action.
 
@@ -289,6 +305,8 @@ def create_document_revision(
 		"reason_for_revision": reason_for_revision,
 		"remarks": remarks,
 	}
+	if readiness:
+		values["readiness"] = readiness
 	# Omit entirely rather than pass `None` when the caller didn't supply one — the field's own
 	# `default: "Today"` only applies when the key is absent, not when it is present and empty.
 	if revision_date:
@@ -296,6 +314,41 @@ def create_document_revision(
 
 	doc = frappe.get_doc(values)
 	doc.insert()
+	return _revision_dict(doc.name)
+
+
+# --- update_revision_readiness ------------------------------------------------------------------
+
+_READINESS_VALUES = ("Uploaded", "Reviewed", "Ready to Publish")
+
+
+@frappe.whitelist()
+def update_revision_readiness(revision: str, readiness: str) -> dict:
+	"""Move a Draft revision through its internal pre-issue review state
+	(docs/ARCHITECTURE_V2.md §9). Purely informational metadata — `readiness` introduces no new
+	lifecycle state and does not touch `revision_status`; issuing is still, and only, `submit()`.
+	`readiness` is not `allow_on_submit`, so the framework itself refuses this once the revision
+	is Issued — this endpoint only ever reaches a Draft row in practice, but is guarded anyway."""
+	if not revision or not frappe.db.exists("EGC Project Document Revision", revision):
+		frappe.throw(_("Revision {0} not found.").format(revision), exc=frappe.DoesNotExistError)
+	if readiness not in _READINESS_VALUES:
+		frappe.throw(_("{0} is not a valid readiness value.").format(frappe.bold(readiness)), exc=frappe.ValidationError)
+
+	doc = frappe.get_doc("EGC Project Document Revision", revision)
+	project = validators.get_project_of("EGC Project Document", doc.document)
+	validators.require_project_permission(project, "write")
+	frappe.has_permission("EGC Project Document Revision", "write", doc=doc, throw=True)
+
+	if doc.docstatus != 0:
+		frappe.throw(
+			_("Readiness can only be changed while the revision is Draft; {0} is {1}.").format(
+				frappe.bold(doc.name), _(doc.revision_status)
+			),
+			exc=frappe.ValidationError,
+		)
+
+	doc.readiness = readiness
+	doc.save()
 	return _revision_dict(doc.name)
 
 

@@ -1,6 +1,11 @@
 <script setup>
 import { watch } from "vue";
-import { get_document_detail, create_document_revision, submit_document_revision } from "./documents_api";
+import {
+	get_document_detail,
+	create_document_revision,
+	submit_document_revision,
+	update_revision_readiness,
+} from "./documents_api";
 import { useHubResource } from "../composables/useHubResource";
 import LoadingState from "./LoadingState.vue";
 import ErrorState from "./ErrorState.vue";
@@ -51,6 +56,13 @@ function open_new_revision_dialog() {
 			},
 			{ fieldname: "reason_for_revision", fieldtype: "Data", label: __("Reason for Revision") },
 			{ fieldname: "remarks", fieldtype: "Small Text", label: __("Remarks") },
+			{
+				fieldname: "readiness",
+				fieldtype: "Select",
+				label: __("Readiness"),
+				options: READINESS_VALUES,
+				default: "Uploaded",
+			},
 		],
 		primary_action_label: __("Create Revision"),
 		primary_action(values) {
@@ -61,6 +73,7 @@ function open_new_revision_dialog() {
 				revision_date: values.revision_date,
 				reason_for_revision: values.reason_for_revision,
 				remarks: values.remarks,
+				readiness: values.readiness,
 			})
 				.then(() => {
 					dialog.hide();
@@ -94,6 +107,20 @@ function issue_revision(rev) {
 		})
 		.catch((e) => {
 			frappe.msgprint({ title: __("Could Not Issue Revision"), message: e.message, indicator: "red" });
+		});
+}
+
+const READINESS_VALUES = ["Uploaded", "Reviewed", "Ready to Publish"];
+
+function do_update_readiness(rev, event) {
+	update_revision_readiness(rev.name, event.target.value)
+		.then(() => {
+			reload();
+			emit("changed");
+		})
+		.catch((e) => {
+			event.target.value = rev.readiness;
+			frappe.msgprint({ title: __("Could Not Update Readiness"), message: e.message, indicator: "red" });
 		});
 }
 </script>
@@ -145,6 +172,24 @@ function issue_revision(rev) {
 						<div v-if="data.document.description" class="doc-detail__description">
 							{{ data.document.description }}
 						</div>
+						<dl v-if="data.document.is_drawing" class="doc-detail__meta doc-detail__meta--drawing">
+							<div>
+								<dt>{{ __("Drawing Set") }}</dt>
+								<dd>{{ data.document.drawing_set || "—" }}</dd>
+							</div>
+							<div>
+								<dt>{{ __("Drawing Area") }}</dt>
+								<dd>{{ data.document.drawing_area || "—" }}</dd>
+							</div>
+							<div>
+								<dt>{{ __("Drawing Date") }}</dt>
+								<dd>{{ format_date(data.document.drawing_date) }}</dd>
+							</div>
+							<div>
+								<dt>{{ __("Received Date") }}</dt>
+								<dd>{{ format_date(data.document.received_date) }}</dd>
+							</div>
+						</dl>
 						<div class="doc-detail__file">
 							<span class="doc-detail__meta-label">{{ __("Current File") }}:</span>
 							<a
@@ -174,6 +219,7 @@ function issue_revision(rev) {
 									<tr>
 										<th>{{ __("Revision") }}</th>
 										<th>{{ __("Status") }}</th>
+										<th>{{ __("Readiness") }}</th>
 										<th>{{ __("Revision Date") }}</th>
 										<th>{{ __("Issue Date") }}</th>
 										<th>{{ __("File") }}</th>
@@ -188,6 +234,17 @@ function issue_revision(rev) {
 											<span v-if="rev.is_current" class="doc-detail__current-badge">{{ __("Current") }}</span>
 										</td>
 										<td><StatusPill :status="rev.revision_status" /></td>
+										<td>
+											<select
+												v-if="rev.docstatus === 0"
+												class="doc-detail__readiness-select"
+												:value="rev.readiness"
+												@change="do_update_readiness(rev, $event)"
+											>
+												<option v-for="value in READINESS_VALUES" :key="value" :value="value">{{ value }}</option>
+											</select>
+											<span v-else>{{ rev.readiness || "—" }}</span>
+										</td>
 										<td>{{ format_date(rev.revision_date) }}</td>
 										<td>{{ rev.issue_date ? format_date(rev.issue_date) : "—" }}</td>
 										<td>
@@ -366,6 +423,21 @@ function issue_revision(rev) {
 	font-size: var(--text-sm);
 	color: var(--text-color);
 	white-space: pre-wrap;
+}
+
+.doc-detail__meta--drawing {
+	margin-top: 12px;
+	padding-top: 12px;
+	border-top: 1px dashed var(--border-color);
+}
+
+.doc-detail__readiness-select {
+	border: 1px solid var(--border-color);
+	border-radius: var(--border-radius);
+	background: var(--fg-color);
+	color: var(--text-color);
+	padding: 3px 6px;
+	font-size: var(--text-xs);
 }
 
 .doc-detail__file {

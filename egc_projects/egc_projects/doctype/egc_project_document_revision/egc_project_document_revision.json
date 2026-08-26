@@ -17,6 +17,7 @@
 		"column_break_2",
 		"revision_date",
 		"issue_date",
+		"readiness",
 		"section_break_status",
 		"revision_status",
 		"superseded_by",
@@ -88,6 +89,13 @@
 			"fieldname": "issue_date",
 			"fieldtype": "Date",
 			"label": "Issue Date"
+		},
+		{
+			"default": "Uploaded",
+			"fieldname": "readiness",
+			"fieldtype": "Select",
+			"label": "Readiness",
+			"options": "Uploaded\nReviewed\nReady to Publish"
 		},
 		{
 			"fieldname": "section_break_status",

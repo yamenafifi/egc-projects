@@ -34,8 +34,12 @@ class EGCProjectDocument(Document):
 		document_number: DF.Data
 		document_status: DF.Literal["No Revision", "Draft", "Issued", "Cancelled"]
 		document_type: DF.Link
+		drawing_area: DF.Link | None
+		drawing_date: DF.Date | None
+		drawing_set: DF.Link | None
 		originator: DF.Data | None
 		project: DF.Link
+		received_date: DF.Date | None
 		revision_history_html: DF.HTML | None
 		title: DF.Data
 		wbs_node: DF.Link | None
@@ -44,6 +48,8 @@ class EGCProjectDocument(Document):
 	def validate(self):
 		validators.validate_unique_in_project(self, "document_number", _("Document"))
 		validators.validate_same_project(self, "wbs_node", "EGC WBS Node", _("WBS Node"))
+		validators.validate_same_project(self, "drawing_set", "EGC Drawing Set", _("Drawing Set"))
+		validators.validate_same_project(self, "drawing_area", "EGC Drawing Area", _("Drawing Area"))
 
 
 @frappe.whitelist()
@@ -68,6 +74,7 @@ def get_revisions(document: str) -> list[dict]:
 			"revision_date",
 			"issue_date",
 			"remarks",
+			"readiness",
 			"superseded_by",
 		],
 		order_by="revision_seq desc",
