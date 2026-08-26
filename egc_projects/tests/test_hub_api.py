@@ -452,6 +452,130 @@ class TestHubAPI(IntegrationTestCase):
 		with self.assertRaises(frappe.ValidationError):
 			egc_activity_status_summary.execute({})
 
+	# -- Project health (docs/ARCHITECTURE_V2.md §11) -------------------------------------------
+
+	def _make_review_step(self, submission, **kwargs):
+		values = {
+			"doctype": "EGC Submittal Review Step",
+			"submittal_revision": submission,
+			"sequence": 0,
+			"status": "In Review",
+			"reviewer_user": self.manager_user,
+		}
+		values.update(kwargs)
+		doc = frappe.get_doc(values)
+		doc.insert(ignore_permissions=True)
+		return doc
+
+	def test_project_health_all_green_on_empty_project(self):
+		self.assertEqual(
+			hub.get_overview(self.project)["health"],
+			{"schedule": "green", "submittals": "green", "documents": "green", "financials": "green"},
+		)
+
+	def test_schedule_health_red_then_orange_once_touched(self):
+		overdue = self._make_activity(
+			"HLT-SCH-1", c.ACTIVITY_IN_PROGRESS, planned_end_date=add_days(today(), -20)
+		)
+		# A freshly-inserted row's own `modified` is "now" by construction, so the "touched
+		# recently" check would trivially pass — backdate it past the 14-day window first to
+		# reach the actual "red" (stale, never touched) state the rule describes.
+		frappe.db.set_value(
+			"EGC Activity", overdue.name, "modified", add_days(today(), -20), update_modified=False
+		)
+		self.assertEqual(hub.get_overview(self.project)["health"]["schedule"], "red")
+
+		# Touching the row (any save) within the last 14 days flips red -> orange, not green —
+		# the Activity is still overdue, it is just no longer being ignored.
+		overdue.reload()
+		overdue.description = "checked in on this today"
+		overdue.save(ignore_permissions=True)
+		self.assertEqual(hub.get_overview(self.project)["health"]["schedule"], "orange")
+
+	def test_schedule_health_ignores_closed_and_undated_activities(self):
+		self._make_activity(
+			"HLT-SCH-DONE", c.ACTIVITY_COMPLETED, planned_end_date=add_days(today(), -20)
+		)
+		self._make_activity("HLT-SCH-NODATE", c.ACTIVITY_IN_PROGRESS)
+		self.assertEqual(hub.get_overview(self.project)["health"]["schedule"], "green")
+
+	def test_submittals_health_red_overdue_beats_orange_needs_resubmit(self):
+		doc = self._make_document("HLT-SUB-DOC")
+		rev = self._make_issued_revision(doc.name, "00")
+		self._make_responded_submittal("HLT-SUB-RNR", c.RESPONSE_REVISE_AND_RESUBMIT, rev)
+		self.assertEqual(hub.get_overview(self.project)["health"]["submittals"], "orange")
+
+		overdue_submittal = self._make_submittal("HLT-SUB-OVERDUE")
+		overdue_submission = self._make_submission(
+			overdue_submittal.name, "00", document_revisions=[rev.name], due_date=add_days(today(), -5)
+		)
+		overdue_submission.submit()
+		self.assertEqual(hub.get_overview(self.project)["health"]["submittals"], "red")
+
+	def test_drawings_health_orange_only_past_the_governing_submittals_due_date(self):
+		drawing = self._make_document("HLT-DRW-001", document_type=self.drawing_type)
+		rev = self._make_issued_revision(drawing.name, "00")
+		submittal = self._make_submittal("HLT-DRW-SUB")
+
+		future_submission = self._make_submission(
+			submittal.name, "00", document_revisions=[rev.name], due_date=add_days(today(), 10)
+		)
+		future_submission.submit()  # Submitted, no response -> drawing approval_status = Under Review
+		self.assertEqual(hub.get_overview(self.project)["health"]["documents"], "green")
+
+		# Move the SAME governing submission's due date into the past — the drawing's own
+		# approval_status doesn't change, only whether it is now considered late.
+		frappe.db.set_value("EGC Submittal Revision", future_submission.name, "due_date", add_days(today(), -3))
+		self.assertEqual(hub.get_overview(self.project)["health"]["documents"], "orange")
+
+	def test_financials_health_red_when_gross_margin_negative(self):
+		frappe.db.set_value("Project", self.project, "gross_margin", -500)
+		self.assertEqual(hub.get_overview(self.project)["health"]["financials"], "red")
+		frappe.db.set_value("Project", self.project, "gross_margin", 500)
+		self.assertEqual(hub.get_overview(self.project)["health"]["financials"], "green")
+
+	# -- My Open Items (docs/ARCHITECTURE_V2.md §8) ----------------------------------------------
+
+	def test_my_open_items_combines_submittal_review_and_overdue_activity(self):
+		doc = self._make_document("OPEN-DOC")
+		rev = self._make_issued_revision(doc.name, "00")
+		submittal = self._make_submittal("OPEN-SUB-001", submittal_manager=self.manager_user)
+		submission = self._make_submission(submittal.name, "00", document_revisions=[rev.name])
+		submission.submit()
+		self._make_review_step(submission.name)
+
+		overdue_activity = self._make_activity(
+			"OPEN-ACT-001",
+			c.ACTIVITY_IN_PROGRESS,
+			planned_end_date=add_days(today(), -2),
+			responsible_user=self.manager_user,
+		)
+		# Not overdue, not returned — proves the activity source filters by is_overdue(), not
+		# merely by having a responsible_user.
+		self._make_activity(
+			"OPEN-ACT-002",
+			c.ACTIVITY_IN_PROGRESS,
+			planned_end_date=add_days(today(), 10),
+			responsible_user=self.manager_user,
+		)
+
+		frappe.set_user(self.manager_user)
+		items = hub.get_my_open_items(self.project)
+
+		self.assertEqual({(i["source"], i["name"]) for i in items}, {
+			("submittal_review", submittal.name),
+			("activity_overdue", overdue_activity.name),
+		})
+		self.assertTrue(all(i["project"] == self.project for i in items))
+
+	def test_my_open_items_project_isolation(self):
+		frappe.set_user(self.project_denied_user)
+		with self.assertRaises(frappe.PermissionError):
+			hub.get_my_open_items(self.project)
+		# No `project` filter at all must not raise — it is a scope, not a gate; permission is
+		# still per-item via `get_open_items_for_user`'s own project membership.
+		self.assertEqual(hub.get_my_open_items(), [])
+
 
 def _get_or_create_document_type():
 	name = "EGC-HUB-Test Document Type"

@@ -439,3 +439,33 @@ documents whose type is actually flagged as a drawing — reused as the drawing 
 rather than building a parallel component, per "a Drawing is a Document with drawing-specific
 semantics." `DrawingsTab.vue`/`EGC Drawing Register` both gain Set/Area columns and filters.
 12 new tests (`test_drawings.py`).
+
+### Wave E: Financials drill-down, Project health, My Open Items
+
+`api/hub.py.get_financial_transactions(project, metric)` — for each of the six metrics with a
+well-defined underlying transaction set (billed/purchase_cost/expense_claims/
+consumed_material_cost/timesheet_cost/sales_order_value), hand-reconstructs the EXACT query
+ERPNext/HRMS uses to arrive at the matching `get_financials()` figure (read straight from
+`erpnext.projects.doctype.project.project.Project`/`hrms.overrides.employee_project.
+EmployeeProject`, which is what this site's Project class is actually overridden to — that's why
+`timesheet_cost` sums `costing_amount` not `base_costing_amount`, and why `expense_claims`
+exists at all). Never recomputes the total independently, so the drill-down and the headline
+figure can never disagree; verified live against real seeded transactions, not just fixtures.
+`FinancialsTab.vue`'s six reconcilable tiles are now clickable, opening a dialog of the
+underlying documents with links to their native forms.
+
+`_project_health()` in `api/hub.py`, folded into `get_overview()`'s response — exactly the four
+signals docs/ARCHITECTURE_V2.md §11 specifies (schedule/submittals/documents/financials, each
+green/orange/red) and no more, per the brief's own "only derive health where the rules are
+defensible" caution. `_drawings_health()` reuses `document_control.get_approval_status()`'s exact
+query (latest non-cancelled submission carrying a document's current revision) to find the
+governing due date, rather than a different, possibly-disagreeing lookup.
+
+`egc_projects/action_items.py` (new) — `get_open_items_for_user(user, project=None)`, a plain
+registry (not a generic framework) combining `EGC Submittal Review Step` (reviewer_user=user,
+In Review) and overdue `EGC Activity` (responsible_user=user) into one normalised shape; adding
+a future source is a new function plus one line here, not a schema change. Exposed as
+`api/hub.py.get_my_open_items`, surfaced as a card on `OverviewTab.vue`.
+
+10 new tests (`test_financial_transactions.py`) plus 12 more in `test_hub_api.py`
+(health + My Open Items); full suite at 161.

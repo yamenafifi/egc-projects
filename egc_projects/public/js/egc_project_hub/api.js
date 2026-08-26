@@ -69,6 +69,14 @@ export function get_financials(project) {
 	return call_hub("get_financials", { project });
 }
 
+export function get_financial_transactions(project, metric) {
+	return call_hub("get_financial_transactions", { project, metric });
+}
+
+export function get_my_open_items(project) {
+	return call_hub("get_my_open_items", { project });
+}
+
 export function get_project_profile(project) {
 	return call_hub("get_project_profile", { project });
 }

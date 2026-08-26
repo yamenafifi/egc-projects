@@ -17,9 +17,10 @@ from __future__ import annotations
 import erpnext
 import frappe
 from frappe import _
-from frappe.utils import getdate, today
+from frappe.query_builder.functions import Coalesce, NullIf, Sum
+from frappe.utils import add_days, flt, getdate, today
 
-from egc_projects.egc_projects import constants as c
+from egc_projects.egc_projects import action_items, constants as c
 from egc_projects.egc_projects import project_profile, validators
 from egc_projects.egc_projects.doctype.egc_activity.egc_activity import is_overdue as activity_is_overdue
 
@@ -311,6 +312,117 @@ def _recent_activity(project: str) -> dict:
 	}
 
 
+# --- Project health (docs/ARCHITECTURE_V2.md §11) ----------------------------------------------
+#
+# Deliberately only these four, deliberately only this simple — "Only derive health where the
+# rules are defensible" is the brief's own instruction. Each returns "green"/"orange"/"red".
+
+
+def _schedule_health(project: str) -> str:
+	overdue_rows = frappe.get_all(
+		"EGC Activity",
+		filters=[
+			["project", "=", project],
+			["planned_end_date", "is", "set"],
+			["planned_end_date", "<", today()],
+			["status", "not in", list(c.ACTIVITY_CLOSED_STATUSES)],
+		],
+		fields=["modified"],
+	)
+	if not overdue_rows:
+		return "green"
+	# "touched" = the Activity row itself was last modified within the window — a status change
+	# is a save, so this is a safe proxy without a dedicated status-change-history field.
+	cutoff = add_days(today(), -14)
+	touched_recently = any(getdate(row.modified) >= getdate(cutoff) for row in overdue_rows)
+	return "orange" if touched_recently else "red"
+
+
+def _submittals_health(project: str) -> str:
+	overdue = frappe.get_all(
+		"EGC Submittal",
+		filters=[
+			["project", "=", project],
+			["current_due_date", "is", "set"],
+			["current_due_date", "<", today()],
+			["submittal_status", "in", list(c.SUBMISSION_OPEN_STATUSES)],
+		],
+		limit=1,
+	)
+	if overdue:
+		return "red"
+	# `submittal_status` already IS the current submission's response (see `_refresh_from_current`
+	# in submittal_control.py), so a Submittal sitting at Revise & Resubmit/Rejected has, by
+	# definition, not yet been resubmitted — a new cycle would move it off that status.
+	needs_resubmit = frappe.get_all(
+		"EGC Submittal",
+		filters={
+			"project": project,
+			"submittal_status": ("in", (c.RESPONSE_REVISE_AND_RESUBMIT, c.RESPONSE_REJECTED)),
+		},
+		limit=1,
+	)
+	return "orange" if needs_resubmit else "green"
+
+
+def _governing_submission_due_date(current_revision: str) -> str | None:
+	"""The due date of the SAME submission `document_control.get_approval_status` used to derive
+	this revision's `approval_status` — mirrors that function's own query exactly (latest
+	non-cancelled submitted submission carrying this revision) rather than picking a different
+	submission and risking a health signal that disagrees with the status it is about."""
+	rows = frappe.get_all(
+		"EGC Submittal Revision",
+		filters=[
+			["EGC Submittal Revision", "docstatus", "=", 1],
+			["EGC Submittal Revision", "submission_status", "!=", c.SUBMISSION_CANCELLED],
+			["EGC Submittal Document Item", "document_revision", "=", current_revision],
+		],
+		fields=["due_date", "submission_seq"],
+		order_by="submission_seq desc",
+		limit=1,
+	)
+	return rows[0].due_date if rows else None
+
+
+def _drawings_health(project: str) -> str:
+	types = get_drawing_document_types()
+	if not types:
+		return "green"
+
+	at_risk = frappe.get_all(
+		"EGC Project Document",
+		filters=[
+			["project", "=", project],
+			["document_type", "in", types],
+			["approval_status", "in", (c.APPROVAL_UNDER_REVIEW, c.RESPONSE_REVISE_AND_RESUBMIT)],
+			["current_revision", "is", "set"],
+		],
+		fields=["current_revision"],
+	)
+	today_date = getdate(today())
+	for row in at_risk:
+		due_date = _governing_submission_due_date(row.current_revision)
+		if due_date and getdate(due_date) < today_date:
+			return "orange"
+	return "green"
+
+
+def _financials_health(project: str) -> str:
+	# Deliberately the simplest possible rule — a fabricated "budget variance" indicator with no
+	# budget data behind it would violate the brief's own instruction not to fake a metric.
+	gross_margin = frappe.db.get_value("Project", project, "gross_margin")
+	return "red" if gross_margin is not None and flt(gross_margin) < 0 else "green"
+
+
+def _project_health(project: str) -> dict:
+	return {
+		"schedule": _schedule_health(project),
+		"submittals": _submittals_health(project),
+		"documents": _drawings_health(project),
+		"financials": _financials_health(project),
+	}
+
+
 @frappe.whitelist()
 def get_overview(project: str) -> dict:
 	validators.require_project_permission(project)
@@ -320,7 +432,18 @@ def get_overview(project: str) -> dict:
 		"submittals": _submittal_overview(project),
 		"drawings": _drawing_overview(project),
 		"recent": _recent_activity(project),
+		"health": _project_health(project),
 	}
+
+
+# --- get_my_open_items (docs/ARCHITECTURE_V2.md §8) --------------------------------------------
+
+
+@frappe.whitelist()
+def get_my_open_items(project: str | None = None) -> list[dict]:
+	if project:
+		validators.require_project_permission(project)
+	return action_items.get_open_items_for_user(frappe.session.user, project)
 
 
 # --- get_wbs_tree ------------------------------------------------------------------------------
@@ -596,6 +719,180 @@ def get_financials(project: str) -> dict:
 		"per_gross_margin": row.per_gross_margin,
 		"currency": currency,
 	}
+
+
+# --- get_financial_transactions (docs/ARCHITECTURE_V2.md §10) -------------------------------
+#
+# Each helper reconstructs, transaction-by-transaction, EXACTLY the same query ERPNext/HRMS uses
+# to arrive at the corresponding `get_financials()` figure (see `erpnext.projects.doctype.
+# project.project.Project.update_costing`/`update_purchase_costing`/`update_billed_amount`, and
+# `hrms.overrides.employee_project.EmployeeProject.update_costing` — this site's Project class is
+# overridden to `EmployeeProject`, which is why `timesheet_cost` sums `costing_amount`, not
+# `base_costing_amount`, and why `expense_claims` folds in the HRMS-only `total_expense_claim`).
+# Never recompute the total independently here — a query that summed differently from the one
+# that produced the headline figure would let the drill-down disagree with it, which is exactly
+# what this endpoint exists to make impossible.
+
+
+def _billed_transactions(project: str) -> list[dict]:
+	si = frappe.qb.DocType("Sales Invoice")
+	sii = frappe.qb.DocType("Sales Invoice Item")
+	rows = (
+		frappe.qb.from_(sii)
+		.join(si)
+		.on(si.name == sii.parent)
+		.select(si.name, si.posting_date, si.customer, Sum(sii.base_net_amount).as_("amount"))
+		.where(
+			(si.docstatus == 1)
+			& ((sii.project == project) | (sii.project.isnull() & (si.project == project)))
+		)
+		.groupby(si.name, si.posting_date, si.customer)
+		.orderby(si.posting_date, order=frappe.qb.desc)
+		.run(as_dict=True)
+	)
+	for row in rows:
+		row["doctype"] = "Sales Invoice"
+		row["date"] = row.pop("posting_date")
+		row["reference"] = row.pop("customer")
+	return rows
+
+
+def _purchase_cost_transactions(project: str) -> list[dict]:
+	pi = frappe.qb.DocType("Purchase Invoice")
+	pii = frappe.qb.DocType("Purchase Invoice Item")
+	rows = (
+		frappe.qb.from_(pii)
+		.join(pi)
+		.on(pi.name == pii.parent)
+		.select(pi.name, pi.posting_date, pi.supplier, Sum(pii.base_net_amount).as_("amount"))
+		.where((pi.docstatus == 1) & (pii.project == project))
+		.groupby(pi.name, pi.posting_date, pi.supplier)
+		.orderby(pi.posting_date, order=frappe.qb.desc)
+		.run(as_dict=True)
+	)
+	for row in rows:
+		row["doctype"] = "Purchase Invoice"
+		row["date"] = row.pop("posting_date")
+		row["reference"] = row.pop("supplier")
+	return rows
+
+
+def _expense_claim_transactions(project: str) -> list[dict]:
+	ec = frappe.qb.DocType("Expense Claim")
+	ecd = frappe.qb.DocType("Expense Claim Detail")
+	rows = (
+		frappe.qb.from_(ecd)
+		.join(ec)
+		.on(ec.name == ecd.parent)
+		.select(ec.name, ec.posting_date, ec.employee_name, Sum(ecd.sanctioned_amount).as_("amount"))
+		.where(
+			(ec.docstatus == 1)
+			& (Coalesce(NullIf(ecd.project, ""), ec.project) == project)
+		)
+		.groupby(ec.name, ec.posting_date, ec.employee_name)
+		.orderby(ec.posting_date, order=frappe.qb.desc)
+		.run(as_dict=True)
+	)
+	for row in rows:
+		row["doctype"] = "Expense Claim"
+		row["date"] = row.pop("posting_date")
+		row["reference"] = row.pop("employee_name")
+	return rows
+
+
+def _consumed_material_transactions(project: str) -> list[dict]:
+	se = frappe.qb.DocType("Stock Entry")
+	sed = frappe.qb.DocType("Stock Entry Detail")
+	rows = (
+		frappe.qb.from_(sed)
+		.join(se)
+		.on(se.name == sed.parent)
+		.select(se.name, se.posting_date, se.purpose, Sum(sed.amount).as_("amount"))
+		.where(
+			(sed.docstatus == 1)
+			& (sed.project == project)
+			& (sed.t_warehouse.isnull() | (sed.t_warehouse == ""))
+		)
+		.groupby(se.name, se.posting_date, se.purpose)
+		.orderby(se.posting_date, order=frappe.qb.desc)
+		.run(as_dict=True)
+	)
+	# `update_costing`'s `total_consumed_material_cost` also folds in Landed Cost Taxes and
+	# Charges rows on Manufacture-purpose Stock Entries — added onto the matching entry here so
+	# a project with such entries still reconciles to the headline figure exactly.
+	lc = frappe.qb.DocType("Landed Cost Taxes and Charges")
+	landed = (
+		frappe.qb.from_(se)
+		.join(lc)
+		.on(lc.parent == se.name)
+		.select(se.name, Sum(lc.base_amount).as_("landed_amount"))
+		.where((se.docstatus == 1) & (se.project == project) & (se.purpose == "Manufacture"))
+		.groupby(se.name)
+		.run(as_dict=True)
+	)
+	landed_by_name = {row.name: row.landed_amount for row in landed}
+	for row in rows:
+		row["amount"] = flt(row["amount"]) + flt(landed_by_name.get(row.name, 0))
+		row["doctype"] = "Stock Entry"
+		row["date"] = row.pop("posting_date")
+		row["reference"] = row.pop("purpose")
+	return rows
+
+
+def _timesheet_transactions(project: str) -> list[dict]:
+	ts = frappe.qb.DocType("Timesheet")
+	tsd = frappe.qb.DocType("Timesheet Detail")
+	rows = (
+		frappe.qb.from_(tsd)
+		.join(ts)
+		.on(ts.name == tsd.parent)
+		.select(ts.name, ts.start_date, ts.employee_name, Sum(tsd.costing_amount).as_("amount"))
+		.where((tsd.docstatus == 1) & (tsd.project == project))
+		.groupby(ts.name, ts.start_date, ts.employee_name)
+		.orderby(ts.start_date, order=frappe.qb.desc)
+		.run(as_dict=True)
+	)
+	for row in rows:
+		row["doctype"] = "Timesheet"
+		row["date"] = row.pop("start_date")
+		row["reference"] = row.pop("employee_name")
+	return rows
+
+
+def _sales_order_transactions(project: str) -> list[dict]:
+	rows = frappe.get_all(
+		"Sales Order",
+		filters={"project": project, "docstatus": 1},
+		fields=["name", "transaction_date as date", "customer as reference", "base_net_total as amount"],
+		order_by="transaction_date desc",
+	)
+	for row in rows:
+		row["doctype"] = "Sales Order"
+	return rows
+
+
+_FINANCIAL_TRANSACTION_FNS = {
+	"billed": _billed_transactions,
+	"purchase_cost": _purchase_cost_transactions,
+	"expense_claims": _expense_claim_transactions,
+	"consumed_material_cost": _consumed_material_transactions,
+	"timesheet_cost": _timesheet_transactions,
+	"sales_order_value": _sales_order_transactions,
+}
+
+
+@frappe.whitelist()
+def get_financial_transactions(project: str, metric: str) -> list[dict]:
+	validators.require_project_permission(project)
+	_require_financial_access()
+
+	fn = _FINANCIAL_TRANSACTION_FNS.get(metric)
+	if not fn:
+		frappe.throw(
+			_("{0} is not a drill-down-able financial metric.").format(frappe.bold(metric)),
+			exc=frappe.ValidationError,
+		)
+	return fn(project)
 
 
 # --- Project Information: get_project_profile / save_project_profile (ARCHITECTURE_V2.md §4) --

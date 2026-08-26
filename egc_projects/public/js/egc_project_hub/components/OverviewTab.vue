@@ -1,6 +1,6 @@
 <script setup>
 import { computed, watch } from "vue";
-import { get_overview } from "../api";
+import { get_overview, get_my_open_items } from "../api";
 import { useHubResource } from "../composables/useHubResource";
 import { useHubRoute } from "../composables/useHubRoute";
 import { overdueIntent } from "../composables/useOverdueIntent";
@@ -15,8 +15,32 @@ const props = defineProps({
 const { setTab } = useHubRoute();
 
 const { data, loading, error, reload } = useHubResource(() => get_overview(props.project));
+const { data: open_items, loading: open_items_loading, reload: reload_open_items } = useHubResource(() =>
+	get_my_open_items(props.project)
+);
 
 watch(() => props.project, reload, { immediate: true });
+watch(() => props.project, reload_open_items, { immediate: true });
+
+const HEALTH_LABELS = {
+	schedule: __("Schedule"),
+	submittals: __("Submittals"),
+	documents: __("Documents"),
+	financials: __("Financials"),
+};
+
+const health_entries = computed(() => {
+	if (!data.value?.health) return [];
+	return Object.entries(data.value.health).map(([key, color]) => ({
+		key,
+		label: HEALTH_LABELS[key] || key,
+		color,
+	}));
+});
+
+function open_item(item) {
+	frappe.set_route("Form", item.doctype, item.name);
+}
 
 const has_any_data = computed(() => {
 	if (!data.value) return false;
@@ -82,6 +106,35 @@ const recent_entries = computed(() => {
 		/>
 
 		<template v-else>
+			<div v-if="health_entries.length" class="hub-card hub-health">
+				<div class="hub-card__title">{{ __("Project Health") }}</div>
+				<div class="hub-health__row">
+					<div v-for="entry in health_entries" :key="entry.key" class="hub-health__item">
+						<span class="hub-health__dot" :class="`hub-health__dot--${entry.color}`"></span>
+						<span class="hub-health__label">{{ entry.label }}</span>
+					</div>
+				</div>
+			</div>
+
+			<div v-if="!open_items_loading && (open_items || []).length" class="hub-card hub-open-items">
+				<div class="hub-card__title">{{ __("My Open Items") }}</div>
+				<ul class="hub-recent">
+					<li
+						v-for="item in open_items"
+						:key="item.source + ':' + item.name"
+						class="hub-recent__item"
+						@click="open_item(item)"
+					>
+						<span class="hub-recent__icon">{{ item.source === "activity_overdue" ? "⏱" : "📩" }}</span>
+						<span class="hub-recent__text">{{ item.title }}</span>
+						<span v-if="item.is_overdue" class="hub-open-items__overdue">{{ __("Overdue") }}</span>
+						<span v-if="item.due_date" class="hub-recent__time">
+							{{ frappe.datetime.str_to_user(item.due_date) }}
+						</span>
+					</li>
+				</ul>
+			</div>
+
 			<div class="hub-overview__grid">
 				<div class="hub-card">
 					<div class="hub-card__title">{{ __("Activities") }}</div>
@@ -190,6 +243,58 @@ const recent_entries = computed(() => {
 </template>
 
 <style scoped>
+.hub-health {
+	margin-bottom: 14px;
+}
+
+.hub-health__row {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 20px;
+	margin-top: 6px;
+}
+
+.hub-health__item {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+}
+
+.hub-health__dot {
+	width: 10px;
+	height: 10px;
+	border-radius: 50%;
+	flex: 0 0 auto;
+}
+
+.hub-health__dot--green {
+	background: var(--green-500, #2e7d32);
+}
+
+.hub-health__dot--orange {
+	background: var(--orange-500, #ef8f2f);
+}
+
+.hub-health__dot--red {
+	background: var(--red-500, #d1403d);
+}
+
+.hub-health__label {
+	font-size: var(--text-sm);
+	color: var(--text-color);
+}
+
+.hub-open-items {
+	margin-bottom: 14px;
+}
+
+.hub-open-items__overdue {
+	flex: 0 0 auto;
+	color: var(--red-500, var(--text-on-red));
+	font-size: var(--text-xs);
+	font-weight: 600;
+}
+
 .hub-overview__grid {
 	display: grid;
 	grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
