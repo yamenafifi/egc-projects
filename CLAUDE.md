@@ -346,3 +346,79 @@ a raw JS array.
 - `bench migrate` clean and idempotent; `frappe`/`erpnext`/`hrms` unmodified throughout.
 - No core Frappe/ERPNext/HRMS modification at any point — confirmed by `git status`, not by
   assumption.
+
+## Build history — v2 technical changelog
+
+v2 is the "Procore-Level Functional & UX Upgrade" — an additive, backward-compatible deepening
+of v1, not a rewrite (docs/ARCHITECTURE_V2.md is the binding spec). Built entirely by direct work
+in this bench (no Sonnet sub-agent delegation past Wave A — four consecutive sub-agents hit
+session-limit failures on Wave B, and the work continued directly from that point on).
+
+### `9131870` — Wave A: Project Information, Documents tool, Hub shell/header redesign
+
+Project Profile/Stakeholders doctype and API, healthcare-context fields, the Hub's redesigned
+header/shell, and the Documents tab's promotion to a full detail workspace.
+
+### `f07bd77` / `56ef0d1` — Wave B: Activity schedule, parent rollup, dependencies
+
+`activity_control.py` (new engine module): `refresh_activity_rollup`/`refresh_ancestors` derive a
+group Activity's dates/duration/status/progress from its direct children only, bottom-up, on
+every child write — never independently stored. `EGC Activity Dependency` (predecessor/successor,
+cycle-checked via BFS, composite-unique-indexed). `ActivityDetail.vue` — full detail drawer
+(schedule, dependencies with add/remove, children, linked Submittals/Documents, history).
+`duration_days` writes `0` rather than `None` when dates are missing — `frappe.db.set_value`
+skips the `cint(None)→0` coercion a normal `doc.save()` gets, and the column is `NOT NULL DEFAULT
+0`, so a bare `None` throws `IntegrityError`. 10 + 12 new tests.
+
+### `aeb9252` — Wave B: WBS operational upgrade
+
+`api/wbs.py`: subtree-wide rollups (`get_wbs_summary`, O(n²) over the NestedSet lft/rgt
+containment, deliberate for simplicity at this scale), `reorder_wbs_nodes`, `copy_wbs_branch`,
+`bulk_create_wbs_nodes` (abort-on-first-error with manual cleanup — Frappe's own request-level
+rollback only applies to real HTTP calls, not direct-Python test calls). `WbsTreeNode.vue` gains
+rollup metrics, reorder, and quick-add; the Bulk Add dialog was rewritten to match ERPNext's own
+native `frappe.ui.Dialog` + `Table` pattern (`task_tree.js`'s "Add Multiple Tasks") rather than a
+bespoke Vue modal. Found and fixed live: `reorder_wbs_nodes`/`bulk_create_wbs_nodes` 500'd on
+every real browser call — Frappe v16's whitelist arg validation uses Pydantic's
+`validate_python`, not `validate_json`, so a `list[...]`/`dict[...]` type hint rejects the
+JSON-encoded string a real HTTP call actually sends; fixed by leaving the param untyped and
+calling `frappe.parse_json()` manually. Regression tests added for both endpoints.
+
+### `eea04c5` / `04ee06b` — Wave C: Submittal review workflows, Ball in Court, notifications
+
+`EGC Submittal Workflow Template` (+ step child table) and `EGC Submittal Review Step` (a
+standalone hash-named doctype, not a child table — steps need independent ToDo assignment and
+identity-based authorization). `submittal_control.py` gains a ~375-line v2 section on top of the
+untouched v1 lifecycle: steps sharing a `sequence` form a parallel stage; a stage advances only
+once every *required* step at that stage has responded; a single Revise & Resubmit/Rejected from
+*any* reviewer ends the whole submission immediately without waiting on siblings; an optional step
+still open when its stage clears is marked Skipped, not left dangling. `record_step_response`'s
+authorization is identity-based (`reviewer_user`, or an internal override role), not
+doctype-permission-based, since a reviewer may be an external party holding no EGC role at all.
+Ball in Court is never stored independently — always derived live from `In Review` step rows, then
+copied onto the submission/Submittal for display. `notifications.py` (new) rides
+`frappe.desk.form.assign_to` for delivery and `notification_log.enqueue_create_notification` for
+the daily due-date reminder scheduled task, baking the date into the dedupe key so it actually
+recurs. `SubmittalDetail.vue` (new) — the full detail workspace: workflow timeline, apply-template,
+submit/respond, documents, submission history, linked activities.
+
+Bugs found via genuine multi-step live browser testing (not caught by the 130+ unit tests, which
+asserted the engine's own field writes rather than what the UI actually reads):
+- `_evaluate_stage` checked "any required step still open?" *before* checking for a blocking
+  terminal response, so a lone Revise & Resubmit/Rejected didn't end the submission while a
+  sibling required step was still `In Review`. Reordered so the blocking check always runs first.
+- A brand-new Submittal (zero submissions) had no path in the Hub to create its first submission
+  cycle — the entire "Current Submission" section was gated on one already existing. Added
+  `create_first_submission` (deliberately distinct from `create_next_revision`, whose "only after
+  Responded" contract is unchanged) and an empty-state action in the drawer.
+- `SubmittalDetail.vue`'s `can_respond_to()` only showed the Respond button for the exact
+  `reviewer_user`, never for an internal override role, even though the backend already
+  authorizes it — an admin covering for an external reviewer had no UI path. It also required
+  `canWrite` even for the assigned reviewer's own step, breaking the documented external-reviewer
+  case entirely. Fixed to mirror the backend's override role set exactly.
+- `_refresh_ball_in_court` wrote only the submission's own `ball_in_court_label`, never
+  propagating to the parent Submittal's `ball_in_court` — the field the Hub register and drawer
+  header actually display. `refresh_submittal_state` was wired only into terminal/lifecycle paths,
+  so a mid-workflow stage advance left the header showing the *previous* stage's reviewer until
+  the whole submission resolved. Fixed by propagating on every Ball in Court recompute; covered by
+  a regression test asserting the Submittal's field changes mid-workflow, not just at the end.
