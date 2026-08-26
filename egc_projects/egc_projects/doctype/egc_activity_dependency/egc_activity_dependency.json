@@ -1,0 +1,131 @@
+{
+	"actions": [],
+	"allow_rename": 0,
+	"autoname": "hash",
+	"creation": "2026-08-25 00:00:00.000000",
+	"doctype": "DocType",
+	"engine": "InnoDB",
+	"field_order": [
+		"predecessor",
+		"successor",
+		"column_break_1",
+		"dependency_type",
+		"lag_days",
+		"project"
+	],
+	"fields": [
+		{
+			"fieldname": "predecessor",
+			"fieldtype": "Link",
+			"in_list_view": 1,
+			"in_standard_filter": 1,
+			"label": "Predecessor",
+			"options": "EGC Activity",
+			"reqd": 1
+		},
+		{
+			"fieldname": "successor",
+			"fieldtype": "Link",
+			"in_list_view": 1,
+			"in_standard_filter": 1,
+			"label": "Successor",
+			"options": "EGC Activity",
+			"reqd": 1
+		},
+		{
+			"fieldname": "column_break_1",
+			"fieldtype": "Column Break"
+		},
+		{
+			"default": "Finish-to-Start",
+			"fieldname": "dependency_type",
+			"fieldtype": "Select",
+			"in_list_view": 1,
+			"label": "Dependency Type",
+			"options": "Finish-to-Start\nStart-to-Start\nFinish-to-Finish\nStart-to-Finish"
+		},
+		{
+			"default": "0",
+			"description": "Working days. Positive lag delays the successor; negative lag (lead) is permitted.",
+			"fieldname": "lag_days",
+			"fieldtype": "Int",
+			"label": "Lag (Days)"
+		},
+		{
+			"fetch_from": "predecessor.project",
+			"fieldname": "project",
+			"fieldtype": "Link",
+			"in_standard_filter": 1,
+			"label": "Project",
+			"options": "Project",
+			"read_only": 1,
+			"reqd": 1
+		}
+	],
+	"index_web_pages_for_search": 1,
+	"links": [],
+	"module": "EGC Projects",
+	"naming_rule": "Hash",
+	"custom": 0,
+	"name": "EGC Activity Dependency",
+	"owner": "Administrator",
+	"permissions": [
+		{
+			"create": 1,
+			"delete": 1,
+			"email": 1,
+			"export": 1,
+			"print": 1,
+			"read": 1,
+			"report": 1,
+			"role": "System Manager",
+			"share": 1,
+			"write": 1
+		},
+		{
+			"create": 1,
+			"delete": 1,
+			"email": 1,
+			"export": 1,
+			"print": 1,
+			"read": 1,
+			"report": 1,
+			"role": "EGC Project Manager",
+			"share": 1,
+			"write": 1
+		},
+		{
+			"create": 1,
+			"delete": 1,
+			"email": 1,
+			"export": 1,
+			"print": 1,
+			"read": 1,
+			"report": 1,
+			"role": "EGC Project Engineer",
+			"share": 1,
+			"write": 1
+		},
+		{
+			"email": 1,
+			"export": 1,
+			"print": 1,
+			"read": 1,
+			"report": 1,
+			"role": "EGC Document Controller"
+		},
+		{
+			"email": 1,
+			"export": 1,
+			"print": 1,
+			"read": 1,
+			"report": 1,
+			"role": "EGC Project Viewer"
+		}
+	],
+	"search_fields": "predecessor,successor,project",
+	"sort_field": "modified",
+	"sort_order": "DESC",
+	"states": [],
+	"track_changes": 1
+}

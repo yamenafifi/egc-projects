@@ -20,11 +20,20 @@
   "planned_start_date",
   "column_break_3",
   "planned_end_date",
+  "duration_days",
+  "is_milestone",
+  "section_break_actual_forecast",
+  "actual_start_date",
+  "actual_end_date",
+  "column_break_actual_forecast",
+  "forecast_start_date",
+  "forecast_end_date",
   "section_break_status",
   "status",
   "percent_complete",
   "column_break_4",
   "responsible_user",
+  "responsible_supplier",
   "section_break_description",
   "description",
   "lft",
@@ -111,7 +120,8 @@
    "fieldname": "planned_start_date",
    "fieldtype": "Date",
    "in_list_view": 1,
-   "label": "Planned Start Date"
+   "label": "Planned Start Date",
+   "read_only_depends_on": "eval:doc.is_group"
   },
   {
    "fieldname": "column_break_3",
@@ -121,7 +131,52 @@
    "fieldname": "planned_end_date",
    "fieldtype": "Date",
    "in_list_view": 1,
-   "label": "Planned End Date"
+   "label": "Planned End Date",
+   "read_only_depends_on": "eval:doc.is_group"
+  },
+  {
+   "description": "date_diff(Planned End Date, Planned Start Date) + 1 when both are set. System-computed; never entered directly (docs/ARCHITECTURE_V2.md §5).",
+   "fieldname": "duration_days",
+   "fieldtype": "Int",
+   "label": "Duration (Days)",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "is_milestone",
+   "fieldtype": "Check",
+   "label": "Is Milestone"
+  },
+  {
+   "fieldname": "section_break_actual_forecast",
+   "fieldtype": "Section Break",
+   "label": "Actual & Forecast Dates"
+  },
+  {
+   "fieldname": "actual_start_date",
+   "fieldtype": "Date",
+   "label": "Actual Start Date",
+   "read_only_depends_on": "eval:doc.is_group"
+  },
+  {
+   "fieldname": "actual_end_date",
+   "fieldtype": "Date",
+   "label": "Actual End Date",
+   "read_only_depends_on": "eval:doc.is_group"
+  },
+  {
+   "fieldname": "column_break_actual_forecast",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "forecast_start_date",
+   "fieldtype": "Date",
+   "label": "Forecast Start Date"
+  },
+  {
+   "fieldname": "forecast_end_date",
+   "fieldtype": "Date",
+   "label": "Forecast End Date"
   },
   {
    "fieldname": "section_break_status",
@@ -135,13 +190,15 @@
    "in_list_view": 1,
    "in_standard_filter": 1,
    "label": "Status",
-   "options": "Not Started\nIn Progress\nOn Hold\nCompleted\nCancelled"
+   "options": "Not Started\nIn Progress\nOn Hold\nCompleted\nCancelled",
+   "read_only_depends_on": "eval:doc.is_group"
   },
   {
    "default": "0",
    "fieldname": "percent_complete",
    "fieldtype": "Percent",
-   "label": "% Complete"
+   "label": "% Complete",
+   "read_only_depends_on": "eval:doc.is_group"
   },
   {
    "fieldname": "column_break_4",
@@ -152,6 +209,12 @@
    "fieldtype": "Link",
    "label": "Responsible User",
    "options": "User"
+  },
+  {
+   "fieldname": "responsible_supplier",
+   "fieldtype": "Link",
+   "label": "Responsible Supplier",
+   "options": "Supplier"
   },
   {
    "fieldname": "section_break_description",

@@ -188,9 +188,14 @@ save_project_profile(project, data: dict) -> saved profile dict   # gated on `ed
 - `actual_start_date`, `actual_end_date` (Date).
 - `forecast_start_date`, `forecast_end_date` (Date).
 - `duration_days` (Int, **read-only, system-computed** — `date_diff(planned_end_date,
-  planned_start_date) + 1` when both are set, else null. This is the only derived-date rule in
-  v2; it does not attempt working-day/calendar logic — that is out of scope, matching the
-  brief's explicit "do not implement a fragile home-grown scheduler").
+  planned_start_date) + 1` when both are set, else **0**. Int is a Frappe numeric fieldtype —
+  its DB column is `NOT NULL DEFAULT 0`, and `frappe.db.set_value` (which the rollup engine
+  uses) does not run the `cint(None) → 0` coercion a normal `doc.save()` would, so writing a
+  bare `None` here throws `IntegrityError`. `0` is unambiguous as "not computed": the formula
+  can never itself produce 0 (a same-day span is `date_diff(x, x) + 1 == 1`), so it cannot
+  collide with a real duration — the frontend renders 0 as "—", not "0 days". This is the only
+  derived-date rule in v2; it does not attempt working-day/calendar logic — that is out of
+  scope, matching the brief's explicit "do not implement a fragile home-grown scheduler").
 - `is_milestone` (Check).
 - `responsible_supplier` (Link `Supplier`, optional) — added alongside the existing
   `responsible_user`. A subcontractor in ERPNext already exists as a `Supplier`; reusing it

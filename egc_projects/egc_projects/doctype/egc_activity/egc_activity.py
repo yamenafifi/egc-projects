@@ -2,16 +2,23 @@
 
 A single self-referencing NestedSet DocType used recursively at every level (group activities,
 leaf activities, milestones). There is no Sub-Activity DocType and ERPNext `Task` is not used
-here — see docs/ARCHITECTURE.md §2.3. Dependencies, lag, baselines, calendars, critical path and
-progress roll-up are deferred (§9) and must not be added here.
+here — see docs/ARCHITECTURE.md §2.3.
+
+**v2 addendum (docs/ARCHITECTURE_V2.md §5):** actual/forecast dates, `duration_days` and
+`is_milestone` add schedule depth; a group Activity's `percent_complete`/dates/`duration_days`/
+`status` are now derived from its children by `activity_control.py`, reversing v1's "groups are
+manually entered, no roll-up" decision — see that module and §5's own callout for the reasoning.
+Dependencies (`EGC Activity Dependency`, §6) are recorded and validated only — no automatic
+forecast-date shifting or critical-path calculation, matching §6's explicit boundary.
 """
 
 import frappe
 from frappe import _
 from frappe.desk.treeview import make_tree_args
-from frappe.utils import flt, getdate, sbool, today
+from frappe.utils import date_diff, flt, getdate, sbool, today
 from frappe.utils.nestedset import NestedSet
 
+from egc_projects.egc_projects import activity_control
 from egc_projects.egc_projects.constants import (
 	ACTIVITY_CLOSED_STATUSES,
 	ACTIVITY_COMPLETED,
@@ -43,11 +50,17 @@ class EGCActivity(NestedSet):
 	if TYPE_CHECKING:
 		from frappe.types import DF
 
+		actual_end_date: DF.Date | None
+		actual_start_date: DF.Date | None
 		activity_code: DF.Data
 		activity_name: DF.Data
 		description: DF.TextEditor | None
 		discipline: DF.Link | None
+		duration_days: DF.Int
+		forecast_end_date: DF.Date | None
+		forecast_start_date: DF.Date | None
 		is_group: DF.Check
+		is_milestone: DF.Check
 		lft: DF.Int
 		old_parent: DF.Data | None
 		parent_egc_activity: DF.Link | None
@@ -55,6 +68,7 @@ class EGCActivity(NestedSet):
 		planned_end_date: DF.Date | None
 		planned_start_date: DF.Date | None
 		project: DF.Link
+		responsible_supplier: DF.Link | None
 		responsible_user: DF.Link | None
 		rgt: DF.Int
 		sequence: DF.Int
@@ -70,7 +84,9 @@ class EGCActivity(NestedSet):
 		validate_project_not_changed_with_children(self, "parent_egc_activity", "Activity")
 		validate_same_project(self, "wbs_node", "EGC WBS Node", "WBS Node")
 		self.validate_dates()
+		self.compute_duration()
 		self.validate_progress()
+		activity_control.assert_group_fields_not_hand_edited(self)
 
 	def validate_dates(self):
 		if self.planned_start_date and self.planned_end_date:
@@ -79,6 +95,22 @@ class EGCActivity(NestedSet):
 					_("Planned End Date cannot be before Planned Start Date."),
 					frappe.exceptions.InvalidDates,
 				)
+
+	def compute_duration(self):
+		# A group's duration_days is rollup-owned (activity_control.py, from the rolled-up
+		# planned dates) — recomputing it here from the group's own fields would fight the
+		# engine's write on every save, so only a leaf computes its own duration.
+		if self.is_group:
+			return
+		if self.planned_start_date and self.planned_end_date:
+			self.duration_days = date_diff(self.planned_end_date, self.planned_start_date) + 1
+		else:
+			# `duration_days` is an Int field — Frappe would coerce a bare `None` to 0 here too
+			# (`cint(None) == 0` in `get_valid_dict`), but writing 0 explicitly keeps this in
+			# sync with activity_control.py's own rollup writes, which go through
+			# `frappe.db.set_value` and get no such coercion. See that module for why 0 is an
+			# unambiguous "not computed" (the formula above can never itself produce 0).
+			self.duration_days = 0
 
 	def validate_progress(self):
 		# The two terminal statuses own percent_complete outright; any other status (including
@@ -89,6 +121,18 @@ class EGCActivity(NestedSet):
 			self.percent_complete = 0
 		else:
 			self.percent_complete = max(0, min(100, flt(self.percent_complete)))
+
+	def on_update(self):
+		super().on_update()
+		activity_control.refresh_ancestors(self.parent_egc_activity)
+
+	def on_trash(self, allow_root_deletion=False):
+		# NestedSet.on_trash() clears self.parent_egc_activity on the in-memory doc before
+		# returning (it detaches the node from the tree ahead of the row's own deletion), so the
+		# parent to refresh must be captured before calling it, not after.
+		parent = self.parent_egc_activity
+		super().on_trash(allow_root_deletion=allow_root_deletion)
+		activity_control.refresh_ancestors(parent)
 
 	@property
 	def is_overdue(self) -> bool:
