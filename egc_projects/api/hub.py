@@ -777,6 +777,13 @@ def get_financials(project: str) -> dict:
 # With no Actual Cost yet, CPI is undefined and EAC falls back to the plain Budget (no evidence
 # yet to deviate from it) — so ETC is simply the full Budget, exactly as expected before any
 # money has been spent.
+#
+# EXPERIMENTAL (Level 1 §36): this is textbook EVM shaped around one number this app doesn't
+# actually have yet — a per-Activity BUDGETED cost. `percent_complete` is a physical-progress
+# proxy (weight_pct's own weighting, not a dollar weighting), so "Earned Value" here is really
+# "budget x physical progress", not a certified cost-loaded EVM figure. Correct once real
+# cost-loaded budgeting exists; until then, this function's only caller (FinancialsTab.vue) must
+# keep it visibly marked as a rough estimate, never presented as a contractual forecast.
 
 _COST_FORECAST_PROJECT_FIELDS = (
 	"estimated_costing",

@@ -237,7 +237,12 @@ async function open_drill_down(row) {
 		</div>
 
 		<div class="hub-card hub-cost-forecast">
-			<div class="hub-financials__label">{{ __("Cost to Complete") }}</div>
+			<div class="hub-cost-forecast__title-row">
+				<div class="hub-financials__label">{{ __("Cost to Complete") }}</div>
+				<span class="hub-cost-forecast__experimental-tag" :title="__('This estimate has no real cost-loaded budget behind it yet — treat it as a rough indicator, never a contractual figure.')">
+					{{ __("Experimental") }}
+				</span>
+			</div>
 
 			<LoadingState v-if="cost_forecast_loading" :rows="2" />
 			<ErrorState v-else-if="cost_forecast_error" :message="cost_forecast_error" @retry="reload_cost_forecast" />
@@ -249,6 +254,13 @@ async function open_drill_down(row) {
 			/>
 
 			<template v-else-if="cost_forecast">
+				<p class="hub-cost-forecast__disclaimer">
+					{{
+						__(
+							"Estimated from overall physical Activity progress against a single project budget figure — not a certified earned-value calculation from cost-loaded activities. Use as a rough indicator, not a contractual forecast."
+						)
+					}}
+				</p>
 				<div class="hub-cost-forecast__row">
 					<div class="hub-cost-forecast__stat">
 						<div class="hub-cost-forecast__stat-label">{{ __("Spent to Date") }}</div>
@@ -275,7 +287,7 @@ async function open_drill_down(row) {
 						<strong>{{ format_contract_amount(cost_forecast.budget) }}</strong>
 					</div>
 					<div class="hub-contract-value__item">
-						{{ __("% Complete (weighted)") }}
+						{{ __("Physical % Complete (weighted, not cost-based)") }}
 						<strong>{{ Math.round(cost_forecast.percent_complete) }}%</strong>
 					</div>
 					<div class="hub-contract-value__item" :class="{ 'hub-cost-forecast__over-text': is_over_budget }">
@@ -434,6 +446,29 @@ async function open_drill_down(row) {
 .hub-cost-forecast {
 	padding: 16px 18px;
 	margin-bottom: 14px;
+}
+
+.hub-cost-forecast__title-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.hub-cost-forecast__experimental-tag {
+	font-size: var(--text-xs);
+	font-weight: 600;
+	color: var(--yellow-700, var(--orange-600));
+	background: var(--yellow-100, var(--bg-yellow));
+	border-radius: var(--border-radius-full);
+	padding: 1px 8px;
+	cursor: help;
+}
+
+.hub-cost-forecast__disclaimer {
+	margin: 4px 0 12px;
+	font-size: var(--text-xs);
+	color: var(--text-muted);
+	max-width: 60ch;
 }
 
 .hub-cost-forecast__row {
