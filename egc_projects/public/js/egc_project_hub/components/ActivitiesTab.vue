@@ -9,6 +9,7 @@ import ErrorState from "./ErrorState.vue";
 import EmptyState from "./EmptyState.vue";
 import StatusPill from "./StatusPill.vue";
 import ActivityDetail from "./ActivityDetail.vue";
+import ActivityExpandPanel from "./ActivityExpandPanel.vue";
 
 const props = defineProps({
 	project: { type: String, required: true },
@@ -38,6 +39,24 @@ function close_detail() {
 function on_detail_changed() {
 	reload();
 }
+
+// -- inline expand: "drop down and showcase what's underneath" without navigating away ---------
+
+const expanded = ref(new Set());
+
+function toggle_expand(name) {
+	const next = new Set(expanded.value);
+	if (next.has(name)) {
+		next.delete(name);
+	} else {
+		next.add(name);
+	}
+	expanded.value = next;
+}
+
+// Toggle column + Code/Name/WBS/Discipline/Planned Start/Planned Finish/Duration/Actual
+// Finish/Status/Weight/% Complete/Responsible, plus the actions column when it's shown.
+const column_count = computed(() => 13 + (can_write.value ? 1 : 0));
 
 const status_filter = ref("");
 const discipline_filter = ref("");
@@ -81,6 +100,13 @@ function format_date(value) {
 // activity_control.py) — 0 is the documented "not computed" sentinel, never a real duration.
 function format_duration(value) {
 	return value ? __("{0}d", [value]) : "—";
+}
+
+// weight_pct defaults to 0 (see egc_activity.json) for an Activity that hasn't been allocated a
+// share yet — indistinguishable from a genuine 0% allocation, so both render as "not set" here,
+// matching duration_days's own 0-as-sentinel convention above.
+function format_weight(value) {
+	return value ? __("{0}%", [Math.round(value)]) : "—";
 }
 
 function open_quick_add(row) {
@@ -156,6 +182,7 @@ function open_quick_add(row) {
 				<table class="hub-table">
 					<thead>
 						<tr>
+							<th class="hub-activities__toggle-col"></th>
 							<th>{{ __("Code") }}</th>
 							<th>{{ __("Name") }}</th>
 							<th>{{ __("WBS") }}</th>
@@ -165,65 +192,87 @@ function open_quick_add(row) {
 							<th>{{ __("Duration") }}</th>
 							<th>{{ __("Actual Finish") }}</th>
 							<th>{{ __("Status") }}</th>
+							<th :title="__('Share of parent\'s rolled-up progress')">{{ __("Weight") }}</th>
 							<th>{{ __("% Complete") }}</th>
 							<th>{{ __("Responsible") }}</th>
 							<th v-if="can_write"></th>
 						</tr>
 					</thead>
 					<tbody>
-						<tr
-							v-for="row in filtered"
-							:key="row.name"
-							class="hub-table__row--clickable"
-							@click="open_detail(row.name)"
-						>
-							<td>
-								<span class="hub-activities__indent" :style="{ width: (row.indent || 0) * 18 + 'px' }" />
-								{{ row.activity_code }}
-							</td>
-							<td>
-								{{ row.activity_name }}
-								<span v-if="row.is_milestone" class="hub-activities__milestone" :title="__('Milestone')" />
-							</td>
-							<td>
-								<a
-									v-if="row.wbs_node"
-									:href="`/app/egc-wbs-node/${encodeURIComponent(row.wbs_node)}`"
-									:title="row.wbs_node"
-									@click.stop
-									>{{ row.wbs_label || row.wbs_node }}</a
-								>
-								<span v-else>—</span>
-							</td>
-							<td>{{ row.discipline || "—" }}</td>
-							<td :class="{ 'hub-table__overdue': row.is_overdue }">{{ format_date(row.planned_start_date) }}</td>
-							<td :class="{ 'hub-table__overdue': row.is_overdue }">
-								{{ format_date(row.planned_end_date) }}
-								<span v-if="row.is_overdue" class="hub-table__overdue-tag">{{ __("Overdue") }}</span>
-							</td>
-							<td>{{ format_duration(row.duration_days) }}</td>
-							<td>{{ format_date(row.actual_end_date) }}</td>
-							<td><StatusPill :status="row.status" /></td>
-							<td>
-								<div class="hub-percent">
-									<div class="hub-percent__track">
-										<div class="hub-percent__fill" :style="{ width: (row.percent_complete || 0) + '%' }" />
+						<template v-for="row in filtered" :key="row.name">
+							<tr class="hub-table__row--clickable" @click="toggle_expand(row.name)">
+								<td class="hub-activities__toggle-col">
+									<button
+										type="button"
+										class="hub-activities__toggle"
+										:class="{ 'hub-activities__toggle--open': expanded.has(row.name) }"
+										:aria-expanded="expanded.has(row.name)"
+										:title="__('Show submittals, documents and dependencies')"
+									>
+										▸
+									</button>
+								</td>
+								<td>
+									<span class="hub-activities__indent" :style="{ width: (row.indent || 0) * 18 + 'px' }" />
+									<a href="#" class="hub-link" @click.stop.prevent="open_detail(row.name)">{{ row.activity_code }}</a>
+								</td>
+								<td>
+									{{ row.activity_name }}
+									<span v-if="row.is_milestone" class="hub-activities__milestone" :title="__('Milestone')" />
+								</td>
+								<td>
+									<a
+										v-if="row.wbs_node"
+										:href="`/app/egc-wbs-node/${encodeURIComponent(row.wbs_node)}`"
+										:title="row.wbs_node"
+										@click.stop
+										>{{ row.wbs_label || row.wbs_node }}</a
+									>
+									<span v-else>—</span>
+								</td>
+								<td>{{ row.discipline || "—" }}</td>
+								<td :class="{ 'hub-table__overdue': row.is_overdue }">{{ format_date(row.planned_start_date) }}</td>
+								<td :class="{ 'hub-table__overdue': row.is_overdue }">
+									{{ format_date(row.planned_end_date) }}
+									<span v-if="row.is_overdue" class="hub-table__overdue-tag">{{ __("Overdue") }}</span>
+								</td>
+								<td>{{ format_duration(row.duration_days) }}</td>
+								<td>{{ format_date(row.actual_end_date) }}</td>
+								<td><StatusPill :status="row.status" /></td>
+								<td>{{ format_weight(row.weight_pct) }}</td>
+								<td>
+									<div class="hub-percent">
+										<div class="hub-percent__track">
+											<div class="hub-percent__fill" :style="{ width: (row.percent_complete || 0) + '%' }" />
+										</div>
+										<span class="hub-percent__value">{{ Math.round(row.percent_complete || 0) }}%</span>
 									</div>
-									<span class="hub-percent__value">{{ Math.round(row.percent_complete || 0) }}%</span>
-								</div>
-							</td>
-							<td>{{ row.responsible_user || row.responsible_supplier || "—" }}</td>
-							<td v-if="can_write">
-								<button
-									type="button"
-									class="btn btn-xs btn-default"
-									:title="__('Add child activity')"
-									@click.stop="open_quick_add(row)"
-								>
-									+
-								</button>
-							</td>
-						</tr>
+								</td>
+								<td>{{ row.responsible_user || row.responsible_supplier || "—" }}</td>
+								<td v-if="can_write">
+									<button
+										type="button"
+										class="btn btn-xs btn-default"
+										:title="__('Add child activity')"
+										@click.stop="open_quick_add(row)"
+									>
+										+
+									</button>
+								</td>
+							</tr>
+							<tr v-if="expanded.has(row.name)" class="hub-activities__expand-row">
+								<td :colspan="column_count">
+									<ActivityExpandPanel
+										:activity="row.name"
+										:project="project"
+										:can-write="can_write"
+										:link-counts="row.link_counts || {}"
+										@open-detail="open_detail"
+										@changed="reload"
+									/>
+								</td>
+							</tr>
+						</template>
 					</tbody>
 				</table>
 			</div>
@@ -255,6 +304,51 @@ function open_quick_add(row) {
 	transform: rotate(45deg);
 	background: var(--blue-500, var(--text-color));
 	vertical-align: middle;
+}
+
+.hub-activities__toggle-col {
+	width: 28px;
+	padding-left: 10px !important;
+	padding-right: 0 !important;
+}
+
+.hub-activities__toggle {
+	appearance: none;
+	border: none;
+	background: none;
+	padding: 0;
+	width: 20px;
+	height: 20px;
+	line-height: 20px;
+	text-align: center;
+	color: var(--text-muted);
+	cursor: pointer;
+	font-size: var(--text-xs);
+	transition: transform 0.1s ease;
+}
+
+.hub-activities__toggle:hover {
+	color: var(--text-color);
+}
+
+.hub-activities__toggle--open {
+	transform: rotate(90deg);
+}
+
+.hub-activities__expand-row td {
+	padding: 0 !important;
+}
+
+.hub-link {
+	color: var(--text-color);
+	cursor: pointer;
+	text-decoration: none;
+	border-bottom: 1px dashed var(--border-color);
+}
+
+.hub-link:hover {
+	color: var(--text-color);
+	border-bottom-color: var(--text-color);
 }
 
 .hub-toolbar__check {

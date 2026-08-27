@@ -516,6 +516,7 @@ def get_activities(project: str, filters=None) -> list[dict]:
 			"planned_end_date",
 			"status",
 			"percent_complete",
+			"weight_pct",
 			"responsible_user",
 			"responsible_supplier",
 			"duration_days",
