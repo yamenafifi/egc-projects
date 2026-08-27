@@ -1,5 +1,5 @@
 <script setup>
-import { watch } from "vue";
+import { ref, watch } from "vue";
 import {
 	get_document_detail,
 	create_document_revision,
@@ -11,6 +11,7 @@ import LoadingState from "./LoadingState.vue";
 import ErrorState from "./ErrorState.vue";
 import EmptyState from "./EmptyState.vue";
 import StatusPill from "./StatusPill.vue";
+import FilePreview from "./FilePreview.vue";
 
 const props = defineProps({
 	document: { type: String, required: true },
@@ -47,7 +48,22 @@ function open_new_revision_dialog() {
 		title: __("New Revision"),
 		fields: [
 			{ fieldname: "revision", fieldtype: "Data", label: __("Revision"), reqd: 1 },
-			{ fieldname: "file", fieldtype: "Attach", label: __("File"), reqd: 1 },
+			{
+				fieldname: "file",
+				fieldtype: "Attach",
+				label: __("File"),
+				reqd: 1,
+				// ControlAttach.set_upload_options() only fills in doctype/docname/fieldname
+				// `if (this.frm)` — a bare frappe.ui.Dialog has no bound form, so without this
+				// explicit `options` override every file uploaded here would land as an orphaned
+				// File record (null attached_to_doctype), invisible to /app/file and to any
+				// attached_to_*-filtered query or private-file permission check. The revision
+				// itself doesn't exist yet at upload time (it's created after this dialog
+				// submits), so the file is attached to the parent Document's own `current_file`
+				// field instead — the field that will end up holding this same URL once the
+				// revision is issued.
+				options: { doctype: "EGC Project Document", docname: props.document, fieldname: "current_file" },
+			},
 			{
 				fieldname: "revision_date",
 				fieldtype: "Date",
@@ -111,6 +127,20 @@ function issue_revision(rev) {
 }
 
 const READINESS_VALUES = ["Uploaded", "Reviewed", "Ready to Publish"];
+
+// -- inline preview: toggled per row, and once for the "Current File" summary -------------------
+
+const preview_open = ref(new Set());
+
+function toggle_preview(key) {
+	const next = new Set(preview_open.value);
+	if (next.has(key)) {
+		next.delete(key);
+	} else {
+		next.add(key);
+	}
+	preview_open.value = next;
+}
 
 function do_update_readiness(rev, event) {
 	update_revision_readiness(rev.name, event.target.value)
@@ -192,17 +222,26 @@ function do_update_readiness(rev, event) {
 						</dl>
 						<div class="doc-detail__file">
 							<span class="doc-detail__meta-label">{{ __("Current File") }}:</span>
-							<a
-								v-if="data.document.current_file"
-								:href="data.document.current_file"
-								target="_blank"
-								rel="noopener"
-								class="hub-link"
-							>
-								{{ __("Open") }}
-							</a>
+							<template v-if="data.document.current_file">
+								<a class="hub-link" href="#" @click.prevent="toggle_preview('current')">
+									{{ preview_open.has('current') ? __("Hide Preview") : __("Preview") }}
+								</a>
+								<a
+									:href="data.document.current_file"
+									target="_blank"
+									rel="noopener"
+									class="hub-link doc-detail__open-link"
+								>
+									{{ __("Open") }}
+								</a>
+							</template>
 							<span v-else class="text-muted">{{ __("No revision issued yet") }}</span>
 						</div>
+						<FilePreview
+							v-if="preview_open.has('current')"
+							:file-url="data.document.current_file"
+							:file-name="data.document.document_number"
+						/>
 					</section>
 
 					<section class="doc-detail__section">
@@ -228,43 +267,50 @@ function do_update_readiness(rev, event) {
 									</tr>
 								</thead>
 								<tbody>
-									<tr v-for="rev in data.revisions" :key="rev.name">
-										<td>
-											{{ rev.revision }}
-											<span v-if="rev.is_current" class="doc-detail__current-badge">{{ __("Current") }}</span>
-										</td>
-										<td><StatusPill :status="rev.revision_status" /></td>
-										<td>
-											<select
-												v-if="rev.docstatus === 0"
-												class="doc-detail__readiness-select"
-												:value="rev.readiness"
-												@change="do_update_readiness(rev, $event)"
-											>
-												<option v-for="value in READINESS_VALUES" :key="value" :value="value">{{ value }}</option>
-											</select>
-											<span v-else>{{ rev.readiness || "—" }}</span>
-										</td>
-										<td>{{ format_date(rev.revision_date) }}</td>
-										<td>{{ rev.issue_date ? format_date(rev.issue_date) : "—" }}</td>
-										<td>
-											<a v-if="rev.file" :href="rev.file" target="_blank" rel="noopener" class="hub-link">
-												{{ __("Open") }}
-											</a>
-											<span v-else>—</span>
-										</td>
-										<td>{{ rev.remarks || "—" }}</td>
-										<td>
-											<button
-												v-if="rev.docstatus === 0"
-												type="button"
-												class="btn btn-xs btn-default"
-												@click="confirm_issue(rev)"
-											>
-												{{ __("Issue") }}
-											</button>
-										</td>
-									</tr>
+									<template v-for="rev in data.revisions" :key="rev.name">
+										<tr>
+											<td>
+												{{ rev.revision }}
+												<span v-if="rev.is_current" class="doc-detail__current-badge">{{ __("Current") }}</span>
+											</td>
+											<td><StatusPill :status="rev.revision_status" /></td>
+											<td>
+												<select
+													v-if="rev.docstatus === 0"
+													class="doc-detail__readiness-select"
+													:value="rev.readiness"
+													@change="do_update_readiness(rev, $event)"
+												>
+													<option v-for="value in READINESS_VALUES" :key="value" :value="value">{{ value }}</option>
+												</select>
+												<span v-else>{{ rev.readiness || "—" }}</span>
+											</td>
+											<td>{{ format_date(rev.revision_date) }}</td>
+											<td>{{ rev.issue_date ? format_date(rev.issue_date) : "—" }}</td>
+											<td>
+												<a v-if="rev.file" href="#" class="hub-link" @click.prevent="toggle_preview(rev.name)">
+													{{ preview_open.has(rev.name) ? __("Hide") : __("Preview") }}
+												</a>
+												<span v-else>—</span>
+											</td>
+											<td>{{ rev.remarks || "—" }}</td>
+											<td>
+												<button
+													v-if="rev.docstatus === 0"
+													type="button"
+													class="btn btn-xs btn-default"
+													@click="confirm_issue(rev)"
+												>
+													{{ __("Issue") }}
+												</button>
+											</td>
+										</tr>
+										<tr v-if="preview_open.has(rev.name)">
+											<td colspan="8" class="doc-detail__preview-cell">
+												<FilePreview :file-url="rev.file" :file-name="rev.revision" />
+											</td>
+										</tr>
+									</template>
 								</tbody>
 							</table>
 						</div>
@@ -443,6 +489,17 @@ function do_update_readiness(rev, event) {
 .doc-detail__file {
 	margin-top: 12px;
 	font-size: var(--text-sm);
+	display: flex;
+	align-items: center;
+	gap: 10px;
+}
+
+.doc-detail__open-link {
+	margin-left: -2px;
+}
+
+.doc-detail__preview-cell {
+	padding: 10px 0 !important;
 }
 
 .doc-detail__meta-label {
