@@ -1,6 +1,7 @@
 <script setup>
 import { computed, watch } from "vue";
 import { get_financials, get_financial_transactions } from "../api";
+import { get_contract_value_breakdown } from "./change_orders_api";
 import { useHubResource } from "../composables/useHubResource";
 import LoadingState from "./LoadingState.vue";
 import ErrorState from "./ErrorState.vue";
@@ -15,15 +16,49 @@ const has_access = computed(() => Boolean(props.context?.permissions?.financials
 
 const { data, loading, error, reload } = useHubResource(() => get_financials(props.project));
 
+const {
+	data: contract_value,
+	loading: contract_value_loading,
+	error: contract_value_error,
+	reload: reload_contract_value,
+} = useHubResource(() => get_contract_value_breakdown(props.project));
+
+// A client-side hint only — EGC Change Order's own DocType permissions are the actual boundary.
+const WRITE_ROLES = ["EGC Project Manager", "System Manager"];
+const can_write_change_orders = computed(() =>
+	(frappe.user_roles || []).some((role) => WRITE_ROLES.includes(role))
+);
+
 watch(
 	() => [props.project, has_access.value],
 	() => {
 		// Never call get_financials() when the caller has no financial visibility — the tab
 		// isn't even shown in that case, but this guard keeps the component safe standalone.
-		if (has_access.value) reload();
+		if (has_access.value) {
+			reload();
+			reload_contract_value();
+		}
 	},
 	{ immediate: true }
 );
+
+function format_contract_amount(value) {
+	if (value === null || value === undefined) return "—";
+	return format_currency(value, data.value?.currency);
+}
+
+const change_orders_pct = computed(() => {
+	if (!contract_value.value || !contract_value.value.total) return 0;
+	return Math.round((contract_value.value.change_orders_total / contract_value.value.total) * 100);
+});
+
+function open_new_change_order() {
+	frappe.new_doc("EGC Change Order", { project: props.project });
+}
+
+function open_change_order(name) {
+	frappe.set_route("Form", "EGC Change Order", name);
+}
 
 function format_amount(value) {
 	if (value === null || value === undefined) return "—";
@@ -132,6 +167,55 @@ async function open_drill_down(row) {
 
 		<template v-else>
 		<div v-if="currency_note" class="hub-financials__currency">{{ currency_note }}</div>
+
+		<div class="hub-card hub-contract-value">
+			<div class="hub-contract-value__head">
+				<div class="hub-financials__label">{{ __("Contract Value") }}</div>
+				<button
+					v-if="can_write_change_orders"
+					type="button"
+					class="btn btn-xs btn-default"
+					@click="open_new_change_order"
+				>
+					{{ __("New Change Order") }}
+				</button>
+			</div>
+
+			<LoadingState v-if="contract_value_loading" :rows="2" />
+			<ErrorState v-else-if="contract_value_error" :message="contract_value_error" @retry="reload_contract_value" />
+
+			<template v-else-if="contract_value">
+				<div class="hub-contract-value__total">{{ format_contract_amount(contract_value.total) }}</div>
+
+				<div class="hub-contract-value__bar">
+					<div class="hub-contract-value__bar-fill" :style="{ width: change_orders_pct + '%' }" />
+				</div>
+
+				<div class="hub-contract-value__breakdown">
+					<div class="hub-contract-value__item">
+						<span class="hub-contract-value__swatch hub-contract-value__swatch--original" />
+						{{ __("Original Scope") }}
+						<strong>{{ format_contract_amount(contract_value.original_scope_total) }}</strong>
+					</div>
+					<div class="hub-contract-value__item">
+						<span class="hub-contract-value__swatch hub-contract-value__swatch--co" />
+						{{ __("Change Orders") }}
+						<strong>{{ format_contract_amount(contract_value.change_orders_total) }}</strong>
+						<span class="hub-contract-value__pct">({{ change_orders_pct }}%)</span>
+					</div>
+				</div>
+
+				<EmptyState v-if="!contract_value.change_orders.length" :title="__('No approved Change Orders yet')" />
+				<ul v-else class="hub-contract-value__list">
+					<li v-for="co in contract_value.change_orders" :key="co.name" @click="open_change_order(co.name)">
+						<span class="hub-contract-value__co-number">{{ co.co_number }}</span>
+						<span class="hub-contract-value__co-title">{{ co.title }}</span>
+						<span class="hub-contract-value__co-amount">{{ format_contract_amount(co.amount) }}</span>
+					</li>
+				</ul>
+			</template>
+		</div>
+
 		<div class="hub-financials__grid">
 			<div
 				v-for="row in rows"
@@ -159,6 +243,122 @@ async function open_drill_down(row) {
 	display: grid;
 	grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
 	gap: 14px;
+}
+
+.hub-contract-value {
+	padding: 16px 18px;
+	margin-bottom: 14px;
+}
+
+.hub-contract-value__head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	margin-bottom: 6px;
+}
+
+.hub-contract-value__total {
+	font-size: var(--text-2xl, 28px);
+	font-weight: 700;
+	color: var(--text-color);
+	margin-bottom: 12px;
+}
+
+.hub-contract-value__bar {
+	height: 10px;
+	border-radius: var(--border-radius-full);
+	background: var(--dark-green-200, var(--green-200));
+	overflow: hidden;
+	margin-bottom: 12px;
+}
+
+.hub-contract-value__bar-fill {
+	height: 100%;
+	background: var(--orange-500, var(--yellow-500));
+}
+
+.hub-contract-value__breakdown {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 20px;
+	margin-bottom: 14px;
+}
+
+.hub-contract-value__item {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	font-size: var(--text-sm);
+	color: var(--text-muted);
+}
+
+.hub-contract-value__item strong {
+	color: var(--text-color);
+	font-weight: 600;
+}
+
+.hub-contract-value__pct {
+	color: var(--text-muted);
+	font-size: var(--text-xs);
+}
+
+.hub-contract-value__swatch {
+	display: inline-block;
+	width: 10px;
+	height: 10px;
+	border-radius: 2px;
+}
+
+.hub-contract-value__swatch--original {
+	background: var(--dark-green-200, var(--green-200));
+}
+
+.hub-contract-value__swatch--co {
+	background: var(--orange-500, var(--yellow-500));
+}
+
+.hub-contract-value__list {
+	list-style: none;
+	margin: 0;
+	padding: 10px 0 0;
+	border-top: 1px solid var(--border-color);
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+
+.hub-contract-value__list li {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 6px 4px;
+	cursor: pointer;
+	border-radius: var(--border-radius);
+	font-size: var(--text-sm);
+}
+
+.hub-contract-value__list li:hover {
+	background: var(--control-bg);
+}
+
+.hub-contract-value__co-number {
+	font-weight: 600;
+	color: var(--text-color);
+	flex: 0 0 auto;
+}
+
+.hub-contract-value__co-title {
+	color: var(--text-muted);
+	flex: 1 1 auto;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.hub-contract-value__co-amount {
+	color: var(--text-color);
+	font-weight: 500;
+	flex: 0 0 auto;
 }
 
 .hub-financials__tile {
