@@ -153,6 +153,35 @@ function do_update_readiness(rev, event) {
 			frappe.msgprint({ title: __("Could Not Update Readiness"), message: e.message, indicator: "red" });
 		});
 }
+
+// -- compare revisions (Level 1 §34) -----------------------------------------------------------
+// Exactly two revisions side by side — a third pick bumps the OLDEST of the current two, so the
+// comparison always stays meaningful (two specific revisions, not an accumulating pile) without
+// forcing the user to manually deselect first.
+
+const compare_mode = ref(false);
+const compare_selection = ref([]);
+
+function toggle_compare_mode() {
+	compare_mode.value = !compare_mode.value;
+	compare_selection.value = [];
+}
+
+function toggle_compare_pick(rev_name) {
+	const next = [...compare_selection.value];
+	const index = next.indexOf(rev_name);
+	if (index !== -1) {
+		next.splice(index, 1);
+	} else {
+		next.push(rev_name);
+		if (next.length > 2) next.shift();
+	}
+	compare_selection.value = next;
+}
+
+function compare_rev(rev_name) {
+	return (data.value?.revisions || []).find((r) => r.name === rev_name);
+}
 </script>
 
 <template>
@@ -247,73 +276,108 @@ function do_update_readiness(rev, event) {
 					<section class="doc-detail__section">
 						<div class="doc-detail__section-head">
 							<div class="doc-detail__section-title">{{ __("Revision History") }}</div>
-							<button type="button" class="btn btn-xs btn-default" @click="open_new_revision_dialog">
-								{{ __("New Revision") }}
-							</button>
+							<div class="doc-detail__section-head-actions">
+								<button
+									v-if="data.revisions.length > 1"
+									type="button"
+									class="btn btn-xs"
+									:class="compare_mode ? 'btn-primary' : 'btn-default'"
+									@click="toggle_compare_mode"
+								>
+									{{ compare_mode ? __("Cancel Compare") : __("Compare Revisions") }}
+								</button>
+								<button type="button" class="btn btn-xs btn-default" @click="open_new_revision_dialog">
+									{{ __("New Revision") }}
+								</button>
+							</div>
 						</div>
 						<EmptyState v-if="!data.revisions.length" :title="__('No revisions recorded yet')" />
-						<div v-else class="hub-table-wrap">
-							<table class="hub-table">
-								<thead>
-									<tr>
-										<th>{{ __("Revision") }}</th>
-										<th>{{ __("Status") }}</th>
-										<th>{{ __("Readiness") }}</th>
-										<th>{{ __("Revision Date") }}</th>
-										<th>{{ __("Issue Date") }}</th>
-										<th>{{ __("File") }}</th>
-										<th>{{ __("Remarks") }}</th>
-										<th></th>
-									</tr>
-								</thead>
-								<tbody>
-									<template v-for="rev in data.revisions" :key="rev.name">
+						<template v-else>
+							<p v-if="compare_mode" class="doc-detail__compare-hint">
+								{{ __("Pick two revisions to compare — picking a third drops the oldest of the current pair.") }}
+							</p>
+							<div class="hub-table-wrap">
+								<table class="hub-table">
+									<thead>
 										<tr>
-											<td>
-												{{ rev.revision }}
-												<span v-if="rev.is_current" class="doc-detail__current-badge">{{ __("Current") }}</span>
-											</td>
-											<td><StatusPill :status="rev.revision_status" /></td>
-											<td>
-												<select
-													v-if="rev.docstatus === 0"
-													class="doc-detail__readiness-select"
-													:value="rev.readiness"
-													@change="do_update_readiness(rev, $event)"
-												>
-													<option v-for="value in READINESS_VALUES" :key="value" :value="value">{{ value }}</option>
-												</select>
-												<span v-else>{{ rev.readiness || "—" }}</span>
-											</td>
-											<td>{{ format_date(rev.revision_date) }}</td>
-											<td>{{ rev.issue_date ? format_date(rev.issue_date) : "—" }}</td>
-											<td>
-												<a v-if="rev.file" href="#" class="hub-link" @click.prevent="toggle_preview(rev.name)">
-													{{ preview_open.has(rev.name) ? __("Hide") : __("Preview") }}
-												</a>
-												<span v-else>—</span>
-											</td>
-											<td>{{ rev.remarks || "—" }}</td>
-											<td>
-												<button
-													v-if="rev.docstatus === 0"
-													type="button"
-													class="btn btn-xs btn-default"
-													@click="confirm_issue(rev)"
-												>
-													{{ __("Issue") }}
-												</button>
-											</td>
+											<th v-if="compare_mode"></th>
+											<th>{{ __("Revision") }}</th>
+											<th>{{ __("Status") }}</th>
+											<th>{{ __("Readiness") }}</th>
+											<th>{{ __("Revision Date") }}</th>
+											<th>{{ __("Issue Date") }}</th>
+											<th>{{ __("File") }}</th>
+											<th>{{ __("Remarks") }}</th>
+											<th></th>
 										</tr>
-										<tr v-if="preview_open.has(rev.name)">
-											<td colspan="8" class="doc-detail__preview-cell">
-												<FilePreview :file-url="rev.file" :file-name="rev.revision" />
-											</td>
-										</tr>
-									</template>
-								</tbody>
-							</table>
-						</div>
+									</thead>
+									<tbody>
+										<template v-for="rev in data.revisions" :key="rev.name">
+											<tr>
+												<td v-if="compare_mode">
+													<input
+														type="checkbox"
+														:checked="compare_selection.includes(rev.name)"
+														:disabled="!rev.file"
+														@change="toggle_compare_pick(rev.name)"
+													/>
+												</td>
+												<td>
+													{{ rev.revision }}
+													<span v-if="rev.is_current" class="doc-detail__current-badge">{{ __("Current") }}</span>
+												</td>
+												<td><StatusPill :status="rev.revision_status" /></td>
+												<td>
+													<select
+														v-if="rev.docstatus === 0"
+														class="doc-detail__readiness-select"
+														:value="rev.readiness"
+														@change="do_update_readiness(rev, $event)"
+													>
+														<option v-for="value in READINESS_VALUES" :key="value" :value="value">{{ value }}</option>
+													</select>
+													<span v-else>{{ rev.readiness || "—" }}</span>
+												</td>
+												<td>{{ format_date(rev.revision_date) }}</td>
+												<td>{{ rev.issue_date ? format_date(rev.issue_date) : "—" }}</td>
+												<td>
+													<a v-if="rev.file" href="#" class="hub-link" @click.prevent="toggle_preview(rev.name)">
+														{{ preview_open.has(rev.name) ? __("Hide") : __("Preview") }}
+													</a>
+													<span v-else>—</span>
+												</td>
+												<td>{{ rev.remarks || "—" }}</td>
+												<td>
+													<button
+														v-if="rev.docstatus === 0"
+														type="button"
+														class="btn btn-xs btn-default"
+														@click="confirm_issue(rev)"
+													>
+														{{ __("Issue") }}
+													</button>
+												</td>
+											</tr>
+											<tr v-if="preview_open.has(rev.name)">
+												<td :colspan="compare_mode ? 9 : 8" class="doc-detail__preview-cell">
+													<FilePreview :file-url="rev.file" :file-name="rev.revision" />
+												</td>
+											</tr>
+										</template>
+									</tbody>
+								</table>
+							</div>
+
+							<div v-if="compare_mode && compare_selection.length === 2" class="doc-detail__compare-panel">
+								<div v-for="rev_name in compare_selection" :key="rev_name" class="doc-detail__compare-side">
+									<div class="doc-detail__compare-side-title">
+										{{ __("Revision") }} {{ compare_rev(rev_name)?.revision }}
+										<span v-if="compare_rev(rev_name)?.is_current" class="doc-detail__current-badge">{{ __("Current") }}</span>
+									</div>
+									<FilePreview :file-url="compare_rev(rev_name)?.file" :file-name="compare_rev(rev_name)?.revision" />
+								</div>
+							</div>
+						</template>
 					</section>
 
 					<section class="doc-detail__section">
@@ -544,6 +608,37 @@ function do_update_readiness(rev, event) {
 .hub-link:hover {
 	color: var(--text-color);
 	border-bottom-color: var(--text-color);
+}
+
+.doc-detail__section-head-actions {
+	display: flex;
+	gap: 8px;
+	flex: 0 0 auto;
+}
+
+.doc-detail__compare-hint {
+	margin: 0 0 10px;
+	font-size: var(--text-xs);
+	color: var(--text-muted);
+}
+
+.doc-detail__compare-panel {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 12px;
+	margin-top: 14px;
+}
+
+.doc-detail__compare-side {
+	flex: 1 1 240px;
+	min-width: 0;
+}
+
+.doc-detail__compare-side-title {
+	font-size: var(--text-sm);
+	font-weight: 600;
+	color: var(--text-color);
+	margin-bottom: 8px;
 }
 
 @media (max-width: 640px) {
