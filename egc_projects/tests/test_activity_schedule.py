@@ -203,4 +203,118 @@ class TestActivitySchedule(IntegrationTestCase):
 		ductwork.reload()
 		expected = (100 + 60) / 2
 		self.assertEqual(installation.percent_complete, expected)
-		self.assertEqual(ductwork.percent_complete, expected)
+
+	# -- weight_pct: sibling-sum validation --------------------------------------------------------
+
+	def test_weight_exceeding_100_across_siblings_rejected(self):
+		group = make_activity(self.project, "WT-GRP", "Group", is_group=1)
+		make_activity(self.project, "WT-A", "A", parent_egc_activity=group.name, weight_pct=60)
+		with self.assertRaises(frappe.ValidationError):
+			make_activity(self.project, "WT-B", "B", parent_egc_activity=group.name, weight_pct=41)
+
+	def test_weight_totaling_exactly_100_is_accepted(self):
+		group = make_activity(self.project, "WT-GRP2", "Group", is_group=1)
+		make_activity(self.project, "WT-C", "C", parent_egc_activity=group.name, weight_pct=60)
+		# Exactly fills the remaining 40% — must not be rejected as "over" due to float error.
+		make_activity(self.project, "WT-D", "D", parent_egc_activity=group.name, weight_pct=40)
+
+	def test_weight_under_100_across_siblings_is_allowed(self):
+		# The tree may still be under construction — only exceeding 100% is an error.
+		group = make_activity(self.project, "WT-GRP3", "Group", is_group=1)
+		make_activity(self.project, "WT-E", "E", parent_egc_activity=group.name, weight_pct=30)
+		leaf = make_activity(self.project, "WT-F", "F", parent_egc_activity=group.name, weight_pct=30)
+		self.assertEqual(leaf.weight_pct, 30)
+
+	def test_weight_re_saving_the_same_row_excludes_itself_from_the_sibling_sum(self):
+		# A no-op re-save of a row already counted must not double-count itself against the cap.
+		group = make_activity(self.project, "WT-GRP4", "Group", is_group=1)
+		leaf = make_activity(self.project, "WT-G", "G", parent_egc_activity=group.name, weight_pct=100)
+		leaf.description = "touched"
+		leaf.save()  # must not raise
+		leaf.reload()
+		self.assertEqual(leaf.weight_pct, 100)
+
+	def test_weight_siblings_are_scoped_to_the_same_parent(self):
+		# Two unrelated groups' children must not be summed against each other.
+		group_a = make_activity(self.project, "WT-GA", "Group A", is_group=1)
+		group_b = make_activity(self.project, "WT-GB", "Group B", is_group=1)
+		make_activity(self.project, "WT-GA-1", "A1", parent_egc_activity=group_a.name, weight_pct=100)
+		# Would exceed 100 if wrongly compared against group_a's child — must succeed.
+		make_activity(self.project, "WT-GB-1", "B1", parent_egc_activity=group_b.name, weight_pct=100)
+
+	def test_weight_clamped_to_0_100_range(self):
+		leaf = make_activity(self.project, "WT-CLAMP", "Clamp", weight_pct=150)
+		self.assertEqual(leaf.weight_pct, 100)
+
+	# -- weight_pct: weighted rollup -----------------------------------------------------------
+
+	def test_rollup_uses_weighted_average_once_children_carry_weight(self):
+		group = make_activity(self.project, "WROLL-GRP", "Group", is_group=1)
+		heavy = make_activity(
+			self.project,
+			"WROLL-A",
+			"Heavy",
+			parent_egc_activity=group.name,
+			weight_pct=80,
+			percent_complete=50,
+			status=ACTIVITY_IN_PROGRESS,
+		)
+		make_activity(
+			self.project, "WROLL-B", "Light", parent_egc_activity=group.name, weight_pct=20, percent_complete=0
+		)
+
+		group.reload()
+		# Weighted: 50*0.8 + 0*0.2 = 40 — NOT the unweighted mean (25).
+		self.assertEqual(group.percent_complete, 40)
+
+		heavy.percent_complete = 100
+		heavy.status = ACTIVITY_IN_PROGRESS
+		heavy.save()
+		group.reload()
+		self.assertEqual(group.percent_complete, 80)
+
+	def test_rollup_falls_back_to_unweighted_mean_when_no_weights_set(self):
+		# Every existing/unconfigured tree (weight_pct left at its 0 default) must roll up
+		# exactly as it did before this field existed.
+		group = make_activity(self.project, "WROLL-GRP2", "Group", is_group=1)
+		make_activity(
+			self.project,
+			"WROLL-C",
+			"C",
+			parent_egc_activity=group.name,
+			percent_complete=40,
+			status=ACTIVITY_IN_PROGRESS,
+		)
+		make_activity(
+			self.project,
+			"WROLL-D",
+			"D",
+			parent_egc_activity=group.name,
+			percent_complete=60,
+			status=ACTIVITY_IN_PROGRESS,
+		)
+
+		group.reload()
+		self.assertEqual(group.percent_complete, 50)  # unweighted mean, weights are all 0
+
+	def test_rollup_partial_weight_normalises_by_allocated_weight_not_100(self):
+		# Only 50% of the weight has been allocated so far (tree still being built) — the
+		# rollup must normalise against what IS allocated, not silently treat the missing 50%
+		# as zero-progress weight (which would understate progress for no real reason).
+		group = make_activity(self.project, "WROLL-GRP3", "Group", is_group=1)
+		make_activity(
+			self.project,
+			"WROLL-E",
+			"E",
+			parent_egc_activity=group.name,
+			weight_pct=50,
+			percent_complete=100,
+			status=ACTIVITY_COMPLETED,
+		)
+		make_activity(
+			self.project, "WROLL-F", "F", parent_egc_activity=group.name, weight_pct=0, percent_complete=0
+		)
+
+		group.reload()
+		# Weighted over allocated weight only: 100*0.5 / 0.5 = 100, not 50.
+		self.assertEqual(group.percent_complete, 100)

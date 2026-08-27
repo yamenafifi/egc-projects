@@ -18,7 +18,7 @@ from frappe.desk.treeview import make_tree_args
 from frappe.utils import date_diff, flt, getdate, sbool, today
 from frappe.utils.nestedset import NestedSet
 
-from egc_projects.egc_projects import activity_control
+from egc_projects.egc_projects import activity_control, project_progress
 from egc_projects.egc_projects.constants import (
 	ACTIVITY_CLOSED_STATUSES,
 	ACTIVITY_COMPLETED,
@@ -74,6 +74,7 @@ class EGCActivity(NestedSet):
 		sequence: DF.Int
 		status: DF.Literal["Not Started", "In Progress", "On Hold", "Completed", "Cancelled"]
 		wbs_node: DF.Link | None
+		weight_pct: DF.Percent
 	# end: auto-generated types
 
 	nsm_parent_field = "parent_egc_activity"
@@ -86,6 +87,7 @@ class EGCActivity(NestedSet):
 		self.validate_dates()
 		self.compute_duration()
 		self.validate_progress()
+		self.validate_weight()
 		activity_control.assert_group_fields_not_hand_edited(self)
 
 	def validate_dates(self):
@@ -122,17 +124,55 @@ class EGCActivity(NestedSet):
 		else:
 			self.percent_complete = max(0, min(100, flt(self.percent_complete)))
 
+	def validate_weight(self):
+		"""Every set of siblings (same `parent_egc_activity`, including root-level Activities of
+		the same project, where the "parent" is blank) may total at most 100% — manually entered
+		for now, per the brief; automatic allocation is a documented future improvement, not
+		implemented here. Clamped to [0, 100] first so a single row can never itself be invalid;
+		the sibling-sum check is what actually enforces the 100% ceiling. Under-allocation (a
+		tree still being built out) is deliberately allowed — only exceeding 100% is rejected.
+		"""
+		self.weight_pct = max(0, min(100, flt(self.weight_pct)))
+
+		siblings_total = frappe.db.sql(
+			"""select coalesce(sum(weight_pct), 0) from `tabEGC Activity`
+			where project = %(project)s
+				and ifnull(parent_egc_activity, '') = %(parent)s
+				and name != %(name)s""",
+			{
+				"project": self.project,
+				"parent": self.parent_egc_activity or "",
+				# `self.name` is unset on a brand-new doc until after insert; comparing against
+				# a value nothing can ever match is equivalent to "no exclusion" in that case.
+				"name": self.name or "",
+			},
+		)[0][0]
+
+		total = flt(siblings_total) + flt(self.weight_pct)
+		if total > 100 + 1e-6:
+			frappe.throw(
+				_(
+					"Weight allocation among these siblings (same Parent Activity) would total"
+					" {0}%, exceeding 100%. Reduce this Activity's weight or another sibling's."
+				).format(frappe.format(total, {"fieldtype": "Float", "precision": 2})),
+				title=_("Over-Allocated"),
+				exc=frappe.ValidationError,
+			)
+
 	def on_update(self):
 		super().on_update()
 		activity_control.refresh_ancestors(self.parent_egc_activity)
+		project_progress.refresh_project_percent_complete(self.project)
 
 	def on_trash(self, allow_root_deletion=False):
 		# NestedSet.on_trash() clears self.parent_egc_activity on the in-memory doc before
 		# returning (it detaches the node from the tree ahead of the row's own deletion), so the
 		# parent to refresh must be captured before calling it, not after.
 		parent = self.parent_egc_activity
+		project = self.project
 		super().on_trash(allow_root_deletion=allow_root_deletion)
 		activity_control.refresh_ancestors(parent)
+		project_progress.refresh_project_percent_complete(project)
 
 	@property
 	def is_overdue(self) -> bool:

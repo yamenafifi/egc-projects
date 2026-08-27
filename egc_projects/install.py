@@ -94,6 +94,7 @@ def setup() -> None:
 	create_modalities()
 	create_equipment_manufacturers()
 	create_project_custom_fields()
+	create_activity_completion_method_option()
 	frappe.db.commit()
 
 
@@ -101,6 +102,27 @@ def create_project_custom_fields() -> None:
 	from egc_projects.egc_projects import project_custom_fields
 
 	project_custom_fields.create()
+
+
+def create_activity_completion_method_option() -> None:
+	"""Adds "Activity Completion" as a 5th option on core `Project.percent_complete_method`
+	(Property Setter, not a Custom Field — this widens an existing Select's own options rather
+	than adding a new field). See `project_progress.py` for why this app needs a value distinct
+	from core's "Task Completion" at all. Idempotent: `make_property_setter` itself upserts by
+	(doc_type, field_name, property), so re-running this is always safe."""
+	from egc_projects.egc_projects.project_progress import PERCENT_COMPLETE_METHOD
+
+	from frappe.custom.doctype.property_setter.property_setter import make_property_setter
+
+	options = "Manual\nTask Completion\nTask Progress\nTask Weight\n" + PERCENT_COMPLETE_METHOD
+	current = frappe.db.get_value(
+		"Property Setter",
+		{"doc_type": "Project", "field_name": "percent_complete_method", "property": "options"},
+		"value",
+	)
+	if current == options:
+		return
+	make_property_setter("Project", "percent_complete_method", "options", options, "Text")
 
 
 def create_roles() -> None:

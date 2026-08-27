@@ -47,6 +47,7 @@ _CHILD_FIELDS = (
 	"planned_end_date",
 	"actual_start_date",
 	"actual_end_date",
+	"weight_pct",
 )
 
 
@@ -123,7 +124,19 @@ def _compute_rollup(children: list[frappe._dict]) -> dict:
 	# "only when every child has one set" — not merely when at least one does.
 	actual_end_date = max(actual_ends) if len(actual_ends) == len(children) else None
 
-	percent_complete = sum(flt(child.percent_complete) for child in children) / len(children)
+	# Weighted by weight_pct once the children carry real weights; falls back to an unweighted
+	# mean — the original rule, before Activities carried a weight at all — for any group whose
+	# children haven't been weighted yet (total_weight == 0), so existing/unconfigured trees keep
+	# behaving exactly as before this field existed. A partially-weighted set (weights that don't
+	# sum to 100) is still handled correctly here: normalising by total_weight, not by 100, means
+	# under-allocated weight simply doesn't participate rather than silently understating progress.
+	total_weight = sum(flt(child.weight_pct) for child in children)
+	if total_weight > 0:
+		percent_complete = (
+			sum(flt(child.percent_complete) * flt(child.weight_pct) for child in children) / total_weight
+		)
+	else:
+		percent_complete = sum(flt(child.percent_complete) for child in children) / len(children)
 
 	return {
 		"percent_complete": percent_complete,

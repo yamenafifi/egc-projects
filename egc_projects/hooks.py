@@ -51,11 +51,16 @@ doc_events = {
 		"on_cancel": "egc_projects.egc_projects.submittal_control.on_submission_cancel",
 		"on_trash": "egc_projects.egc_projects.submittal_control.on_submission_trash",
 	},
-	# `Project` is core — this validates the Healthcare/Equipment custom fields
-	# (project_custom_fields.py) the same way a doctype-owned `validate()` would if we owned
-	# the doctype outright.
+	# `Project` is core, so it can't carry its own doctype-owned `validate()` overrides — these
+	# two hooks stand in for that. Order matters only in that both must run after core's own
+	# controller validate() (which Frappe always dispatches first for the same event) — see
+	# project_progress.py's module docstring for why that ordering is what makes the second
+	# hook here work at all.
 	"Project": {
-		"validate": "egc_projects.egc_projects.project_custom_fields.validate_project",
+		"validate": [
+			"egc_projects.egc_projects.project_custom_fields.validate_project",
+			"egc_projects.egc_projects.project_progress.sync_project_percent_complete",
+		],
 	},
 }
 
