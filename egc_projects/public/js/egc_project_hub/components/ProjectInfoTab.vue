@@ -37,7 +37,6 @@ const has_any_data = computed(() => {
 		"contract_type",
 		"project_description",
 		"work_scope",
-		"contract_value",
 		"project_image",
 		"country",
 		"region",
@@ -65,11 +64,6 @@ function open_edit() {
 
 function format_date(value) {
 	return value ? frappe.datetime.str_to_user(value) : "—";
-}
-
-function format_amount(value) {
-	if (!value) return "—";
-	return format_currency(value, data.value?.currency);
 }
 
 function stakeholder_party(row) {
@@ -126,10 +120,6 @@ function stakeholder_party(row) {
 					<div>
 						<dt>{{ __("Contract Type") }}</dt>
 						<dd>{{ data.info.contract_type || "—" }}</dd>
-					</div>
-					<div>
-						<dt>{{ __("Contract Value") }}</dt>
-						<dd>{{ format_amount(data.info.contract_value) }}</dd>
 					</div>
 				</dl>
 				<p v-if="data.info.project_description" class="hub-project-info__text">

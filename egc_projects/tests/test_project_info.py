@@ -59,7 +59,8 @@ class TestProjectInfo(IntegrationTestCase):
 	# -- fixtures ------------------------------------------------------------------------------
 
 	def _set_project_fields(self, **values):
-		"""Mirrors editing the native `Project` form's "EGC Project Info" tab directly."""
+		"""Mirrors editing the `custom_egc_*` fields directly on the native `Project` form
+		(distributed across its Details/More Info tabs — see project_custom_fields.py)."""
 		doc = frappe.get_doc("Project", self.project)
 		for fieldname, value in values.items():
 			doc.set(fieldname, value)
@@ -90,14 +91,14 @@ class TestProjectInfo(IntegrationTestCase):
 		self._set_project_fields(
 			custom_egc_project_code="PC-001",
 			custom_egc_sector="Healthcare",
-			custom_egc_contract_value=125000,
+			custom_egc_delivery_method="Design-Build",
 		)
 
 		frappe.set_user(self.manager_user)
 		result = hub.get_project_info(self.project)
 		self.assertEqual(result["project_code"], "PC-001")
 		self.assertEqual(result["sector"], "Healthcare")
-		self.assertEqual(result["contract_value"], 125000)
+		self.assertEqual(result["delivery_method"], "Design-Build")
 
 	# -- 1b. An untouched Select field must stay unset, never silently default to its first
 	#         option (regression — carried over from the old EGC Project Profile doctype) ------

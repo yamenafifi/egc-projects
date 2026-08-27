@@ -27,7 +27,7 @@ const profile = computed(() => props.context?.profile || null);
 const has_profile_data = computed(() => {
 	const p = profile.value;
 	if (!p) return false;
-	return Boolean(p.project_code || p.project_stage || p.sector || p.contract_value || p.key_stakeholders?.length);
+	return Boolean(p.project_code || p.project_stage || p.sector || p.key_stakeholders?.length);
 });
 const project_details_label = computed(() =>
 	has_profile_data.value ? __("Project Details") : __("+ Add Project Information")

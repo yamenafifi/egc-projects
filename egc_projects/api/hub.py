@@ -121,7 +121,6 @@ def _project_profile_summary(project: str) -> dict:
 			"custom_egc_project_stage",
 			"custom_egc_sector",
 			"custom_egc_project_image",
-			"custom_egc_contract_value",
 		],
 		as_dict=True,
 	)
@@ -130,7 +129,6 @@ def _project_profile_summary(project: str) -> dict:
 		"project_stage": raw.custom_egc_project_stage,
 		"sector": raw.custom_egc_sector,
 		"project_image": raw.custom_egc_project_image,
-		"contract_value": raw.custom_egc_contract_value,
 	}
 
 	stakeholders = project_profile.get_stakeholders(project)
@@ -981,7 +979,6 @@ _PROFILE_FIELD_MAP = {
 	"contract_type": "custom_egc_contract_type",
 	"project_description": "custom_egc_project_description",
 	"work_scope": "custom_egc_work_scope",
-	"contract_value": "custom_egc_contract_value",
 	"project_image": "custom_egc_project_image",
 	"country": "custom_egc_country",
 	"region": "custom_egc_region",

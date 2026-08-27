@@ -9,6 +9,26 @@ out — this data is edited on the native `Project` form, the same way `egc_hr` 
 GPS/geofencing and Supervisors — both already exist on `Project`, owned by that domain, and are
 never duplicated here.
 
+Distributed across the Project form's EXISTING tabs (no dedicated "EGC Project Info" tab):
+Classification/Description/Contract Dates land at the end of the (implicit, un-tab-broken)
+Details tab; Stakeholders/Address/Site Contact/Healthcare-Equipment land at the end of the native
+More Info tab, after `notes`. Nothing is added to Costing — "Contract Value" used to live there as
+a manually-entered field, but core's own `total_sales_amount` plus `EGC Change Order`
+(api/change_orders.py) now cover that ground with a single source of truth (Original Scope +
+Change Orders = Total), so a second, unsynced number would only contradict it.
+
+**The bridging-anchor fields** (`custom_egc_details_bridge`/`custom_egc_more_info_bridge`, hidden,
+otherwise inert) exist ONLY to work around a real quirk in `Meta.sort_fields()`
+(frappe/model/meta.py): anchoring a Section Break's `insert_after` directly at a CORE field name
+makes it walk FORWARD through the doctype's `field_order` looking for the next Section Break (or a
+field of the same type as the anchor) — with no Tab Break stopping condition — and can land the
+section past a tab boundary into the NEXT tab instead of at the end of the current one. Anchoring
+at a CUSTOM field's name instead never triggers that walk at all (the walk only fires when
+`insert_after in field_order`, and `field_order` — read from the doctype's own JSON — only ever
+contains STANDARD fieldnames), so a plain, non-breaking custom field placed once at each risky
+boundary makes every other field anchored to IT immune to the quirk. Confirmed directly against
+`Meta.sort_fields()`'s source, not assumed.
+
     bench --site dev.localhost execute egc_projects.egc_projects.project_custom_fields.run
 """
 
@@ -20,23 +40,43 @@ from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
 
 from egc_projects.egc_projects import validators
 
-#: `insert_after: notes` places the whole tab right before the core "Connections" tab, after
-#: every existing tab (Details/Costing/Progress/More Info) — appended, not interleaved with
-#: core or egc_hr fields, so neither this app nor egc_hr can ever destabilise the other's
-#: field positions by changing its own.
+#: Custom Fields once used to build a dedicated "EGC Project Info" tab (Tab Break) with a
+#: "Commercial" section (Contract Value) inside it — both superseded, per this module's own
+#: docstring. `create_custom_fields` only creates/updates fields present in `CUSTOM_FIELDS`, so
+#: these are deleted explicitly in `create()` below; anything not listed here keeps its fieldname
+#: and data untouched, just repositioned.
+_RETIRED_FIELDS = (
+	"custom_egc_project_info_tab",
+	"custom_egc_commercial_section",
+	"custom_egc_commercial_col",
+	"custom_egc_contract_value",
+)
+
 CUSTOM_FIELDS = {
 	"Project": [
+		# -- bridging anchors (see module docstring) --------------------------------------------
 		{
-			"fieldname": "custom_egc_project_info_tab",
-			"label": "EGC Project Info",
-			"fieldtype": "Tab Break",
-			"insert_after": "notes",
+			"fieldname": "custom_egc_details_bridge",
+			"fieldtype": "Data",
+			"insert_after": "actual_end_date",
+			"hidden": 1,
+			"read_only": 1,
+			"print_hide": 1,
 		},
+		{
+			"fieldname": "custom_egc_more_info_bridge",
+			"fieldtype": "Data",
+			"insert_after": "notes",
+			"hidden": 1,
+			"read_only": 1,
+			"print_hide": 1,
+		},
+		# -- Details tab: Classification -----------------------------------------------------
 		{
 			"fieldname": "custom_egc_classification_section",
 			"label": "Classification",
 			"fieldtype": "Section Break",
-			"insert_after": "custom_egc_project_info_tab",
+			"insert_after": "custom_egc_details_bridge",
 		},
 		{
 			"fieldname": "custom_egc_project_code",
@@ -79,11 +119,18 @@ CUSTOM_FIELDS = {
 			"options": "\nLump Sum\nUnit Price\nCost Plus\nTime & Material\nOther",
 			"insert_after": "custom_egc_delivery_method",
 		},
+		# -- Details tab: Description ---------------------------------------------------------
+		{
+			"fieldname": "custom_egc_description_section",
+			"label": "Description",
+			"fieldtype": "Section Break",
+			"insert_after": "custom_egc_contract_type",
+		},
 		{
 			"fieldname": "custom_egc_project_description",
 			"label": "Project Description",
 			"fieldtype": "Small Text",
-			"insert_after": "custom_egc_contract_type",
+			"insert_after": "custom_egc_description_section",
 		},
 		{
 			"fieldname": "custom_egc_work_scope",
@@ -92,33 +139,58 @@ CUSTOM_FIELDS = {
 			"insert_after": "custom_egc_project_description",
 		},
 		{
-			"fieldname": "custom_egc_commercial_section",
-			"label": "Commercial",
-			"fieldtype": "Section Break",
-			"insert_after": "custom_egc_work_scope",
-		},
-		{
-			"fieldname": "custom_egc_contract_value",
-			"label": "Contract Value",
-			"fieldtype": "Currency",
-			"insert_after": "custom_egc_commercial_section",
-		},
-		{
-			"fieldname": "custom_egc_commercial_col",
+			"fieldname": "custom_egc_description_col",
 			"fieldtype": "Column Break",
-			"insert_after": "custom_egc_contract_value",
+			"insert_after": "custom_egc_work_scope",
 		},
 		{
 			"fieldname": "custom_egc_project_image",
 			"label": "Project Image",
 			"fieldtype": "Attach Image",
-			"insert_after": "custom_egc_commercial_col",
+			"insert_after": "custom_egc_description_col",
 		},
+		# -- Details tab: Contract Dates --------------------------------------------------------
+		{
+			"fieldname": "custom_egc_contract_dates_section",
+			"label": "Contract Dates",
+			"fieldtype": "Section Break",
+			"insert_after": "custom_egc_project_image",
+		},
+		{
+			"fieldname": "custom_egc_contract_date",
+			"label": "Contract Date",
+			"fieldtype": "Date",
+			"insert_after": "custom_egc_contract_dates_section",
+		},
+		{
+			"fieldname": "custom_egc_forecast_completion_date",
+			"label": "Forecast Completion Date",
+			"fieldtype": "Date",
+			"insert_after": "custom_egc_contract_date",
+		},
+		{
+			"fieldname": "custom_egc_contract_dates_col",
+			"fieldtype": "Column Break",
+			"insert_after": "custom_egc_forecast_completion_date",
+		},
+		{
+			"fieldname": "custom_egc_warranty_start_date",
+			"label": "Warranty Start Date",
+			"fieldtype": "Date",
+			"insert_after": "custom_egc_contract_dates_col",
+		},
+		{
+			"fieldname": "custom_egc_dlp_end_date",
+			"label": "DLP End Date",
+			"fieldtype": "Date",
+			"insert_after": "custom_egc_warranty_start_date",
+		},
+		# -- More Info tab: Stakeholders ---------------------------------------------------------
 		{
 			"fieldname": "custom_egc_stakeholders_section",
 			"label": "Stakeholders",
 			"fieldtype": "Section Break",
-			"insert_after": "custom_egc_project_image",
+			"insert_after": "custom_egc_more_info_bridge",
 			"description": (
 				"External and internal parties on this project (Client, Consultant, Main "
 				"Contractor, OEM, EGC roles, ...) — a distinct concern from egc_hr's own "
@@ -131,6 +203,7 @@ CUSTOM_FIELDS = {
 			"options": "EGC Project Stakeholder",
 			"insert_after": "custom_egc_stakeholders_section",
 		},
+		# -- More Info tab: Address ------------------------------------------------------------
 		{
 			"fieldname": "custom_egc_address_section",
 			"label": "Address",
@@ -177,6 +250,7 @@ CUSTOM_FIELDS = {
 			"fieldtype": "Data",
 			"insert_after": "custom_egc_address",
 		},
+		# -- More Info tab: Site Contact --------------------------------------------------------
 		{
 			"fieldname": "custom_egc_site_contact_section",
 			"label": "Site Contact",
@@ -208,46 +282,12 @@ CUSTOM_FIELDS = {
 			"options": "Email",
 			"insert_after": "custom_egc_site_contact_phone",
 		},
-		{
-			"fieldname": "custom_egc_contract_dates_section",
-			"label": "Contract Dates",
-			"fieldtype": "Section Break",
-			"insert_after": "custom_egc_site_contact_email",
-		},
-		{
-			"fieldname": "custom_egc_contract_date",
-			"label": "Contract Date",
-			"fieldtype": "Date",
-			"insert_after": "custom_egc_contract_dates_section",
-		},
-		{
-			"fieldname": "custom_egc_forecast_completion_date",
-			"label": "Forecast Completion Date",
-			"fieldtype": "Date",
-			"insert_after": "custom_egc_contract_date",
-		},
-		{
-			"fieldname": "custom_egc_contract_dates_col",
-			"fieldtype": "Column Break",
-			"insert_after": "custom_egc_forecast_completion_date",
-		},
-		{
-			"fieldname": "custom_egc_warranty_start_date",
-			"label": "Warranty Start Date",
-			"fieldtype": "Date",
-			"insert_after": "custom_egc_contract_dates_col",
-		},
-		{
-			"fieldname": "custom_egc_dlp_end_date",
-			"label": "DLP End Date",
-			"fieldtype": "Date",
-			"insert_after": "custom_egc_warranty_start_date",
-		},
+		# -- More Info tab: Healthcare / Equipment ----------------------------------------------
 		{
 			"fieldname": "custom_egc_equipment_section",
 			"label": "Healthcare / Equipment",
 			"fieldtype": "Section Break",
-			"insert_after": "custom_egc_dlp_end_date",
+			"insert_after": "custom_egc_site_contact_email",
 			"collapsible": 1,
 		},
 		{
@@ -262,6 +302,10 @@ CUSTOM_FIELDS = {
 
 def create() -> None:
 	create_custom_fields(CUSTOM_FIELDS, ignore_validate=True)
+	for fieldname in _RETIRED_FIELDS:
+		name = frappe.db.get_value("Custom Field", {"dt": "Project", "fieldname": fieldname})
+		if name:
+			frappe.delete_doc("Custom Field", name, ignore_permissions=True, force=True)
 
 
 def run() -> None:

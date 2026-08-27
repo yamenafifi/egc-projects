@@ -101,7 +101,25 @@ def setup() -> None:
 def create_project_custom_fields() -> None:
 	from egc_projects.egc_projects import project_custom_fields
 
+	_remove_stale_project_field_order()
 	project_custom_fields.create()
+
+
+def _remove_stale_project_field_order() -> None:
+	"""A `field_order` Property Setter on `Project` freezes the WHOLE doctype's field order as a
+	static snapshot (written whenever anyone uses Desk's "Customize Form" to drag-reorder
+	fields) — and `Meta.sort_fields()` treats that frozen snapshot as authoritative over the
+	doctype's own JSON `field_order`, silently overriding it. A snapshot taken before this app's
+	(or another app's) custom fields existed never includes them, so every `insert_after` this
+	module declares is computed relative to a list that doesn't contain half its own anchor
+	points — the exact bug that once pushed core's own `more_info_tab` to the very end of the
+	native Project form, well past its own content. Deleting it here, before every
+	`create_custom_fields` run, keeps the doctype's own (complete, correct) field_order
+	authoritative, so this can't silently recur if Customize Form is ever used on Project again.
+	"""
+	name = frappe.db.get_value("Property Setter", {"doc_type": "Project", "property": "field_order"})
+	if name:
+		frappe.delete_doc("Property Setter", name, ignore_permissions=True, force=True)
 
 
 def create_activity_completion_method_option() -> None:
