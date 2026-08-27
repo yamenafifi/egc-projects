@@ -191,11 +191,19 @@ function confirm_remove_submittal(row) {
 				<div v-if="active_tool === 'submittals'" class="activity-expand__submittals">
 					<div class="activity-expand__table-head">
 						<div class="activity-detail__section-title">{{ __("Submittals") }}</div>
-						<button v-if="canWrite" type="button" class="btn btn-xs btn-default" @click="open_add_submittal_dialog">
+						<button
+							v-if="canWrite && !data.activity.is_group"
+							type="button"
+							class="btn btn-xs btn-default"
+							@click="open_add_submittal_dialog"
+						>
 							{{ __("Link Existing") }}
 						</button>
 					</div>
-					<EmptyState v-if="!submittal_links.length" :title="__('No linked submittals yet')" />
+					<EmptyState
+						v-if="!submittal_links.length"
+						:title="data.activity.is_group ? __('Not applicable to a Group Activity') : __('No linked submittals yet')"
+					/>
 					<div v-else class="hub-table-wrap">
 						<table class="hub-table">
 							<thead>
@@ -255,6 +263,7 @@ function confirm_remove_submittal(row) {
 					:empty-message="__('No linked documents yet')"
 					:rows="document_links"
 					:can-write="canWrite"
+					:allow-add="!data.activity.is_group"
 					@changed="reload"
 				/>
 

@@ -47,9 +47,25 @@ class EGCActivityLink(Document):
 	def validate(self):
 		self.validate_link_doctype_allowed()
 		self.set_project_from_activity()
+		self.validate_activity_not_group()
 		self.validate_target_same_project()
 		self.set_link_title()
 		self.validate_duplicate()
+
+	def validate_activity_not_group(self):
+		"""Level 0 §9-§22: a Group Activity is a phase/summary node, not a place work actually
+		happens — Submittals, Documents and (future) RFIs/Inspections belong on the leaf Activity
+		that represents the real scope, never on the group that just rolls its children up."""
+		if frappe.db.get_value("EGC Activity", self.activity, "is_group"):
+			label = ALLOWED_LINK_DOCTYPES.get(self.link_doctype, {}).get("label", self.link_doctype)
+			frappe.throw(
+				_(
+					"{0} is a Group Activity. {1} records belong on the leaf Activity that"
+					" represents the actual work, not on the group that summarises it."
+				).format(frappe.bold(self.activity), label),
+				title=_("Not Allowed on a Group Activity"),
+				exc=frappe.ValidationError,
+			)
 
 	def validate_link_doctype_allowed(self):
 		# The client `get_query` on `link_doctype` is UX only; this is the enforcement (§0.5).

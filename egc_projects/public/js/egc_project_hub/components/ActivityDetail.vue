@@ -531,6 +531,7 @@ function confirm_remove_dependency(name) {
 							:empty-message="__('No linked submittals yet')"
 							:rows="submittal_links()"
 							:can-write="canWrite"
+							:allow-add="!data.activity.is_group"
 							@changed="notify_changed"
 						/>
 					</section>
@@ -544,6 +545,7 @@ function confirm_remove_dependency(name) {
 							:empty-message="__('No linked documents yet')"
 							:rows="document_links()"
 							:can-write="canWrite"
+							:allow-add="!data.activity.is_group"
 							@changed="notify_changed"
 						/>
 					</section>

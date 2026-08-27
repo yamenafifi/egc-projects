@@ -186,6 +186,39 @@ class TestRelationships(IntegrationTestCase):
 		with self.assertRaises(frappe.ValidationError):
 			link.insert(ignore_permissions=True)
 
+	# -- 4b. A Group Activity is rejected as a link target (Level 0 §9-§22) -------------------
+
+	def test_group_activity_rejected_via_add_link(self):
+		group = self._make_activity("GRP-A1", is_group=1)
+		document = self._make_document("GRP-DOC-001")
+
+		with self.assertRaises(frappe.ValidationError):
+			relationships.add_link(group.name, "EGC Project Document", document.name)
+
+	def test_group_activity_rejected_at_controller_level_too(self):
+		group = self._make_activity("GRP-A2", is_group=1)
+		document = self._make_document("GRP-DOC-002")
+
+		link = frappe.get_doc(
+			{
+				"doctype": "EGC Activity Link",
+				"activity": group.name,
+				"link_doctype": "EGC Project Document",
+				"link_name": document.name,
+			}
+		)
+		with self.assertRaises(frappe.ValidationError):
+			link.insert(ignore_permissions=True)
+
+	def test_leaf_activity_still_accepted(self):
+		# The group check must not accidentally block ordinary leaf Activities — a regression
+		# here would silently break every other test in this file too, but this pins it directly.
+		leaf = self._make_activity("GRP-A3")
+		document = self._make_document("GRP-DOC-003")
+
+		name = relationships.add_link(leaf.name, "EGC Project Document", document.name)
+		self.assertTrue(frappe.db.exists("EGC Activity Link", name))
+
 	# -- 5. Duplicate (activity, doctype, name) link is rejected ------------------------------
 
 	def test_duplicate_link_rejected(self):

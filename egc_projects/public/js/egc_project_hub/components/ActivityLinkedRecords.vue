@@ -17,6 +17,11 @@ const props = defineProps({
 	emptyMessage: { type: String, required: true },
 	rows: { type: Array, default: () => [] },
 	canWrite: { type: Boolean, default: false },
+	// False on a Group Activity (Level 0 §9-§22) — operational records belong on the leaf that
+	// represents the real work, not the group that rolls it up. Existing rows still render and
+	// can still be removed (e.g. to clean up data from before this rule was enforced); only
+	// adding a new one is blocked, matching the server-side EGC Activity Link guard.
+	allowAdd: { type: Boolean, default: true },
 });
 const emit = defineEmits(["changed"]);
 
@@ -89,11 +94,11 @@ function confirm_remove(row) {
 	<div class="activity-links">
 		<div class="activity-links__head">
 			<div class="activity-detail__section-title">{{ title }}</div>
-			<button v-if="canWrite" type="button" class="btn btn-xs btn-default" @click="open_add_dialog">
+			<button v-if="canWrite && allowAdd" type="button" class="btn btn-xs btn-default" @click="open_add_dialog">
 				{{ __("Link Existing") }}
 			</button>
 		</div>
-		<EmptyState v-if="!rows.length" :title="emptyMessage" />
+		<EmptyState v-if="!rows.length" :title="allowAdd ? emptyMessage : __('Not applicable to a Group Activity')" />
 		<ul v-else class="activity-detail__list">
 			<li v-for="row in rows" :key="row.name">
 				<a href="#" class="activity-detail__link" @click.prevent="open_record(row)">
