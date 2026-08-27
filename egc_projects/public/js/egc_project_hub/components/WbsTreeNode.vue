@@ -60,8 +60,12 @@ function format_date(value) {
 			<span v-if="summary && summary.activity_overdue_count" class="wbs-node__overdue" :title="__('Overdue activities')">
 				{{ summary.activity_overdue_count }} {{ __("overdue") }}
 			</span>
-			<span v-if="summary" class="wbs-node__metric" :title="__('Drawings / Open Submittals')">
-				{{ summary.drawing_count }}📄 {{ summary.submittal_open_count }}📝
+			<span
+				v-if="summary"
+				class="wbs-node__metric"
+				:title="__('{0} documents ({1} drawings) · {2} open submittals', [summary.document_count, summary.drawing_count, summary.submittal_open_count])"
+			>
+				{{ summary.document_count }}📄 {{ summary.submittal_open_count }}📝
 			</span>
 			<span v-if="summary && (summary.planned_start || summary.planned_finish)" class="wbs-node__dates">
 				{{ format_date(summary.planned_start) }} – {{ format_date(summary.planned_finish) }}

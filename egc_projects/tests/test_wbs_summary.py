@@ -142,6 +142,19 @@ class TestWbsSummary(IntegrationTestCase):
 				"wbs_node": hvac.name,
 			}
 		).insert(ignore_permissions=True)
+		# A non-drawing document (Specification) — must count toward document_count, but NOT
+		# toward drawing_count, proving the two are genuinely distinct rollups, not the same
+		# number under two names.
+		frappe.get_doc(
+			{
+				"doctype": "EGC Project Document",
+				"project": self.project,
+				"document_number": "SPEC-WBS-1",
+				"title": "Test Specification",
+				"document_type": "Specification",
+				"wbs_node": hvac.name,
+			}
+		).insert(ignore_permissions=True)
 
 		submittal = frappe.get_doc(
 			{
@@ -160,6 +173,8 @@ class TestWbsSummary(IntegrationTestCase):
 		summary = {row["name"]: row for row in wbs.get_wbs_summary(self.project)}
 		self.assertEqual(summary[hvac.name]["drawing_count"], 1)
 		self.assertEqual(summary[mechanical.name]["drawing_count"], 1)  # rolled up
+		self.assertEqual(summary[hvac.name]["document_count"], 2)
+		self.assertEqual(summary[mechanical.name]["document_count"], 2)  # rolled up
 		self.assertEqual(summary[hvac.name]["submittal_open_count"], 1)
 
 	# -- reorder_wbs_nodes ------------------------------------------------------------------------

@@ -82,6 +82,7 @@ def get_wbs_summary(project: str) -> list[dict]:
 			"activity_overdue_count": 0,
 			"planned_start": None,
 			"planned_finish": None,
+			"document_count": 0,
 			"drawing_count": 0,
 			"submittal_open_count": 0,
 			"submittal_overdue_count": 0,
@@ -111,15 +112,19 @@ def get_wbs_summary(project: str) -> list[dict]:
 				candidates = [d for d in (bucket["planned_finish"], activity.planned_end_date) if d]
 				bucket["planned_finish"] = max(candidates) if candidates else None
 
+	# One query for every Document under this project, not just Drawings — §29's rollup list
+	# names "Submittals" and "Documents" as two distinct figures; Drawings is a subset of
+	# Documents (`EGC Document Type.is_drawing`), not a stand-in for the whole count.
 	drawing_types = set(_get_drawing_document_types())
-	if drawing_types:
-		documents = frappe.get_all(
-			"EGC Project Document",
-			filters={"project": project, "wbs_node": ("is", "set"), "document_type": ("in", list(drawing_types))},
-			fields=["wbs_node"],
-		)
-		for document in documents:
-			for ancestor in ancestors.get(document.wbs_node, []):
+	documents = frappe.get_all(
+		"EGC Project Document",
+		filters={"project": project, "wbs_node": ("is", "set")},
+		fields=["wbs_node", "document_type"],
+	)
+	for document in documents:
+		for ancestor in ancestors.get(document.wbs_node, []):
+			totals[ancestor]["document_count"] += 1
+			if document.document_type in drawing_types:
 				totals[ancestor]["drawing_count"] += 1
 
 	submittals = frappe.get_all(
@@ -158,6 +163,7 @@ def get_wbs_summary(project: str) -> list[dict]:
 				"activity_overdue_count": bucket["activity_overdue_count"],
 				"planned_start": bucket["planned_start"],
 				"planned_finish": bucket["planned_finish"],
+				"document_count": bucket["document_count"],
 				"drawing_count": bucket["drawing_count"],
 				"submittal_open_count": bucket["submittal_open_count"],
 				"submittal_overdue_count": bucket["submittal_overdue_count"],
