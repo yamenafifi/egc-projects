@@ -13,7 +13,7 @@
      detail round trip even resolves. -->
 <script setup>
 import { computed, ref, watch } from "vue";
-import { get_activity_detail } from "./activities_api";
+import { get_activity_detail, link_activity_record, unlink_activity_record } from "./activities_api";
 import LoadingState from "./LoadingState.vue";
 import ErrorState from "./ErrorState.vue";
 import EmptyState from "./EmptyState.vue";
@@ -94,6 +94,74 @@ function tool_count(key) {
 function open_activity(name) {
 	emit("open-detail", name);
 }
+
+// -- submittals table (row.* fields come from relationships._TARGET_STATUS_FIELDS["EGC
+// Submittal"] — the same fields the main Submittals register itself shows) --------------------
+
+function format_date(value) {
+	return value ? frappe.datetime.str_to_user(value) : "—";
+}
+
+// Mirrors api/hub.py's get_submittals() is_overdue rule exactly (current_due_date in the past,
+// status still one of the two "open" ones) — relationships.py is a generic linking module and
+// deliberately doesn't know submittal-specific status semantics, so this is computed here
+// instead of being a field the backend already sends.
+const SUBMISSION_OPEN_STATUSES = ["Submitted", "Under Review"];
+function is_submittal_overdue(row) {
+	if (!row.current_due_date) return false;
+	if (!SUBMISSION_OPEN_STATUSES.includes(row.submittal_status)) return false;
+	return frappe.datetime.get_diff(row.current_due_date, frappe.datetime.get_today()) < 0;
+}
+
+function open_submittal(row) {
+	frappe.set_route("Form", "EGC Submittal", row.link_name);
+}
+
+function open_add_submittal_dialog() {
+	const dialog = new frappe.ui.Dialog({
+		title: __("Link Submittal"),
+		fields: [
+			{
+				fieldname: "link_name",
+				fieldtype: "Link",
+				label: __("Submittal"),
+				options: "EGC Submittal",
+				reqd: 1,
+				get_query: () => ({ filters: { project: props.project } }),
+			},
+			{
+				fieldname: "link_purpose",
+				fieldtype: "Select",
+				label: __("Purpose"),
+				options: ["Reference", "Requirement"],
+				default: "Reference",
+			},
+			{ fieldname: "remarks", fieldtype: "Small Text", label: __("Remarks") },
+		],
+		primary_action_label: __("Add"),
+		primary_action(values) {
+			link_activity_record(props.activity, "EGC Submittal", values.link_name, values.link_purpose, values.remarks)
+				.then(() => {
+					dialog.hide();
+					reload();
+				})
+				.catch((e) => {
+					frappe.msgprint({ title: __("Could Not Add Link"), message: e.message, indicator: "red" });
+				});
+		},
+	});
+	dialog.show();
+}
+
+function confirm_remove_submittal(row) {
+	frappe.confirm(__("Remove this link?"), () => {
+		unlink_activity_record(row.name)
+			.then(reload)
+			.catch((e) => {
+				frappe.msgprint({ title: __("Could Not Remove Link"), message: e.message, indicator: "red" });
+			});
+	});
+}
 </script>
 
 <template>
@@ -120,17 +188,63 @@ function open_activity(name) {
 			</div>
 
 			<div class="activity-expand__body">
-				<ActivityLinkedRecords
-					v-if="active_tool === 'submittals'"
-					:activity="activity"
-					:project="project"
-					link-doctype="EGC Submittal"
-					:title="__('Submittals')"
-					:empty-message="__('No linked submittals yet')"
-					:rows="submittal_links"
-					:can-write="canWrite"
-					@changed="reload"
-				/>
+				<div v-if="active_tool === 'submittals'" class="activity-expand__submittals">
+					<div class="activity-expand__table-head">
+						<div class="activity-detail__section-title">{{ __("Submittals") }}</div>
+						<button v-if="canWrite" type="button" class="btn btn-xs btn-default" @click="open_add_submittal_dialog">
+							{{ __("Link Existing") }}
+						</button>
+					</div>
+					<EmptyState v-if="!submittal_links.length" :title="__('No linked submittals yet')" />
+					<div v-else class="hub-table-wrap">
+						<table class="hub-table">
+							<thead>
+								<tr>
+									<th>{{ __("Submittal No") }}</th>
+									<th>{{ __("Title") }}</th>
+									<th>{{ __("Type") }}</th>
+									<th>{{ __("Discipline") }}</th>
+									<th>{{ __("Current Submission") }}</th>
+									<th>{{ __("Status") }}</th>
+									<th>{{ __("Ball in Court") }}</th>
+									<th>{{ __("Due Date") }}</th>
+									<th>{{ __("Purpose") }}</th>
+									<th v-if="canWrite"></th>
+								</tr>
+							</thead>
+							<tbody>
+								<tr
+									v-for="row in submittal_links"
+									:key="row.name"
+									class="hub-table__row--clickable"
+									@click="open_submittal(row)"
+								>
+									<td>{{ row.submittal_number || "—" }}</td>
+									<td class="hub-table__truncate" :title="row.link_title">{{ row.link_title || "—" }}</td>
+									<td>{{ row.submittal_type || "—" }}</td>
+									<td>{{ row.discipline || "—" }}</td>
+									<td>{{ row.current_submission_label || "—" }}</td>
+									<td><StatusPill :status="row.submittal_status" /></td>
+									<td>{{ row.ball_in_court || "—" }}</td>
+									<td :class="{ 'hub-table__overdue': is_submittal_overdue(row) }">
+										{{ format_date(row.current_due_date) }}
+										<span v-if="is_submittal_overdue(row)" class="hub-table__overdue-tag">{{ __("Overdue") }}</span>
+									</td>
+									<td>{{ row.link_purpose || "—" }}</td>
+									<td v-if="canWrite">
+										<button
+											type="button"
+											class="btn btn-xs btn-default"
+											@click.stop="confirm_remove_submittal(row)"
+										>
+											{{ __("Remove") }}
+										</button>
+									</td>
+								</tr>
+							</tbody>
+						</table>
+					</div>
+				</div>
 
 				<ActivityLinkedRecords
 					v-else-if="active_tool === 'documents'"
@@ -305,5 +419,18 @@ function open_activity(name) {
 	align-items: center;
 	gap: 8px;
 	flex: 0 0 auto;
+}
+
+.activity-detail__section-title {
+	font-size: var(--text-sm);
+	font-weight: 600;
+	color: var(--text-color);
+}
+
+.activity-expand__table-head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	margin-bottom: 10px;
 }
 </style>

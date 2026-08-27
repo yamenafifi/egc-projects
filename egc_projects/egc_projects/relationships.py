@@ -34,8 +34,16 @@ ALLOWED_LINK_DOCTYPES: dict[str, dict] = {
 #: Per-target-doctype extra fields fetched in one query per doctype by `get_links_for_activity`,
 #: so a row renders its target's live status without a second round-trip per row.
 _TARGET_STATUS_FIELDS: dict[str, tuple[str, ...]] = {
-	"EGC Project Document": ("document_number", "current_revision_label", "approval_status"),
-	"EGC Submittal": ("submittal_number", "submittal_status", "current_submission_label"),
+	"EGC Project Document": ("document_number", "current_revision_label", "approval_status", "discipline"),
+	"EGC Submittal": (
+		"submittal_number",
+		"submittal_status",
+		"current_submission_label",
+		"submittal_type",
+		"discipline",
+		"ball_in_court",
+		"current_due_date",
+	),
 }
 
 

@@ -52,7 +52,29 @@ function open_tree_view() {
 }
 
 function create_root() {
-	frappe.new_doc("EGC WBS Node", { project: props.project });
+	// Same in-Hub dialog as the per-row "Add Child WBS Node" quick-add (on_quick_add below),
+	// just without a parent — stays inside the Hub instead of navigating to the native form.
+	const dialog = new frappe.ui.Dialog({
+		title: __("New WBS Node"),
+		fields: [
+			{ fieldname: "wbs_code", fieldtype: "Data", label: __("WBS Code"), reqd: 1 },
+			{ fieldname: "wbs_name", fieldtype: "Data", label: __("WBS Name"), reqd: 1 },
+			{ fieldname: "is_group", fieldtype: "Check", label: __("Is Group") },
+			{ fieldname: "discipline", fieldtype: "Link", label: __("Discipline"), options: "EGC Discipline" },
+		],
+		primary_action_label: __("Create"),
+		primary_action(values) {
+			create_wbs_node({ ...values, project: props.project })
+				.then(() => {
+					dialog.hide();
+					reload();
+				})
+				.catch((e) => {
+					frappe.msgprint({ title: __("Could Not Create WBS Node"), message: e.message, indicator: "red" });
+				});
+		},
+	});
+	dialog.show();
 }
 
 // -- reorder (up/down within siblings) ---------------------------------------------------------
@@ -244,8 +266,8 @@ function open_bulk_dialog() {
 				<button v-if="can_write" type="button" class="btn btn-xs btn-default" @click="open_bulk_dialog">
 					{{ __("Bulk Add") }}
 				</button>
-				<button v-if="can_write" type="button" class="btn btn-xs btn-default" @click="create_root">
-					{{ __("+ Add Root Node") }}
+				<button v-if="can_write" type="button" class="btn btn-sm btn-primary" @click="create_root">
+					{{ __("+ New WBS Node") }}
 				</button>
 				<a href="#" class="hub-link" @click.prevent="open_tree_view">{{ __("Open Tree View") }}</a>
 			</div>

@@ -84,12 +84,38 @@ const filtered = computed(() => {
 });
 
 function create_activity() {
-	// Empty-state action for a project with no activities at all yet — a bare top-level
-	// creation still goes to the native "New" form (there is no sensible quick-add target
-	// without an existing group to attach to). Once at least one activity exists, the
-	// per-row "+" quick-add and the detail drawer's "Add Child Activity" cover routine growth
-	// of the tree without leaving the Hub.
-	frappe.new_doc("EGC Activity", { project: props.project });
+	// Root-level creation — same in-Hub dialog as the per-row "+" quick-add (open_quick_add
+	// below), just without a parent. A persistent toolbar action, not just the empty-state's
+	// one-time affordance: a project with activities already in it still needs a way to add a
+	// new top-level phase without leaving the Hub for the native form.
+	const dialog = new frappe.ui.Dialog({
+		title: __("New Activity"),
+		fields: [
+			{ fieldname: "activity_code", fieldtype: "Data", label: __("Activity Code"), reqd: 1 },
+			{ fieldname: "activity_name", fieldtype: "Data", label: __("Activity Name"), reqd: 1 },
+			{ fieldname: "is_group", fieldtype: "Check", label: __("Is Group") },
+			{
+				fieldname: "wbs_node",
+				fieldtype: "Link",
+				label: __("WBS Node"),
+				options: "EGC WBS Node",
+				get_query: () => ({ filters: { project: props.project } }),
+			},
+			{ fieldname: "discipline", fieldtype: "Link", label: __("Discipline"), options: "EGC Discipline" },
+		],
+		primary_action_label: __("Create"),
+		primary_action(values) {
+			create_activity_record({ ...values, project: props.project })
+				.then(() => {
+					dialog.hide();
+					reload();
+				})
+				.catch((e) => {
+					frappe.msgprint({ title: __("Could Not Create Activity"), message: e.message, indicator: "red" });
+				});
+		},
+	});
+	dialog.show();
 }
 
 function format_date(value) {
@@ -107,6 +133,13 @@ function format_duration(value) {
 // matching duration_days's own 0-as-sentinel convention above.
 function format_weight(value) {
 	return value ? __("{0}%", [Math.round(value)]) : "—";
+}
+
+// `row.link_counts` is already batched in one query per get_activities() call (api/hub.py) — a
+// glanceable "2 Sub · 1 Doc" badge right on the collapsed row, so a PM scanning the whole list
+// can already see what's underneath an Activity without expanding every row one at a time.
+function link_badge(row, link_doctype) {
+	return (row.link_counts || {})[link_doctype] || 0;
 }
 
 function open_quick_add(row) {
@@ -175,6 +208,10 @@ function open_quick_add(row) {
 					<input v-model="overdue_only" type="checkbox" />
 					{{ __("Overdue only") }}
 				</label>
+				<div class="hub-toolbar__spacer" />
+				<button v-if="can_write" type="button" class="btn btn-sm btn-primary" @click="create_activity">
+					{{ __("+ New Activity") }}
+				</button>
 			</div>
 
 			<EmptyState v-if="!filtered.length" :title="__('No activities match these filters')" />
@@ -219,6 +256,16 @@ function open_quick_add(row) {
 								<td class="hub-table__truncate" :title="row.activity_name">
 									{{ row.activity_name }}
 									<span v-if="row.is_milestone" class="hub-activities__milestone" :title="__('Milestone')" />
+									<span v-if="link_badge(row, 'EGC Submittal')" class="hub-activities__link-badge" :title="__('Linked Submittals')">
+										{{ link_badge(row, "EGC Submittal") }} {{ __("Sub") }}
+									</span>
+									<span
+										v-if="link_badge(row, 'EGC Project Document')"
+										class="hub-activities__link-badge"
+										:title="__('Linked Drawings & Documents')"
+									>
+										{{ link_badge(row, "EGC Project Document") }} {{ __("Doc") }}
+									</span>
 								</td>
 								<td>
 									<a
@@ -306,6 +353,19 @@ function open_quick_add(row) {
 	vertical-align: middle;
 }
 
+.hub-activities__link-badge {
+	display: inline-block;
+	margin-left: 6px;
+	padding: 0 6px;
+	font-size: var(--text-xs);
+	font-weight: 500;
+	color: var(--text-muted);
+	background: var(--control-bg);
+	border-radius: var(--border-radius-full);
+	vertical-align: middle;
+	white-space: nowrap;
+}
+
 .hub-activities__toggle-col {
 	width: 28px;
 	padding-left: 10px !important;
@@ -358,6 +418,10 @@ function open_quick_add(row) {
 	font-size: var(--text-sm);
 	color: var(--text-color);
 	white-space: nowrap;
+}
+
+.hub-toolbar__spacer {
+	flex: 1 1 auto;
 }
 
 .hub-table__overdue-tag {
