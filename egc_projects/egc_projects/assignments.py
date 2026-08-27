@@ -22,6 +22,10 @@ from frappe import _
 #: must have a direct `project` field — this module never infers it transitively.
 ALLOWED_ASSIGNMENT_DOCTYPES: dict[str, str] = {
 	"EGC Activity": "project",
+	# Level 1 §31: "multiple responsible people, multiple organizations" on a Submittal — a whole
+	# team from the responsible organization, or a Watcher who isn't a reviewer at all, neither of
+	# which `responsible_organization`/`responsible_party` (a single primary party) can represent.
+	"EGC Submittal": "project",
 }
 
 ASSIGNMENT_ROLES = (

@@ -33,6 +33,25 @@ def _make_activity(project, code):
 	return doc.name
 
 
+def _make_submittal(project, number):
+	submittal_type = "EGC-Dir-Test Submittal Type"
+	if not frappe.db.exists("EGC Submittal Type", submittal_type):
+		frappe.get_doc(
+			{"doctype": "EGC Submittal Type", "submittal_type_name": submittal_type, "abbreviation": "DIRT"}
+		).insert(ignore_permissions=True)
+	doc = frappe.get_doc(
+		{
+			"doctype": "EGC Submittal",
+			"project": project,
+			"submittal_number": number,
+			"title": number,
+			"submittal_type": submittal_type,
+		}
+	)
+	doc.insert(ignore_permissions=True)
+	return doc.name
+
+
 def _make_organization(name=None):
 	name = name or f"EGC-Dir-Org-{frappe.generate_hash(length=6)}"
 	if frappe.db.exists("EGC Organization", name):
@@ -129,6 +148,21 @@ class TestEGCAssignment(IntegrationTestCase):
 	def test_disallowed_parent_doctype_rejected(self):
 		with self.assertRaises(frappe.ValidationError):
 			assignments.add_assignment("Project", self.project, "Responsible", person=_make_person())
+
+	def test_submittal_accepts_multiple_assignments(self):
+		# Level 1 §31: "multiple responsible people, multiple organizations" on a Submittal —
+		# EGC Submittal joined EGC Activity in ALLOWED_ASSIGNMENT_DOCTYPES this phase.
+		submittal = _make_submittal(self.project, "DIR-SUB-001")
+		org = _make_organization()
+		p1 = _make_person("Ahmed", organization=org)
+		p2 = _make_person("Sara", organization=org)
+
+		assignments.add_assignment("EGC Submittal", submittal, "Responsible", person=p1, is_primary=True)
+		assignments.add_assignment("EGC Submittal", submittal, "Watcher", person=p2)
+
+		rows = assignments.get_assignments_for("EGC Submittal", submittal)
+		self.assertEqual(len(rows), 2)
+		self.assertEqual(frappe.db.get_value("EGC Assignment", rows[0]["name"], "project"), self.project)
 
 	def test_same_person_same_role_twice_rejected(self):
 		person = _make_person()

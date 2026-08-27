@@ -14,7 +14,7 @@ from __future__ import annotations
 import frappe
 from frappe import _
 
-from egc_projects.egc_projects import relationships, submittal_control, validators
+from egc_projects.egc_projects import assignments, relationships, submittal_control, validators
 
 # --- add/remove a controlled document revision on a Draft submission --------------------------
 
@@ -241,6 +241,9 @@ def get_submittal_detail(submittal: str) -> dict:
 		"submissions": submissions,
 		# Reverse direction of EGC Activity Link — every Activity linked to this Submittal.
 		"related_activities": relationships.get_activities_for("EGC Submittal", submittal),
+		# Level 1 §31: multiple responsible people/organizations, beyond the single primary
+		# responsible_organization/responsible_party pair.
+		"assignments": assignments.get_assignments_for("EGC Submittal", submittal),
 	}
 
 

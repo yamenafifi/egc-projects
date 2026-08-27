@@ -22,6 +22,7 @@ import {
 	remove_review_step,
 } from "./submittals_api";
 import { link_activity_record, unlink_activity_record } from "./activities_api";
+import { add_assignment, remove_assignment } from "./assignments_api";
 import { get_comments, add_comment } from "./comments_api";
 import { useHubResource } from "../composables/useHubResource";
 import LoadingState from "./LoadingState.vue";
@@ -283,6 +284,74 @@ function confirm_remove_reviewer(step) {
 	});
 }
 
+// -- People: multiple assignees beyond the single primary responsible_organization/
+// responsible_party pair (Level 1 §31) — same generic assignments.py engine ActivityDetail.vue
+// already uses, just pointed at "EGC Submittal" instead of "EGC Activity".
+
+const ASSIGNMENT_ROLES = ["Responsible", "Assignee", "Supervisor", "Consultant", "Reviewer", "Contractor", "Watcher"];
+
+function open_add_assignment_dialog() {
+	const dialog = new frappe.ui.Dialog({
+		title: __("Add Person"),
+		fields: [
+			{
+				fieldname: "person",
+				fieldtype: "Link",
+				label: __("Person"),
+				options: "EGC Person",
+				description: __("Leave blank to assign a whole Organization with no specific individual named."),
+			},
+			{
+				fieldname: "organization",
+				fieldtype: "Link",
+				label: __("Organization"),
+				options: "EGC Organization",
+				description: __("Defaults from the Person's own organization when one is picked above."),
+			},
+			{
+				fieldname: "assignment_role",
+				fieldtype: "Select",
+				label: __("Role on this Submittal"),
+				options: ASSIGNMENT_ROLES,
+				default: "Responsible",
+				reqd: 1,
+			},
+			{ fieldname: "is_primary", fieldtype: "Check", label: __("Primary") },
+			{ fieldname: "remarks", fieldtype: "Small Text", label: __("Remarks") },
+		],
+		primary_action_label: __("Add"),
+		primary_action(values) {
+			add_assignment(
+				"EGC Submittal",
+				props.submittal,
+				values.assignment_role,
+				values.person,
+				values.organization,
+				values.remarks,
+				Boolean(values.is_primary)
+			)
+				.then(() => {
+					dialog.hide();
+					notify_changed();
+				})
+				.catch((e) => {
+					frappe.msgprint({ title: __("Could Not Add Person"), message: e.message, indicator: "red" });
+				});
+		},
+	});
+	dialog.show();
+}
+
+function confirm_remove_assignment(row) {
+	frappe.confirm(__("Remove {0} from this Submittal?", [row.person_name || row.organization_name]), () => {
+		remove_assignment(row.name)
+			.then(notify_changed)
+			.catch((e) => {
+				frappe.msgprint({ title: __("Could Not Remove"), message: e.message, indicator: "red" });
+			});
+	});
+}
+
 // -- documents on the current (Draft) submission -----------------------------------------------
 
 function open_add_document_dialog() {
@@ -441,6 +510,33 @@ function open_link_activity_dialog() {
 								<dd>{{ format_date(data.submittal.current_due_date) }}</dd>
 							</div>
 						</dl>
+					</section>
+
+					<section class="activity-detail__section">
+						<div class="activity-detail__head-row">
+							<div class="activity-detail__section-title">{{ __("People") }}</div>
+							<button v-if="canWrite" type="button" class="btn btn-xs btn-default" @click="open_add_assignment_dialog">
+								{{ __("Add Person") }}
+							</button>
+						</div>
+						<EmptyState v-if="!(data.assignments || []).length" :title="__('No one assigned yet')" />
+						<ul v-else class="activity-detail__list">
+							<li v-for="row in data.assignments" :key="row.name">
+								<div>
+									<span class="activity-detail__link">{{ row.person_name || row.organization_name || __("Unnamed") }}</span>
+									<span v-if="row.person_name && row.organization_name" class="activity-detail__dep-type">
+										— {{ row.organization_name }}
+									</span>
+									<span v-if="row.is_primary" class="indicator-pill blue">{{ __("Primary") }}</span>
+								</div>
+								<div class="activity-links__meta">
+									<span class="activity-detail__dep-type">{{ row.assignment_role }}</span>
+									<button v-if="canWrite" type="button" class="btn btn-xs btn-default" @click="confirm_remove_assignment(row)">
+										{{ __("Remove") }}
+									</button>
+								</div>
+							</li>
+						</ul>
 					</section>
 
 					<section v-if="!current_submission" class="activity-detail__section">
@@ -807,6 +903,18 @@ function open_link_activity_dialog() {
 .activity-detail__link {
 	color: var(--text-color);
 	font-weight: 500;
+}
+
+.activity-detail__dep-type {
+	font-size: var(--text-xs);
+	color: var(--text-muted);
+}
+
+.activity-links__meta {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex: 0 0 auto;
 }
 
 .activity-detail__section {
