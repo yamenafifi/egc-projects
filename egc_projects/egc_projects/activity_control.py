@@ -127,14 +127,17 @@ def _compute_rollup(children: list[frappe._dict]) -> dict:
 	# Weighted by weight_pct once the children carry real weights; falls back to an unweighted
 	# mean — the original rule, before Activities carried a weight at all — for any group whose
 	# children haven't been weighted yet (total_weight == 0), so existing/unconfigured trees keep
-	# behaving exactly as before this field existed. A partially-weighted set (weights that don't
-	# sum to 100) is still handled correctly here: normalising by total_weight, not by 100, means
-	# under-allocated weight simply doesn't participate rather than silently understating progress.
+	# behaving exactly as before this field existed.
+	#
+	# Normalises by a FIXED 100, not by total_weight — under-allocated weight must NOT be
+	# invisible. If only 70% of a group's weight is allocated, that group can never show more
+	# than 70% complete even if every allocated child is at 100%: the unallocated 30% is real,
+	# not-yet-planned scope that has not started, and pretending the allocated slice represents
+	# the whole parent would silently overstate progress the moment allocation is incomplete.
+	# (Corrected from an earlier division-by-total_weight version that did exactly that.)
 	total_weight = sum(flt(child.weight_pct) for child in children)
 	if total_weight > 0:
-		percent_complete = (
-			sum(flt(child.percent_complete) * flt(child.weight_pct) for child in children) / total_weight
-		)
+		percent_complete = sum(flt(child.percent_complete) * flt(child.weight_pct) for child in children) / 100
 	else:
 		percent_complete = sum(flt(child.percent_complete) for child in children) / len(children)
 

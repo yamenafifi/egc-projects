@@ -297,10 +297,11 @@ class TestActivitySchedule(IntegrationTestCase):
 		group.reload()
 		self.assertEqual(group.percent_complete, 50)  # unweighted mean, weights are all 0
 
-	def test_rollup_partial_weight_normalises_by_allocated_weight_not_100(self):
-		# Only 50% of the weight has been allocated so far (tree still being built) — the
-		# rollup must normalise against what IS allocated, not silently treat the missing 50%
-		# as zero-progress weight (which would understate progress for no real reason).
+	def test_rollup_normalises_by_fixed_100_not_allocated_weight(self):
+		# Only 50% of the weight has been allocated so far (tree still being built). The
+		# unallocated 50% is real, not-yet-planned scope — it must count as not-started, not be
+		# invisible. Normalising against only what's allocated would let one fully-complete
+		# child claim the WHOLE group is done while half its scope was never even weighted in.
 		group = make_activity(self.project, "WROLL-GRP3", "Group", is_group=1)
 		make_activity(
 			self.project,
@@ -316,5 +317,5 @@ class TestActivitySchedule(IntegrationTestCase):
 		)
 
 		group.reload()
-		# Weighted over allocated weight only: 100*0.5 / 0.5 = 100, not 50.
-		self.assertEqual(group.percent_complete, 100)
+		# Fixed-100 normalisation: 100*0.5 / 100 = 50, not 100.
+		self.assertEqual(group.percent_complete, 50)
