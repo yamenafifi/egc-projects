@@ -5,6 +5,7 @@ import { create_document } from "./documents_api";
 import { useHubResource } from "../composables/useHubResource";
 import { statusColor } from "../composables/useStatusColor";
 import { consumeDrawingsApprovalIntent } from "../composables/useDrawingsIntent";
+import { consumeCreateIntent } from "../composables/useCreateIntent";
 import LoadingState from "./LoadingState.vue";
 import ErrorState from "./ErrorState.vue";
 import EmptyState from "./EmptyState.vue";
@@ -30,6 +31,7 @@ const area_filter = ref("");
 onMounted(() => {
 	const intent = consumeDrawingsApprovalIntent();
 	if (intent) approval_filter.value = intent;
+	if (consumeCreateIntent("drawings")) open_create_dialog();
 });
 
 const disciplines = computed(() =>

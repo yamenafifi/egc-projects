@@ -4,6 +4,7 @@ import { get_activities } from "../api";
 import { create_activity as create_activity_record } from "./activities_api";
 import { useHubResource } from "../composables/useHubResource";
 import { consumeOverdueIntent } from "../composables/useOverdueIntent";
+import { consumeCreateIntent } from "../composables/useCreateIntent";
 import LoadingState from "./LoadingState.vue";
 import ErrorState from "./ErrorState.vue";
 import EmptyState from "./EmptyState.vue";
@@ -71,6 +72,7 @@ const active_view = ref("Table");
 
 onMounted(() => {
 	if (consumeOverdueIntent("activities")) overdue_only.value = true;
+	if (consumeCreateIntent("activities")) create_activity();
 });
 
 const statuses = computed(() => [...new Set((data.value || []).map((r) => r.status).filter(Boolean))].sort());

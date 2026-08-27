@@ -4,6 +4,7 @@ import { get_submittals } from "../api";
 import { create_submittal } from "./submittals_api";
 import { useHubResource } from "../composables/useHubResource";
 import { consumeOverdueIntent } from "../composables/useOverdueIntent";
+import { consumeCreateIntent } from "../composables/useCreateIntent";
 import LoadingState from "./LoadingState.vue";
 import ErrorState from "./ErrorState.vue";
 import EmptyState from "./EmptyState.vue";
@@ -35,6 +36,7 @@ const overdue_only = ref(false);
 
 onMounted(() => {
 	if (consumeOverdueIntent("submittals")) overdue_only.value = true;
+	if (consumeCreateIntent("submittals")) open_create_dialog();
 });
 
 const statuses = computed(() =>

@@ -1,8 +1,9 @@
 <!-- Header-level "Quick Actions" affordance (ARCHITECTURE_V2.md §0 finding 3 — Overview had no
-quick actions). The actual creation UI lives in each target tab's own package, not here, and
-none of those tabs expose an in-place creation dialog yet — so for this wave every action just
-navigates to its tab. TODO: once Activities/Submittals/Documents/Drawings expose a "New …"
-dialog, wire these straight into it instead of a tab switch.
+quick actions; Level 1 §35 names exactly these four). Each action sets a one-shot createIntent
+flag (useCreateIntent.js) before switching tabs, and the target tab's own onMounted consumes it
+to open ITS OWN "New …" dialog — the actual creation UI still lives in each tab's own package,
+this just makes arriving there also open it, instead of leaving the user to find the button
+themselves after the tab switch.
 
 Click-outside is done via a real document listener (checked against a template ref), not a
 focusout/blur handler — a blur fires before the menu item's own click event completes, which
@@ -12,6 +13,7 @@ it. -->
 <script setup>
 import { onBeforeUnmount, onMounted, ref } from "vue";
 import { useHubRoute } from "../composables/useHubRoute";
+import { createIntent } from "../composables/useCreateIntent";
 
 const { setTab } = useHubRoute();
 const open = ref(false);
@@ -30,6 +32,7 @@ function toggle() {
 
 function trigger(tab) {
 	open.value = false;
+	createIntent[tab] = true;
 	setTab(tab);
 }
 

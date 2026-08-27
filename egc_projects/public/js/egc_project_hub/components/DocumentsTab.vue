@@ -1,7 +1,8 @@
 <script setup>
-import { computed, ref, watch } from "vue";
+import { computed, ref, watch, onMounted } from "vue";
 import { get_documents, create_document } from "./documents_api";
 import { useHubResource } from "../composables/useHubResource";
+import { consumeCreateIntent } from "../composables/useCreateIntent";
 import LoadingState from "./LoadingState.vue";
 import ErrorState from "./ErrorState.vue";
 import EmptyState from "./EmptyState.vue";
@@ -23,6 +24,10 @@ const document_status_filter = ref("");
 const approval_filter = ref("");
 
 const selected_document = ref(null);
+
+onMounted(() => {
+	if (consumeCreateIntent("documents")) open_create_dialog();
+});
 
 const document_types = computed(() =>
 	[...new Set((data.value || []).map((r) => r.document_type).filter(Boolean))].sort()
