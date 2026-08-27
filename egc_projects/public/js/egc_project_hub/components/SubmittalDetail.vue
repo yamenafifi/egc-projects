@@ -18,6 +18,8 @@ import {
 	record_step_response,
 	add_submission_document,
 	remove_submission_document,
+	add_review_step,
+	remove_review_step,
 } from "./submittals_api";
 import { link_activity_record, unlink_activity_record } from "./activities_api";
 import { useHubResource } from "../composables/useHubResource";
@@ -202,6 +204,72 @@ async function open_apply_template_dialog() {
 	dialog.show();
 }
 
+// -- add/remove reviewers (ball in court can hold more than one person at a stage) --------------
+//
+// `add_review_step` is a per-reviewer call, not a bulk one — adding N people to the same stage
+// means calling it N times with the same `sequence`. That's exactly how a review stage becomes
+// "parallel" (submittal_control.py's `_refresh_ball_in_court` already aggregates every step of
+// the CURRENT sequence into one Ball in Court label); this dialog is just what makes doing that
+// from the Hub possible at all — the API already supported it, nothing in the UI called it.
+
+function open_add_reviewer_dialog() {
+	const existing_sequences = [...new Set((current_submission.value?.steps || []).map((s) => s.sequence))];
+	const next_sequence = existing_sequences.length ? Math.max(...existing_sequences) : 1;
+
+	const dialog = new frappe.ui.Dialog({
+		title: __("Add Reviewer"),
+		fields: [
+			{
+				fieldname: "sequence",
+				fieldtype: "Int",
+				label: __("Stage"),
+				default: next_sequence,
+				reqd: 1,
+				description: __(
+					"Reviewers sharing the same stage number review in parallel — all of them show up in Ball in Court at once. Use the next stage number to review after the current stage responds instead."
+				),
+			},
+			{
+				fieldname: "reviewer_role",
+				fieldtype: "Link",
+				label: __("Reviewer Role"),
+				options: "EGC Stakeholder Role",
+				description: __("Resolves to that role's stakeholder on this project. Leave blank if picking a user directly."),
+			},
+			{
+				fieldname: "reviewer_user",
+				fieldtype: "Link",
+				label: __("Reviewer User"),
+				options: "User",
+				description: __("Set this instead of (or in addition to) a role to name a specific person."),
+			},
+			{ fieldname: "is_required", fieldtype: "Check", label: __("Required"), default: 1 },
+		],
+		primary_action_label: __("Add"),
+		primary_action(values) {
+			add_review_step(current_submission.value.name, values.sequence, values.reviewer_role, values.reviewer_user, Boolean(values.is_required))
+				.then(() => {
+					dialog.hide();
+					notify_changed();
+				})
+				.catch((e) => {
+					frappe.msgprint({ title: __("Could Not Add Reviewer"), message: e.message, indicator: "red" });
+				});
+		},
+	});
+	dialog.show();
+}
+
+function confirm_remove_reviewer(step) {
+	frappe.confirm(__("Remove this reviewer from the submission?"), () => {
+		remove_review_step(step.name)
+			.then(notify_changed)
+			.catch((e) => {
+				frappe.msgprint({ title: __("Could Not Remove Reviewer"), message: e.message, indicator: "red" });
+			});
+	});
+}
+
 // -- documents on the current (Draft) submission -----------------------------------------------
 
 function open_add_document_dialog() {
@@ -353,6 +421,14 @@ function open_link_activity_dialog() {
 								<button
 									v-if="current_submission.docstatus === 0"
 									type="button"
+									class="btn btn-xs btn-default"
+									@click="open_add_reviewer_dialog"
+								>
+									{{ __("Add Reviewer") }}
+								</button>
+								<button
+									v-if="current_submission.docstatus === 0"
+									type="button"
 									class="btn btn-xs btn-primary"
 									:disabled="submitting || !current_submission.documents.length"
 									@click="do_submit"
@@ -410,6 +486,15 @@ function open_link_activity_dialog() {
 										@click="open_record_response_dialog(step)"
 									>
 										{{ __("Respond") }}
+									</button>
+									<button
+										v-if="canWrite && current_submission.docstatus === 0"
+										type="button"
+										class="btn btn-xs btn-default"
+										:title="__('Remove reviewer')"
+										@click="confirm_remove_reviewer(step)"
+									>
+										&times;
 									</button>
 								</div>
 							</div>
