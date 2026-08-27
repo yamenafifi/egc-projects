@@ -73,6 +73,10 @@ export function get_financial_transactions(project, metric) {
 	return call_hub("get_financial_transactions", { project, metric });
 }
 
+export function get_cost_forecast(project) {
+	return call_hub("get_cost_forecast", { project });
+}
+
 export function get_my_open_items(project) {
 	return call_hub("get_my_open_items", { project });
 }

@@ -1,6 +1,6 @@
 <script setup>
 import { computed, watch } from "vue";
-import { get_financials, get_financial_transactions } from "../api";
+import { get_financials, get_financial_transactions, get_cost_forecast } from "../api";
 import { get_contract_value_breakdown } from "./change_orders_api";
 import { useHubResource } from "../composables/useHubResource";
 import LoadingState from "./LoadingState.vue";
@@ -23,6 +23,13 @@ const {
 	reload: reload_contract_value,
 } = useHubResource(() => get_contract_value_breakdown(props.project));
 
+const {
+	data: cost_forecast,
+	loading: cost_forecast_loading,
+	error: cost_forecast_error,
+	reload: reload_cost_forecast,
+} = useHubResource(() => get_cost_forecast(props.project));
+
 // A client-side hint only — EGC Change Order's own DocType permissions are the actual boundary.
 const WRITE_ROLES = ["EGC Project Manager", "System Manager"];
 const can_write_change_orders = computed(() =>
@@ -37,6 +44,7 @@ watch(
 		if (has_access.value) {
 			reload();
 			reload_contract_value();
+			reload_cost_forecast();
 		}
 	},
 	{ immediate: true }
@@ -59,6 +67,18 @@ function open_new_change_order() {
 function open_change_order(name) {
 	frappe.set_route("Form", "EGC Change Order", name);
 }
+
+// Spent-vs-remaining is measured against the FORECASTED total cost (estimate_at_completion), not
+// the original budget — once spending is running inefficiently the forecast is the honest "100%"
+// to bar against, otherwise "spent" could show past the end of its own bar.
+const spent_pct = computed(() => {
+	if (!cost_forecast.value || !cost_forecast.value.estimate_at_completion) return 0;
+	return Math.round((cost_forecast.value.actual_cost / cost_forecast.value.estimate_at_completion) * 100);
+});
+
+const is_over_budget = computed(
+	() => cost_forecast.value && cost_forecast.value.estimate_at_completion > cost_forecast.value.budget + 0.01
+);
 
 function format_amount(value) {
 	if (value === null || value === undefined) return "—";
@@ -216,6 +236,56 @@ async function open_drill_down(row) {
 			</template>
 		</div>
 
+		<div class="hub-card hub-cost-forecast">
+			<div class="hub-financials__label">{{ __("Cost to Complete") }}</div>
+
+			<LoadingState v-if="cost_forecast_loading" :rows="2" />
+			<ErrorState v-else-if="cost_forecast_error" :message="cost_forecast_error" @retry="reload_cost_forecast" />
+
+			<EmptyState
+				v-else-if="cost_forecast && !cost_forecast.budget"
+				:title="__('No budget set yet')"
+				:description="__('Set Estimated Costing on the Project to forecast remaining cost from progress.')"
+			/>
+
+			<template v-else-if="cost_forecast">
+				<div class="hub-cost-forecast__row">
+					<div class="hub-cost-forecast__stat">
+						<div class="hub-cost-forecast__stat-label">{{ __("Spent to Date") }}</div>
+						<div class="hub-cost-forecast__stat-value">{{ format_contract_amount(cost_forecast.actual_cost) }}</div>
+					</div>
+					<div class="hub-cost-forecast__stat">
+						<div class="hub-cost-forecast__stat-label">
+							{{ __("Remaining to Spend") }}
+							<span v-if="is_over_budget" class="hub-cost-forecast__over-tag">{{ __("Over Budget") }}</span>
+						</div>
+						<div class="hub-cost-forecast__stat-value hub-cost-forecast__stat-value--emphasis">
+							{{ format_contract_amount(cost_forecast.estimate_to_complete) }}
+						</div>
+					</div>
+				</div>
+
+				<div class="hub-cost-forecast__bar">
+					<div class="hub-cost-forecast__bar-fill" :style="{ width: Math.min(spent_pct, 100) + '%' }" />
+				</div>
+
+				<div class="hub-contract-value__breakdown">
+					<div class="hub-contract-value__item">
+						{{ __("Budget") }}
+						<strong>{{ format_contract_amount(cost_forecast.budget) }}</strong>
+					</div>
+					<div class="hub-contract-value__item">
+						{{ __("% Complete (weighted)") }}
+						<strong>{{ Math.round(cost_forecast.percent_complete) }}%</strong>
+					</div>
+					<div class="hub-contract-value__item" :class="{ 'hub-cost-forecast__over-text': is_over_budget }">
+						{{ __("Forecasted Total Cost") }}
+						<strong>{{ format_contract_amount(cost_forecast.estimate_at_completion) }}</strong>
+					</div>
+				</div>
+			</template>
+		</div>
+
 		<div class="hub-financials__grid">
 			<div
 				v-for="row in rows"
@@ -359,6 +429,62 @@ async function open_drill_down(row) {
 	color: var(--text-color);
 	font-weight: 500;
 	flex: 0 0 auto;
+}
+
+.hub-cost-forecast {
+	padding: 16px 18px;
+	margin-bottom: 14px;
+}
+
+.hub-cost-forecast__row {
+	display: flex;
+	gap: 32px;
+	margin: 10px 0 14px;
+}
+
+.hub-cost-forecast__stat-label {
+	font-size: var(--text-xs);
+	color: var(--text-muted);
+	margin-bottom: 4px;
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.hub-cost-forecast__stat-value {
+	font-size: var(--text-xl, 22px);
+	font-weight: 700;
+	color: var(--text-color);
+}
+
+.hub-cost-forecast__stat-value--emphasis {
+	color: var(--dark-green-600, var(--green-600));
+}
+
+.hub-cost-forecast__over-tag {
+	font-size: var(--text-xs);
+	font-weight: 600;
+	color: var(--red-600, var(--text-on-red));
+	background: var(--red-100, var(--bg-red));
+	border-radius: var(--border-radius-full);
+	padding: 1px 8px;
+}
+
+.hub-cost-forecast__over-text strong {
+	color: var(--red-600, var(--text-on-red)) !important;
+}
+
+.hub-cost-forecast__bar {
+	height: 10px;
+	border-radius: var(--border-radius-full);
+	background: var(--dark-green-200, var(--green-200));
+	overflow: hidden;
+	margin-bottom: 12px;
+}
+
+.hub-cost-forecast__bar-fill {
+	height: 100%;
+	background: var(--dark-green-500, var(--green-500));
 }
 
 .hub-financials__tile {

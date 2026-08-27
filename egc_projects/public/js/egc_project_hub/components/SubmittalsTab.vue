@@ -169,7 +169,7 @@ function days_overdue(row) {
 							@click="open_detail(row.name)"
 						>
 							<td>{{ row.submittal_number }}</td>
-							<td>{{ row.title }}</td>
+							<td class="hub-table__truncate" :title="row.title">{{ row.title }}</td>
 							<td>{{ row.submittal_type || "—" }}</td>
 							<td>{{ row.discipline || "—" }}</td>
 							<td>{{ row.current_submission_label || "—" }}</td>

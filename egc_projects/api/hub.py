@@ -725,6 +725,70 @@ def get_financials(project: str) -> dict:
 	}
 
 
+# --- get_cost_forecast ------------------------------------------------------------------------
+#
+# Earned Value Management, using the Activity-weighted `Project.percent_complete` (see
+# project_progress.py) as the "physical % complete" — the number weight_pct exists to make
+# trustworthy. Standard formulas (budget = BAC, spent-to-date = AC):
+#
+#   Earned Value (EV)  = Budget x % Complete           — the budgeted worth of work actually done
+#   Cost Performance Index (CPI) = EV / Actual Cost     — spending efficiency so far (1.0 = on plan)
+#   Estimate at Completion (EAC) = Budget / CPI         — forecast TOTAL cost, given that efficiency
+#   Estimate to Complete (ETC)   = EAC - Actual Cost     — "how much money I still need to spend"
+#
+# With no Actual Cost yet, CPI is undefined and EAC falls back to the plain Budget (no evidence
+# yet to deviate from it) — so ETC is simply the full Budget, exactly as expected before any
+# money has been spent.
+
+_COST_FORECAST_PROJECT_FIELDS = (
+	"estimated_costing",
+	"total_purchase_cost",
+	"total_consumed_material_cost",
+	"total_costing_amount",
+	"percent_complete",
+	"company",
+)
+
+
+@frappe.whitelist()
+def get_cost_forecast(project: str) -> dict:
+	validators.require_project_permission(project)
+	_require_financial_access()
+
+	row = frappe.db.get_value("Project", project, _COST_FORECAST_PROJECT_FIELDS, as_dict=True)
+
+	expense_claims = 0
+	if frappe.get_meta("Project").has_field("total_expense_claim"):
+		expense_claims = flt(frappe.db.get_value("Project", project, "total_expense_claim"))
+
+	budget = flt(row.estimated_costing)
+	actual_cost = (
+		flt(row.total_purchase_cost)
+		+ flt(row.total_consumed_material_cost)
+		+ flt(row.total_costing_amount)
+		+ expense_claims
+	)
+	percent_complete = flt(row.percent_complete)
+
+	earned_value = budget * percent_complete / 100
+	cpi = earned_value / actual_cost if actual_cost > 0 else None
+	estimate_at_completion = budget / cpi if cpi else budget
+	estimate_to_complete = estimate_at_completion - actual_cost
+
+	currency = erpnext.get_company_currency(row.company) if row.company else None
+
+	return {
+		"budget": budget,
+		"percent_complete": percent_complete,
+		"actual_cost": actual_cost,
+		"earned_value": earned_value,
+		"cost_performance_index": cpi,
+		"estimate_at_completion": estimate_at_completion,
+		"estimate_to_complete": max(estimate_to_complete, 0),
+		"currency": currency,
+	}
+
+
 # --- get_financial_transactions (docs/ARCHITECTURE_V2.md §10) -------------------------------
 #
 # Each helper reconstructs, transaction-by-transaction, EXACTLY the same query ERPNext/HRMS uses

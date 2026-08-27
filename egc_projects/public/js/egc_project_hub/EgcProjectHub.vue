@@ -211,6 +211,14 @@ watch(context, (ctx) => {
 	border-bottom: 1px solid var(--border-color);
 	color: var(--text-color);
 	vertical-align: middle;
+	/* Every current column is a bounded identifier/date/status, not free text — wrapping only
+	   ever happened because the browser's automatic table layout squeezed a column narrower than
+	   its content once some OTHER column (e.g. a long WBS label) demanded more room. Matching
+	   `th`'s own nowrap here means a table that doesn't fit scrolls horizontally in its own box
+	   (`.hub-table-wrap` already sets `overflow-x: auto`) instead of silently wrapping codes and
+	   names across 2-3 lines. A genuinely long free-text column can opt back into wrapping with
+	   its own `white-space: normal` override. */
+	white-space: nowrap;
 }
 
 .hub-table tbody tr:last-child td {
@@ -228,6 +236,15 @@ watch(context, (ctx) => {
 .hub-table td.hub-table__overdue {
 	color: var(--red-500, var(--text-on-red));
 	font-weight: 500;
+}
+
+/* Opt-in for the one or two genuinely free-text columns a table has (a Name/Title) — caps how
+   far an unusually long value can stretch the table, ellipsizing rather than wrapping. Hover
+   still shows the full value via the native title tooltip. */
+.hub-table__truncate {
+	max-width: 260px;
+	overflow: hidden;
+	text-overflow: ellipsis;
 }
 
 /* Toolbar shared by filterable tabs */

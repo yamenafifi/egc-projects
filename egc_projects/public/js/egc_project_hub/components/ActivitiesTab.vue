@@ -216,7 +216,7 @@ function open_quick_add(row) {
 									<span class="hub-activities__indent" :style="{ width: (row.indent || 0) * 18 + 'px' }" />
 									<a href="#" class="hub-link" @click.stop.prevent="open_detail(row.name)">{{ row.activity_code }}</a>
 								</td>
-								<td>
+								<td class="hub-table__truncate" :title="row.activity_name">
 									{{ row.activity_name }}
 									<span v-if="row.is_milestone" class="hub-activities__milestone" :title="__('Milestone')" />
 								</td>

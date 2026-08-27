@@ -236,7 +236,7 @@ async function open_revision_history(row, event) {
 							@click="open_detail(row)"
 						>
 							<td>{{ row.number }}</td>
-							<td>{{ row.title }}</td>
+							<td class="hub-table__truncate" :title="row.title">{{ row.title }}</td>
 							<td>{{ row.discipline || "—" }}</td>
 							<td>{{ row.drawing_set || "—" }}</td>
 							<td>{{ row.drawing_area || "—" }}</td>

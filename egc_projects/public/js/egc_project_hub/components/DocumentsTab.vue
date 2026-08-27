@@ -169,7 +169,7 @@ function open_create_dialog() {
 							@click="open_detail(row.document)"
 						>
 							<td>{{ row.document_number }}</td>
-							<td>{{ row.title }}</td>
+							<td class="hub-table__truncate" :title="row.title">{{ row.title }}</td>
 							<td>{{ row.document_type }}</td>
 							<td>{{ row.discipline || "—" }}</td>
 							<td>{{ row.current_revision_label || "—" }}</td>
