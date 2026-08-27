@@ -476,7 +476,7 @@ def get_wbs_tree(project: str) -> list[dict]:
 
 # --- get_activities ------------------------------------------------------------------------------
 
-_ACTIVITY_FILTER_FIELDS = {"status", "discipline", "wbs_node", "responsible_user", "is_group", "parent_egc_activity"}
+_ACTIVITY_FILTER_FIELDS = {"status", "discipline", "wbs_node", "is_group", "parent_egc_activity"}
 
 
 def _activity_link_counts(activity_names: list[str]) -> dict[str, dict[str, int]]:
@@ -492,6 +492,43 @@ def _activity_link_counts(activity_names: list[str]) -> dict[str, dict[str, int]
 	for row in rows:
 		counts.setdefault(row.activity, {})[row.link_doctype] = row["count"]
 	return counts
+
+
+def _activity_assignees(activity_names: list[str]) -> dict[str, list[dict]]:
+	"""Batched replacement for the old single `responsible_user`/`responsible_supplier` columns
+	— every EGC Assignment row for these Activities in one query, grouped back by Activity, for
+	a compact "people chips" display in the register without a round-trip per row."""
+	if not activity_names:
+		return {}
+	rows = frappe.get_all(
+		"EGC Assignment",
+		filters={"parent_doctype": "EGC Activity", "parent_name": ("in", activity_names)},
+		fields=["parent_name", "assignment_role", "is_primary", "person_label", "organization"],
+		order_by="is_primary desc, creation asc",
+	)
+	if not rows:
+		return {}
+	org_names = {row.organization for row in rows if row.organization}
+	org_labels = (
+		{
+			o.name: o.organization_name
+			for o in frappe.get_all(
+				"EGC Organization", filters={"name": ("in", list(org_names))}, fields=["name", "organization_name"]
+			)
+		}
+		if org_names
+		else {}
+	)
+	grouped: dict[str, list[dict]] = {}
+	for row in rows:
+		grouped.setdefault(row.parent_name, []).append(
+			{
+				"label": row.person_label or org_labels.get(row.organization) or row.organization,
+				"assignment_role": row.assignment_role,
+				"is_primary": row.is_primary,
+			}
+		)
+	return grouped
 
 
 @frappe.whitelist()
@@ -518,8 +555,6 @@ def get_activities(project: str, filters=None) -> list[dict]:
 			"status",
 			"percent_complete",
 			"weight_pct",
-			"responsible_user",
-			"responsible_supplier",
 			"duration_days",
 			"is_milestone",
 			"actual_start_date",
@@ -533,6 +568,7 @@ def get_activities(project: str, filters=None) -> list[dict]:
 		return []
 
 	link_counts = _activity_link_counts([row.name for row in rows])
+	assignees = _activity_assignees([row.name for row in rows])
 	wbs_labels = _wbs_labels({row.wbs_node for row in rows if row.wbs_node})
 
 	# Depth from the parent chain, exactly like the EGC Activity Status Summary report — `lft`
@@ -545,6 +581,7 @@ def get_activities(project: str, filters=None) -> list[dict]:
 		depth_by_name[row.name] = row["indent"]
 		row["is_overdue"] = activity_is_overdue(row.status, row.planned_end_date)
 		row["link_counts"] = link_counts.get(row.name, {})
+		row["assignees"] = assignees.get(row.name, [])
 		# The raw WBS record name is `{project}-{code}`, which reads as noise in a register
 		# that is already scoped to one project. Send the code and name so the client can show
 		# "01.02.01 HVAC" and still deep-link by `wbs_node`.

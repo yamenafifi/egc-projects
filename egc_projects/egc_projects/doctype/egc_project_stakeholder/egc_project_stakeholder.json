@@ -6,6 +6,7 @@
  "engine": "InnoDB",
  "field_order": [
   "role",
+  "person",
   "party_name",
   "organization",
   "user",
@@ -24,6 +25,14 @@
    "reqd": 1
   },
   {
+   "fieldname": "person",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Person",
+   "options": "EGC Person",
+   "description": "The normal path — links this stakeholder row to a reusable Project Directory entry. Party Name/Organization/User/Email/Phone below are filled from it automatically; only fill them directly for a one-off party that genuinely isn't in the Directory yet."
+  },
+  {
    "fieldname": "party_name",
    "fieldtype": "Data",
    "in_list_view": 1,
@@ -32,9 +41,10 @@
   },
   {
    "fieldname": "organization",
-   "fieldtype": "Data",
+   "fieldtype": "Link",
    "in_list_view": 1,
-   "label": "Organization"
+   "label": "Organization",
+   "options": "EGC Organization"
   },
   {
    "fieldname": "user",

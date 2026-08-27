@@ -32,9 +32,6 @@
   "section_break_status",
   "status",
   "percent_complete",
-  "column_break_4",
-  "responsible_user",
-  "responsible_supplier",
   "section_break_description",
   "description",
   "lft",
@@ -208,22 +205,6 @@
    "fieldtype": "Percent",
    "label": "% Complete",
    "read_only_depends_on": "eval:doc.is_group"
-  },
-  {
-   "fieldname": "column_break_4",
-   "fieldtype": "Column Break"
-  },
-  {
-   "fieldname": "responsible_user",
-   "fieldtype": "Link",
-   "label": "Responsible User",
-   "options": "User"
-  },
-  {
-   "fieldname": "responsible_supplier",
-   "fieldtype": "Link",
-   "label": "Responsible Supplier",
-   "options": "Supplier"
   },
   {
    "fieldname": "section_break_description",

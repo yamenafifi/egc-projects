@@ -295,7 +295,22 @@ function open_quick_add(row) {
 										<span class="hub-percent__value">{{ Math.round(row.percent_complete || 0) }}%</span>
 									</div>
 								</td>
-								<td>{{ row.responsible_user || row.responsible_supplier || "—" }}</td>
+								<td class="hub-activities__assignees">
+									<template v-if="row.assignees && row.assignees.length">
+										<span
+											v-for="(a, idx) in row.assignees.slice(0, 2)"
+											:key="idx"
+											class="hub-activities__assignee-chip"
+											:title="a.assignment_role"
+										>
+											{{ a.label }}
+										</span>
+										<span v-if="row.assignees.length > 2" class="hub-activities__assignee-more">
+											+{{ row.assignees.length - 2 }}
+										</span>
+									</template>
+									<span v-else>—</span>
+								</td>
 								<td v-if="can_write">
 									<button
 										type="button"
@@ -351,6 +366,28 @@ function open_quick_add(row) {
 	transform: rotate(45deg);
 	background: var(--blue-500, var(--text-color));
 	vertical-align: middle;
+}
+
+.hub-activities__assignees {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+}
+
+.hub-activities__assignee-chip {
+	display: inline-block;
+	padding: 2px 8px;
+	font-size: var(--text-xs);
+	font-weight: 500;
+	color: var(--text-color);
+	background: var(--control-bg);
+	border-radius: var(--border-radius-full);
+	white-space: nowrap;
+}
+
+.hub-activities__assignee-more {
+	font-size: var(--text-xs);
+	color: var(--text-muted);
 }
 
 .hub-activities__link-badge {

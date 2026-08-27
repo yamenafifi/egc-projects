@@ -16,6 +16,7 @@ import {
 	create_activity,
 	update_activity_fields,
 } from "./activities_api";
+import { add_assignment, remove_assignment } from "./assignments_api";
 import { useHubResource } from "../composables/useHubResource";
 import LoadingState from "./LoadingState.vue";
 import ErrorState from "./ErrorState.vue";
@@ -42,18 +43,17 @@ function open_form() {
 	frappe.set_route("Form", "EGC Activity", props.activity);
 }
 
-// Deliberately a small, fixed field set here (not a generic form builder) — dates, discipline,
-// WBS and responsible party cover the routine "fix a typo / reassign / reschedule" edit without
-// reimplementing the native form. Schedule fields on a group are excluded outright since they
-// are rollup-owned; "Open Form" remains the escape hatch for anything not covered here.
+// Deliberately a small, fixed field set here (not a generic form builder) — dates, discipline
+// and WBS cover the routine "fix a typo / reschedule" edit without reimplementing the native
+// form. Schedule fields on a group are excluded outright since they are rollup-owned; "Open
+// Form" remains the escape hatch for anything not covered here. Who's responsible is handled by
+// the People section below instead of a field here — see assignments.py.
 function open_edit_dialog() {
 	const activity = data.value.activity;
 	const fields = [
 		{ fieldname: "activity_name", fieldtype: "Data", label: __("Activity Name"), default: activity.activity_name, reqd: 1 },
 		{ fieldname: "wbs_node", fieldtype: "Link", label: __("WBS Node"), options: "EGC WBS Node", default: activity.wbs_node, get_query: () => ({ filters: { project: props.project } }) },
 		{ fieldname: "discipline", fieldtype: "Link", label: __("Discipline"), options: "EGC Discipline", default: activity.discipline },
-		{ fieldname: "responsible_user", fieldtype: "Link", label: __("Responsible User"), options: "User", default: activity.responsible_user },
-		{ fieldname: "responsible_supplier", fieldtype: "Link", label: __("Responsible Supplier"), options: "Supplier", default: activity.responsible_supplier },
 	];
 	if (!activity.is_group) {
 		fields.push(
@@ -82,6 +82,74 @@ function open_edit_dialog() {
 		},
 	});
 	dialog.show();
+}
+
+// -- People: multiple assignees, each an EGC Person (and/or an EGC Organization) with a role on
+// THIS Activity — replaces the old single responsible_user/responsible_supplier fields, which
+// could never represent "several people, possibly from different organizations" (assignments.py).
+
+const ASSIGNMENT_ROLES = ["Responsible", "Assignee", "Supervisor", "Consultant", "Reviewer", "Contractor", "Watcher"];
+
+function open_add_assignment_dialog() {
+	const dialog = new frappe.ui.Dialog({
+		title: __("Add Person"),
+		fields: [
+			{
+				fieldname: "person",
+				fieldtype: "Link",
+				label: __("Person"),
+				options: "EGC Person",
+				description: __("Leave blank to assign a whole Organization with no specific individual named."),
+			},
+			{
+				fieldname: "organization",
+				fieldtype: "Link",
+				label: __("Organization"),
+				options: "EGC Organization",
+				description: __("Defaults from the Person's own organization when one is picked above."),
+			},
+			{
+				fieldname: "assignment_role",
+				fieldtype: "Select",
+				label: __("Role on this Activity"),
+				options: ASSIGNMENT_ROLES,
+				default: "Responsible",
+				reqd: 1,
+			},
+			{ fieldname: "is_primary", fieldtype: "Check", label: __("Primary") },
+			{ fieldname: "remarks", fieldtype: "Small Text", label: __("Remarks") },
+		],
+		primary_action_label: __("Add"),
+		primary_action(values) {
+			add_assignment(
+				"EGC Activity",
+				props.activity,
+				values.assignment_role,
+				values.person,
+				values.organization,
+				values.remarks,
+				Boolean(values.is_primary)
+			)
+				.then(() => {
+					dialog.hide();
+					notify_changed();
+				})
+				.catch((e) => {
+					frappe.msgprint({ title: __("Could Not Add Person"), message: e.message, indicator: "red" });
+				});
+		},
+	});
+	dialog.show();
+}
+
+function confirm_remove_assignment(row) {
+	frappe.confirm(__("Remove {0} from this Activity?", [row.person_name || row.organization_name]), () => {
+		remove_assignment(row.name)
+			.then(notify_changed)
+			.catch((e) => {
+				frappe.msgprint({ title: __("Could Not Remove"), message: e.message, indicator: "red" });
+			});
+	});
 }
 
 function open_activity(name) {
@@ -308,11 +376,34 @@ function confirm_remove_dependency(name) {
 								<dt>{{ __("Discipline") }}</dt>
 								<dd>{{ data.activity.discipline || "—" }}</dd>
 							</div>
-							<div>
-								<dt>{{ __("Responsible") }}</dt>
-								<dd>{{ data.activity.responsible_user || data.activity.responsible_supplier || "—" }}</dd>
-							</div>
 						</dl>
+					</section>
+
+					<section class="activity-detail__section">
+						<div class="activity-detail__head-row">
+							<div class="activity-detail__section-title">{{ __("People") }}</div>
+							<button v-if="canWrite" type="button" class="btn btn-xs btn-default" @click="open_add_assignment_dialog">
+								{{ __("Add Person") }}
+							</button>
+						</div>
+						<EmptyState v-if="!data.assignments.length" :title="__('No one assigned yet')" />
+						<ul v-else class="activity-detail__list">
+							<li v-for="row in data.assignments" :key="row.name">
+								<div>
+									<span class="activity-detail__link">{{ row.person_name || row.organization_name || __("Unnamed") }}</span>
+									<span v-if="row.person_name && row.organization_name" class="activity-detail__dep-type">
+										— {{ row.organization_name }}
+									</span>
+									<span v-if="row.is_primary" class="indicator-pill blue">{{ __("Primary") }}</span>
+								</div>
+								<div class="activity-links__meta">
+									<span class="activity-detail__dep-type">{{ row.assignment_role }}</span>
+									<button v-if="canWrite" type="button" class="btn btn-xs btn-default" @click="confirm_remove_assignment(row)">
+										{{ __("Remove") }}
+									</button>
+								</div>
+							</li>
+						</ul>
 					</section>
 
 					<section class="activity-detail__section">

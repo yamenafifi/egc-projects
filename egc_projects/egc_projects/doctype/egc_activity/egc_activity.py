@@ -68,8 +68,6 @@ class EGCActivity(NestedSet):
 		planned_end_date: DF.Date | None
 		planned_start_date: DF.Date | None
 		project: DF.Link
-		responsible_supplier: DF.Link | None
-		responsible_user: DF.Link | None
 		rgt: DF.Int
 		sequence: DF.Int
 		status: DF.Literal["Not Started", "In Progress", "On Hold", "Completed", "Cancelled"]

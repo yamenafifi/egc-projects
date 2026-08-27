@@ -214,6 +214,11 @@ class TestProjectInfo(IntegrationTestCase):
 	# -- 6. Stakeholder child rows round-trip -----------------------------------------------------
 
 	def test_stakeholders_round_trip(self):
+		if not frappe.db.exists("EGC Organization", "Acme Inc"):
+			frappe.get_doc({"doctype": "EGC Organization", "organization_name": "Acme Inc"}).insert(
+				ignore_permissions=True
+			)
+
 		self._add_stakeholder(self.role_pm, user=self.manager_user, party_name="Jane PM")
 		doc = frappe.get_doc("Project", self.project)
 		doc.custom_egc_stakeholders[-1].is_primary = 1

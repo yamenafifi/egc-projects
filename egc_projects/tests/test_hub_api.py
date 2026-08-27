@@ -117,6 +117,29 @@ class TestHubAPI(IntegrationTestCase):
 		doc.insert(ignore_permissions=True)
 		return doc
 
+	def _make_person(self, user=None, full_name=None):
+		existing = frappe.db.get_value("EGC Person", {"user": user}, "name") if user else None
+		if existing:
+			return existing
+		doc = frappe.get_doc(
+			{"doctype": "EGC Person", "full_name": full_name or user or "Test Person", "user": user}
+		)
+		doc.insert(ignore_permissions=True)
+		return doc.name
+
+	def _make_assignment(self, parent_doctype, parent_name, person, assignment_role="Responsible"):
+		doc = frappe.get_doc(
+			{
+				"doctype": "EGC Assignment",
+				"parent_doctype": parent_doctype,
+				"parent_name": parent_name,
+				"person": person,
+				"assignment_role": assignment_role,
+			}
+		)
+		doc.insert(ignore_permissions=True)
+		return doc.name
+
 	def _make_document(self, document_number="DOC-001", document_type=None, **kwargs):
 		values = {
 			"doctype": "EGC Project Document",
@@ -545,19 +568,16 @@ class TestHubAPI(IntegrationTestCase):
 		self._make_review_step(submission.name)
 
 		overdue_activity = self._make_activity(
-			"OPEN-ACT-001",
-			c.ACTIVITY_IN_PROGRESS,
-			planned_end_date=add_days(today(), -2),
-			responsible_user=self.manager_user,
+			"OPEN-ACT-001", c.ACTIVITY_IN_PROGRESS, planned_end_date=add_days(today(), -2)
 		)
 		# Not overdue, not returned — proves the activity source filters by is_overdue(), not
-		# merely by having a responsible_user.
-		self._make_activity(
-			"OPEN-ACT-002",
-			c.ACTIVITY_IN_PROGRESS,
-			planned_end_date=add_days(today(), 10),
-			responsible_user=self.manager_user,
+		# merely by being assigned.
+		not_overdue_activity = self._make_activity(
+			"OPEN-ACT-002", c.ACTIVITY_IN_PROGRESS, planned_end_date=add_days(today(), 10)
 		)
+		person = self._make_person(self.manager_user)
+		self._make_assignment("EGC Activity", overdue_activity.name, person)
+		self._make_assignment("EGC Activity", not_overdue_activity.name, person)
 
 		frappe.set_user(self.manager_user)
 		items = hub.get_my_open_items(self.project)

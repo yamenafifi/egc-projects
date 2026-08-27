@@ -31,10 +31,14 @@ DOCUMENT_TYPES = (
 #: (role_name, is_egc_internal) — ARCHITECTURE_V2.md §2
 STAKEHOLDER_ROLES = (
 	("Client", 0),
+	("Client Representative", 0),
 	("Main Contractor", 0),
 	("Consultant", 0),
 	("Architect", 0),
 	("OEM", 0),
+	("OEM Engineer", 0),
+	("Subcontractor Engineer", 0),
+	("Supplier Representative", 0),
 	("EGC Project Manager", 1),
 	("EGC Site Manager", 1),
 	("Project Engineer", 1),
@@ -42,6 +46,7 @@ STAKEHOLDER_ROLES = (
 	("QA/QC", 1),
 	("HSE", 1),
 	("Commercial", 1),
+	("Quantity Surveyor", 1),
 )
 
 MODALITIES = (

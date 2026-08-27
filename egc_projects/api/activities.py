@@ -18,7 +18,7 @@ import frappe
 from frappe import _
 from frappe.utils import flt
 
-from egc_projects.egc_projects import constants as c
+from egc_projects.egc_projects import assignments, constants as c
 from egc_projects.egc_projects import relationships, validators
 from egc_projects.egc_projects.doctype.egc_activity.egc_activity import is_overdue
 
@@ -44,8 +44,6 @@ _ACTIVITY_DETAIL_FIELDS = (
 	"forecast_end_date",
 	"status",
 	"percent_complete",
-	"responsible_user",
-	"responsible_supplier",
 	"description",
 	"creation",
 	"modified",
@@ -148,6 +146,10 @@ def get_activity_detail(activity: str) -> dict:
 		# here — this is the same "Linked Documents & Submittals" data the native form already
 		# shows, batched one query per distinct target doctype.
 		"links": relationships.get_links_for_activity(activity),
+		# Multi-person/multi-organization (assignments.py) — replaces the old single
+		# responsible_user/responsible_supplier fields, which could never represent "several
+		# people, possibly from different organizations, on one Activity."
+		"assignments": assignments.get_assignments_for("EGC Activity", activity),
 	}
 
 

@@ -30,7 +30,6 @@ _FIELDS = (
 	"planned_end_date",
 	"status",
 	"percent_complete",
-	"responsible_user",
 )
 
 
@@ -71,13 +70,6 @@ def get_columns():
 		{"fieldname": "status", "label": _("Status"), "fieldtype": "Data", "width": 120},
 		{"fieldname": "percent_complete", "label": _("% Complete"), "fieldtype": "Percent", "width": 100},
 		{"fieldname": "is_overdue", "label": _("Overdue"), "fieldtype": "Check", "width": 80},
-		{
-			"fieldname": "responsible_user",
-			"label": _("Responsible"),
-			"fieldtype": "Link",
-			"options": "User",
-			"width": 160,
-		},
 	]
 
 
