@@ -92,6 +92,7 @@ fixtures = [
 					"EGC Project Engineer",
 					"EGC Document Controller",
 					"EGC Project Viewer",
+					"EGC External Viewer",
 				],
 			]
 		],

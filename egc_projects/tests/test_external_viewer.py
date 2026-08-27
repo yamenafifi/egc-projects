@@ -1,0 +1,105 @@
+# Copyright (c) 2026, EGC and contributors
+# For license information, please see license.txt
+
+"""EGC External Viewer (constants.ROLE_EXTERNAL_VIEWER) — for an external party (Main
+Contractor, Client, Consultant, ...) given their own login, always paired with a User
+Permission scoping them to the one Project they're allowed to see. Same read-only doctype
+footprint as EGC Project Viewer, but never financial: proves the role can read ordinary
+project data yet is denied Financials/Change Orders, exactly like the Hub's own financial
+gate, and that a User Permission genuinely fences it to one project.
+"""
+
+import frappe
+from frappe.permissions import add_user_permission
+from frappe.tests import IntegrationTestCase
+
+from egc_projects.api import change_orders, hub
+from egc_projects.egc_projects import constants as c
+
+
+def _get_or_create_user(email, roles):
+	if frappe.db.exists("User", email):
+		user = frappe.get_doc("User", email)
+	else:
+		user = frappe.get_doc(
+			{"doctype": "User", "email": email, "first_name": email.split("@")[0], "send_welcome_email": 0}
+		)
+		user.insert(ignore_permissions=True)
+	user.add_roles(*roles)
+	return user.name
+
+
+def _make_project(company):
+	doc = frappe.get_doc(
+		{
+			"doctype": "Project",
+			"project_name": f"EGC-ExtViewer-Test-{frappe.generate_hash(length=8)}",
+			"company": company,
+		}
+	)
+	doc.insert(ignore_permissions=True)
+	return doc.name
+
+
+class TestExternalViewer(IntegrationTestCase):
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		frappe.set_user("Administrator")
+		cls.company = frappe.db.get_value("Company", {}, "name") or frappe.get_all(
+			"Company", limit=1, pluck="name"
+		)[0]
+
+	def setUp(self):
+		frappe.set_user("Administrator")
+		self.project = _make_project(self.company)
+		self.other_project = _make_project(self.company)
+		self.external_user = _get_or_create_user(
+			f"egc-mc-{frappe.generate_hash(length=6)}@example.com",
+			["Projects User", c.ROLE_EXTERNAL_VIEWER],
+		)
+		add_user_permission("Project", self.project, self.external_user, ignore_permissions=True)
+
+	def tearDown(self):
+		frappe.set_user("Administrator")
+
+	def test_can_read_ordinary_project_data(self):
+		frappe.set_user(self.external_user)
+		# Must not raise — the whole point of the role is real read access to non-financial
+		# Hub data for the one project it's scoped to.
+		hub.get_activities(self.project)
+		hub.get_drawings(self.project)
+		hub.get_overview(self.project)
+
+	def test_cannot_see_financials(self):
+		frappe.set_user(self.external_user)
+		with self.assertRaises(frappe.PermissionError):
+			hub.get_financials(self.project)
+
+	def test_cannot_see_change_order_breakdown(self):
+		frappe.set_user(self.external_user)
+		with self.assertRaises(frappe.PermissionError):
+			change_orders.get_contract_value_breakdown(self.project)
+
+	def test_change_order_doctype_denies_direct_read(self):
+		# The doctype-level permission gate, independent of the Hub API gate above — an
+		# external (or even internal Project Viewer) user must never see EGC Change Order
+		# through the native list/report view either.
+		frappe.set_user(self.external_user)
+		self.assertFalse(frappe.has_permission("EGC Change Order", "read"))
+
+	def test_cannot_see_a_project_not_granted(self):
+		frappe.set_user(self.external_user)
+		with self.assertRaises(frappe.PermissionError):
+			hub.get_activities(self.other_project)
+
+	def test_internal_project_viewer_also_denied_change_order(self):
+		# Regression: EGC Change Order's doctype permissions used to list EGC Project Viewer
+		# (and EGC Project Engineer) as read-only, contradicting the Hub API's own
+		# FINANCIAL_ROLES gate — fixed alongside adding the External Viewer role.
+		viewer = _get_or_create_user(
+			f"egc-piv-{frappe.generate_hash(length=6)}@example.com",
+			["Projects User", c.ROLE_PROJECT_VIEWER],
+		)
+		frappe.set_user(viewer)
+		self.assertFalse(frappe.has_permission("EGC Change Order", "read"))

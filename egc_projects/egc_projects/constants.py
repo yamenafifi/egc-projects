@@ -118,12 +118,22 @@ ROLE_PROJECT_MANAGER = "EGC Project Manager"
 ROLE_PROJECT_ENGINEER = "EGC Project Engineer"
 ROLE_DOCUMENT_CONTROLLER = "EGC Document Controller"
 ROLE_PROJECT_VIEWER = "EGC Project Viewer"
+#: For an external party (Main Contractor, Client, Consultant, ...) given their own login —
+#: always paired with a User Permission scoping them to the one Project they're allowed to see
+#: (docs/ARCHITECTURE_V2.md's external-access design). Same read-only doctype footprint as
+#: ROLE_PROJECT_VIEWER, kept as a genuinely separate role rather than reusing it: an external
+#: account's access surface needs to stay independently auditable and must never silently widen
+#: just because ROLE_PROJECT_VIEWER (an internal-staff role) gains some new capability later.
+#: Deliberately absent from every financial doctype's permissions (EGC Change Order) and from
+#: FINANCIAL_ROLES below — an external party never sees commercial figures through this role.
+ROLE_EXTERNAL_VIEWER = "EGC External Viewer"
 
 EGC_ROLES = (
 	ROLE_PROJECT_MANAGER,
 	ROLE_PROJECT_ENGINEER,
 	ROLE_DOCUMENT_CONTROLLER,
 	ROLE_PROJECT_VIEWER,
+	ROLE_EXTERNAL_VIEWER,
 )
 
 #: Roles allowed to read ERPNext project financial actuals through the Project Hub.
