@@ -617,39 +617,42 @@ function open_link_activity_dialog() {
 									class="submittal-workflow__step"
 									:class="`submittal-workflow__step--${step.status.toLowerCase().replace(' ', '-')}`"
 								>
-									<span class="submittal-workflow__icon">{{ stage_icon(step) }}</span>
-									<span class="submittal-workflow__who">
-										{{ step.reviewer_role }}<template v-if="step.reviewer_label">: {{ step.reviewer_label }}</template>
-										<span v-if="!step.is_required" class="submittal-workflow__optional">({{ __("optional") }})</span>
-									</span>
-									<span v-if="step.response" class="submittal-workflow__response">{{ step.response }}</span>
-									<a
-										v-if="step.response_attachment"
-										:href="step.response_attachment"
-										target="_blank"
-										rel="noopener"
-										class="hub-link"
-										:title="__('Response attachment')"
-									>
-										📎
-									</a>
-									<button
-										v-if="can_respond_to(step)"
-										type="button"
-										class="btn btn-xs btn-primary"
-										@click="open_record_response_dialog(step)"
-									>
-										{{ __("Respond") }}
-									</button>
-									<button
-										v-if="canWrite && current_submission.docstatus === 0"
-										type="button"
-										class="btn btn-xs btn-default"
-										:title="__('Remove reviewer')"
-										@click="confirm_remove_reviewer(step)"
-									>
-										&times;
-									</button>
+									<div class="submittal-workflow__step-row">
+										<span class="submittal-workflow__icon">{{ stage_icon(step) }}</span>
+										<span class="submittal-workflow__who">
+											{{ step.reviewer_role }}<template v-if="step.reviewer_label">: {{ step.reviewer_label }}</template>
+											<span v-if="!step.is_required" class="submittal-workflow__optional">({{ __("optional") }})</span>
+										</span>
+										<span v-if="step.response" class="submittal-workflow__response">{{ step.response }}</span>
+										<a
+											v-if="step.response_attachment"
+											:href="step.response_attachment"
+											target="_blank"
+											rel="noopener"
+											class="hub-link"
+											:title="__('Response attachment')"
+										>
+											📎
+										</a>
+										<button
+											v-if="can_respond_to(step)"
+											type="button"
+											class="btn btn-xs btn-primary"
+											@click="open_record_response_dialog(step)"
+										>
+											{{ __("Respond") }}
+										</button>
+										<button
+											v-if="canWrite && current_submission.docstatus === 0"
+											type="button"
+											class="btn btn-xs btn-default"
+											:title="__('Remove reviewer')"
+											@click="confirm_remove_reviewer(step)"
+										>
+											&times;
+										</button>
+									</div>
+									<p v-if="step.response_remarks" class="submittal-workflow__remarks">{{ step.response_remarks }}</p>
 								</div>
 							</div>
 						</div>
@@ -940,9 +943,22 @@ function open_link_activity_dialog() {
 
 .submittal-workflow__step {
 	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	font-size: var(--text-sm);
+}
+
+.submittal-workflow__step-row {
+	display: flex;
 	align-items: center;
 	gap: 8px;
-	font-size: var(--text-sm);
+}
+
+.submittal-workflow__remarks {
+	margin: 0 0 0 24px;
+	color: var(--text-muted);
+	font-size: var(--text-xs);
+	white-space: pre-wrap;
 }
 
 .submittal-workflow__icon {
