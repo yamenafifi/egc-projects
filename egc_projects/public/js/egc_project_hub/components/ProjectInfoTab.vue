@@ -36,7 +36,6 @@ const has_any_data = computed(() => {
 		"delivery_method",
 		"contract_type",
 		"project_description",
-		"work_scope",
 		"project_image",
 		"country",
 		"region",
@@ -125,7 +124,6 @@ function stakeholder_party(row) {
 				<p v-if="data.info.project_description" class="hub-project-info__text">
 					{{ data.info.project_description }}
 				</p>
-				<div v-if="data.info.work_scope" class="hub-project-info__richtext" v-html="data.info.work_scope"></div>
 			</section>
 
 			<section v-if="data.info.stakeholders.length" class="hub-card hub-project-info__section">
@@ -276,12 +274,6 @@ function stakeholder_party(row) {
 	font-size: var(--text-sm);
 	color: var(--text-color);
 	white-space: pre-wrap;
-}
-
-.hub-project-info__richtext {
-	margin-top: 14px;
-	font-size: var(--text-sm);
-	color: var(--text-color);
 }
 
 .hub-project-info__image-row {

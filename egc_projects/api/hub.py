@@ -260,7 +260,7 @@ def _submittal_overview(project: str) -> dict:
 def _drawing_overview(project: str) -> dict:
 	types = get_drawing_document_types()
 	if not types:
-		return {"total": 0, "issued": 0, "pending_review": 0}
+		return {"total": 0, "issued": 0, "pending_review": 0, "approved": 0}
 
 	base_filters = {"project": project, "document_type": ("in", types)}
 	by_document_status = frappe.get_all(
@@ -280,6 +280,9 @@ def _drawing_overview(project: str) -> dict:
 		"issued": sum(row["count"] for row in by_document_status if row.document_status == c.DOCUMENT_ISSUED),
 		"pending_review": sum(
 			row["count"] for row in by_approval_status if row.approval_status == c.APPROVAL_UNDER_REVIEW
+		),
+		"approved": sum(
+			row["count"] for row in by_approval_status if row.approval_status == c.RESPONSE_APPROVED
 		),
 	}
 
@@ -978,7 +981,6 @@ _PROFILE_FIELD_MAP = {
 	"delivery_method": "custom_egc_delivery_method",
 	"contract_type": "custom_egc_contract_type",
 	"project_description": "custom_egc_project_description",
-	"work_scope": "custom_egc_work_scope",
 	"project_image": "custom_egc_project_image",
 	"country": "custom_egc_country",
 	"region": "custom_egc_region",

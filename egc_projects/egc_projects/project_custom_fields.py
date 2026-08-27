@@ -50,6 +50,9 @@ _RETIRED_FIELDS = (
 	"custom_egc_commercial_section",
 	"custom_egc_commercial_col",
 	"custom_egc_contract_value",
+	# Work Scope (Text Editor) — dropped per explicit user feedback: scope is defined in
+	# Activities and WBS, not a freeform rich-text field duplicating that.
+	"custom_egc_work_scope",
 )
 
 CUSTOM_FIELDS = {
@@ -133,15 +136,9 @@ CUSTOM_FIELDS = {
 			"insert_after": "custom_egc_description_section",
 		},
 		{
-			"fieldname": "custom_egc_work_scope",
-			"label": "Work Scope",
-			"fieldtype": "Text Editor",
-			"insert_after": "custom_egc_project_description",
-		},
-		{
 			"fieldname": "custom_egc_description_col",
 			"fieldtype": "Column Break",
-			"insert_after": "custom_egc_work_scope",
+			"insert_after": "custom_egc_project_description",
 		},
 		{
 			"fieldname": "custom_egc_project_image",

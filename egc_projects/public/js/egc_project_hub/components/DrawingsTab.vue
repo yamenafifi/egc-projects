@@ -1,9 +1,10 @@
 <script setup>
-import { computed, ref, watch } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { get_drawings, get_document_revisions } from "../api";
 import { create_document } from "./documents_api";
 import { useHubResource } from "../composables/useHubResource";
 import { statusColor } from "../composables/useStatusColor";
+import { consumeDrawingsApprovalIntent } from "../composables/useDrawingsIntent";
 import LoadingState from "./LoadingState.vue";
 import ErrorState from "./ErrorState.vue";
 import EmptyState from "./EmptyState.vue";
@@ -25,6 +26,11 @@ const discipline_filter = ref("");
 const approval_filter = ref("");
 const set_filter = ref("");
 const area_filter = ref("");
+
+onMounted(() => {
+	const intent = consumeDrawingsApprovalIntent();
+	if (intent) approval_filter.value = intent;
+});
 
 const disciplines = computed(() =>
 	[...new Set((data.value || []).map((r) => r.discipline).filter(Boolean))].sort()

@@ -4,6 +4,7 @@ import { get_overview, get_my_open_items } from "../api";
 import { useHubResource } from "../composables/useHubResource";
 import { useHubRoute } from "../composables/useHubRoute";
 import { overdueIntent } from "../composables/useOverdueIntent";
+import { drawingsIntent } from "../composables/useDrawingsIntent";
 import LoadingState from "./LoadingState.vue";
 import ErrorState from "./ErrorState.vue";
 import EmptyState from "./EmptyState.vue";
@@ -50,6 +51,11 @@ const has_any_data = computed(() => {
 function goto_overdue(section) {
 	overdueIntent[section] = true;
 	setTab(section);
+}
+
+function goto_approved_drawings() {
+	drawingsIntent.approvalStatus = "Approved";
+	setTab("drawings");
 }
 
 function open_route(doctype, name) {
@@ -214,6 +220,14 @@ const recent_entries = computed(() => {
 						<div class="hub-stat">
 							<div class="hub-stat__value">{{ data.drawings.pending_review }}</div>
 							<div class="hub-stat__label">{{ __("Pending Review") }}</div>
+						</div>
+						<div
+							class="hub-stat"
+							:class="{ 'hub-stat--clickable': data.drawings.approved > 0 }"
+							@click="data.drawings.approved > 0 && goto_approved_drawings()"
+						>
+							<div class="hub-stat__value">{{ data.drawings.approved }}</div>
+							<div class="hub-stat__label">{{ __("Approved") }}</div>
 						</div>
 					</div>
 				</div>

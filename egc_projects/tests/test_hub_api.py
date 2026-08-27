@@ -260,7 +260,7 @@ class TestHubAPI(IntegrationTestCase):
 		)
 		self.assertEqual(
 			overview["drawings"],
-			{"total": 2, "issued": 2, "pending_review": 1},
+			{"total": 2, "issued": 2, "pending_review": 1, "approved": 0},
 		)
 
 	# -- 2. Financials are a pure passthrough of `tabProject` -------------------------------
