@@ -5,7 +5,7 @@ frappe.pages["egc-project-hub"].on_page_load = function (wrapper) {
 		single_column: true,
 		hide_sidebar: true,
 	});
-	// The Hub owns its own header/navigation shell (a sidebar tool switcher, not Desk's
+	// The Hub owns its own header/navigation shell (a top-bar Toolbox tool switcher, not Desk's
 	// generic breadcrumb+title+buttons bar) — same technique Print Designer uses
 	// (frappe.ui.pages["print-designer"], print_designer.js) to read as an independent app
 	// rather than a themed Desk page.

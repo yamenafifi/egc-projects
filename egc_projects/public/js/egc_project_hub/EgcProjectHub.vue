@@ -3,7 +3,7 @@ import { ref, computed, watch } from "vue";
 import { useHubRoute, TABS } from "./composables/useHubRoute";
 import { get_project_context } from "./api";
 import HubHeader from "./components/HubHeader.vue";
-import HubSidebar from "./components/HubSidebar.vue";
+import HubTopBar from "./components/HubTopBar.vue";
 import ProjectPicker from "./components/ProjectPicker.vue";
 import LoadingState from "./components/LoadingState.vue";
 import ErrorState from "./components/ErrorState.vue";
@@ -35,7 +35,6 @@ const TAB_LABELS = {
 const context = ref(null);
 const context_loading = ref(false);
 const context_error = ref("");
-const sidebar_open = ref(false);
 
 // The Financials tab is hidden entirely (not just its content) when the user lacks financial
 // visibility — the tab list only shows it once get_project_context() confirms
@@ -96,79 +95,63 @@ watch(context, (ctx) => {
 		<ProjectPicker v-if="!route.project" @select="setProject" />
 
 		<template v-else>
-			<HubSidebar
+			<HubTopBar
 				:project="route.project"
 				:project-name="context ? context.project_name : ''"
 				:tabs="tab_defs"
 				:active="route.tab"
-				:open="sidebar_open"
+				:context="context"
 				@select="setTab"
 				@switch-project="setProject"
-				@close="sidebar_open = false"
 			/>
 
-			<div class="egc-shell__main">
-				<HubHeader
-					:project="route.project"
-					:context="context"
-					:loading="context_loading"
-					@toggle-sidebar="sidebar_open = !sidebar_open"
-				/>
+			<HubHeader
+				:label="TAB_LABELS[route.tab]"
+				:project="route.project"
+				:context="context"
+			/>
 
-				<div class="egc-shell__content">
-					<ErrorState v-if="context_error" :message="context_error" @retry="load_context" />
+			<div class="egc-shell__content">
+				<ErrorState v-if="context_error" :message="context_error" @retry="load_context" />
 
-					<template v-else>
-						<LoadingState v-if="context_loading && !context" :rows="6" />
+				<template v-else>
+					<LoadingState v-if="context_loading && !context" :rows="6" />
 
-						<component
-							:is="tab_component"
-							v-else-if="context"
-							:key="route.tab + ':' + route.project"
-							:project="route.project"
-							:context="context"
-						/>
-					</template>
-				</div>
+					<component
+						:is="tab_component"
+						v-else-if="context"
+						:key="route.tab + ':' + route.project"
+						:project="route.project"
+						:context="context"
+					/>
+				</template>
 			</div>
 		</template>
 	</div>
 </template>
 
 <style>
-/* Design tokens for the Hub's own shell chrome (sidebar/topbar) — deliberately built from
-   Frappe's existing semantic CSS variables (--control-bg, --border-color, --primary, ...)
-   rather than a hand-rolled parallel light/dark palette, so the shell tracks Desk's theme
-   automatically instead of drifting out of sync with it. */
+/* Design tokens for the Hub's own shell chrome — deliberately built from Frappe's existing
+   semantic CSS variables (--control-bg, --border-color, --primary, ...) rather than a
+   hand-rolled parallel light/dark palette, so the shell tracks Desk's theme automatically
+   instead of drifting out of sync with it. */
 :root {
-	--egc-sidebar-bg: var(--fg-color);
-	--egc-sidebar-border: var(--border-color);
-	--egc-sidebar-text: var(--text-color);
-	--egc-sidebar-text-muted: var(--text-muted);
-	--egc-sidebar-hover: var(--control-bg);
-	--egc-sidebar-active-bg: var(--bg-light-blue, var(--control-bg));
 	--egc-accent: var(--primary, var(--blue-500));
 	--egc-accent-contrast: white;
 }
 
 /* Takes over the full Desk content area below the navbar (egc_project_hub.js hides the
-   standard page-head bar) — a fixed-height flex row: sidebar + a scrollable main column, not a
-   page that grows and scrolls as a whole the way a themed DocType view does. */
+   standard page-head bar) — Procore's own layout, top bar first (project/tool switcher), not a
+   sidebar: a fixed-height flex COLUMN of [HubTopBar, HubHeader, scrollable content], not a page
+   that grows and scrolls as a whole the way a themed DocType view does. */
 .egc-shell {
 	display: flex;
+	flex-direction: column;
 	/* `.layout-main-section` (this component's own mount point) is already sized by Frappe's
 	   own layout CSS to exactly the space available below Desk's chrome — inheriting `100%` is
 	   correct; independently subtracting `--navbar-height` here double-counts it. */
 	height: 100%;
 	background: var(--bg-color);
-}
-
-.egc-shell__main {
-	flex: 1 1 auto;
-	min-width: 0;
-	display: flex;
-	flex-direction: column;
-	height: 100%;
 }
 
 .egc-shell__content {

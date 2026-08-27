@@ -7,7 +7,7 @@ import { reactive, readonly } from "vue";
 
 // "documents" (Documents register) and "project-info" (Project Information) were added in
 // WP-11 alongside the WP-10/WP-09 packages that own their tab content. Order here drives
-// HubSidebar's display order via EgcProjectHub.vue's tab_defs.
+// HubTopBar's Toolbox menu order via EgcProjectHub.vue's tab_defs.
 export const TABS = [
 	"overview",
 	"wbs",
