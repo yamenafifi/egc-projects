@@ -187,6 +187,7 @@ _STEP_FIELDS = (
 	"response_date",
 	"responded_by",
 	"response_remarks",
+	"response_attachment",
 )
 
 

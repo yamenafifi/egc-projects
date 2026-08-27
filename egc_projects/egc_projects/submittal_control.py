@@ -402,7 +402,14 @@ _STEP_TERMINAL_RESPONSES = (c.RESPONSE_REVISE_AND_RESUBMIT, c.RESPONSE_REJECTED)
 def assert_step_engine_authorized(doc) -> None:
 	if frappe.flags.get(STEP_ENGINE_FLAG):
 		return
-	for fieldname in ("status", "response", "response_date", "responded_by", "response_remarks"):
+	for fieldname in (
+		"status",
+		"response",
+		"response_date",
+		"responded_by",
+		"response_remarks",
+		"response_attachment",
+	):
 		if doc.has_value_changed(fieldname):
 			frappe.throw(
 				_("{0} is controlled by the review workflow and cannot be set directly.").format(
@@ -680,7 +687,9 @@ def _is_step_override_user() -> bool:
 
 
 @frappe.whitelist()
-def record_step_response(step: str, response: str, remarks: str | None = None) -> None:
+def record_step_response(
+	step: str, response: str, remarks: str | None = None, attachment: str | None = None
+) -> None:
 	"""Records ONE reviewer's response on their own step. Authorization here is identity-based,
 	not doctype-role-based: the point of Ball in Court is that a specific person — who may be an
 	external party holding no EGC role at all — is the one who must act, so the check is "are
@@ -716,6 +725,7 @@ def record_step_response(step: str, response: str, remarks: str | None = None) -
 			"response_date": today(),
 			"responded_by": frappe.session.user,
 			"response_remarks": remarks,
+			"response_attachment": attachment,
 		},
 	)
 	_close_step_assignment(doc.name, doc.reviewer_user)

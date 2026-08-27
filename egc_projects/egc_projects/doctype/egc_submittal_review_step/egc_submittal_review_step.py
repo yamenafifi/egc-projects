@@ -5,9 +5,9 @@
 template change after creation — `EGC Submittal Workflow Template` is a convenience for
 generating these rows, not a live binding to them.
 
-`status`, `response`, `response_date`, `responded_by`, `response_remarks` are engine-owned —
-see `submittal_control.py`'s `assert_step_engine_authorized`, the same discipline as every other
-engine-guarded field in this app.
+`status`, `response`, `response_date`, `responded_by`, `response_remarks`, `response_attachment`
+are engine-owned — see `submittal_control.py`'s `assert_step_engine_authorized`, the same
+discipline as every other engine-guarded field in this app.
 """
 
 from frappe.model.document import Document
@@ -26,6 +26,7 @@ class EGCSubmittalReviewStep(Document):
 		project: DF.Link
 		response: DF.Literal["", "Approved", "Approved with Comments", "Revise & Resubmit", "Rejected"]
 		responded_by: DF.Link | None
+		response_attachment: DF.Attach | None
 		response_date: DF.Date | None
 		response_remarks: DF.SmallText | None
 		reviewer_label: DF.Data | None

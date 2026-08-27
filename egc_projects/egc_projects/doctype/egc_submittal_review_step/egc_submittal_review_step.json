@@ -20,7 +20,8 @@
 		"response",
 		"response_date",
 		"responded_by",
-		"response_remarks"
+		"response_remarks",
+		"response_attachment"
 	],
 	"fields": [
 		{
@@ -129,6 +130,13 @@
 			"fieldtype": "Small Text",
 			"label": "Response Remarks",
 			"read_only": 1
+		},
+		{
+			"fieldname": "response_attachment",
+			"fieldtype": "Attach",
+			"label": "Response Attachment",
+			"read_only": 1,
+			"description": "Optional — a marked-up file the reviewer is returning with their response (e.g. an annotated drawing)."
 		}
 	],
 	"index_web_pages_for_search": 1,

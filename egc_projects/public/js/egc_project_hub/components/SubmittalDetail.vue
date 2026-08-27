@@ -22,6 +22,7 @@ import {
 	remove_review_step,
 } from "./submittals_api";
 import { link_activity_record, unlink_activity_record } from "./activities_api";
+import { get_comments, add_comment } from "./comments_api";
 import { useHubResource } from "../composables/useHubResource";
 import LoadingState from "./LoadingState.vue";
 import ErrorState from "./ErrorState.vue";
@@ -122,16 +123,28 @@ const RESPONSES = ["Approved", "Approved with Comments", "Revise & Resubmit", "R
 
 function open_record_response_dialog(step) {
 	const is_step = Boolean(step);
+	const fields = [
+		{ fieldname: "response", fieldtype: "Select", label: __("Response"), options: RESPONSES, reqd: 1 },
+		{ fieldname: "remarks", fieldtype: "Small Text", label: __("Remarks") },
+	];
+	// Only a review step already has a docname to attach the file to (the step is inserted the
+	// moment a reviewer is added) — the no-steps v1 path has nothing to bind an Attach field to.
+	if (is_step) {
+		fields.push({
+			fieldname: "attachment",
+			fieldtype: "Attach",
+			label: __("Attachment"),
+			description: __("Optional — a marked-up file you're returning with your response (e.g. an annotated drawing)."),
+			options: { doctype: "EGC Submittal Review Step", docname: step.name, fieldname: "response_attachment" },
+		});
+	}
 	const dialog = new frappe.ui.Dialog({
 		title: __("Record Response"),
-		fields: [
-			{ fieldname: "response", fieldtype: "Select", label: __("Response"), options: RESPONSES, reqd: 1 },
-			{ fieldname: "remarks", fieldtype: "Small Text", label: __("Remarks") },
-		],
+		fields,
 		primary_action_label: __("Record"),
 		primary_action(values) {
 			const action = is_step
-				? record_step_response(step.name, values.response, values.remarks)
+				? record_step_response(step.name, values.response, values.remarks, values.attachment)
 				: record_response(current_submission.value.name, values.response, values.remarks);
 			action
 				.then(() => {
@@ -314,6 +327,40 @@ function confirm_remove_document(row) {
 
 // -- related activities ------------------------------------------------------------------------
 
+// -- comments (generic thread, reachable by external reviewers too — comments.py's only gate is
+// read access to the Submittal itself, same as everything else on this drawer) -----------------
+
+const comments = ref([]);
+const new_comment = ref("");
+const posting_comment = ref(false);
+
+async function load_comments() {
+	try {
+		comments.value = await get_comments("EGC Submittal", props.submittal);
+	} catch (e) {
+		comments.value = [];
+	}
+}
+watch(() => props.submittal, load_comments, { immediate: true });
+
+async function do_post_comment() {
+	if (!new_comment.value.trim()) return;
+	posting_comment.value = true;
+	try {
+		await add_comment("EGC Submittal", props.submittal, new_comment.value);
+		new_comment.value = "";
+		await load_comments();
+	} catch (e) {
+		frappe.msgprint({ title: __("Could Not Post Comment"), message: e.message, indicator: "red" });
+	} finally {
+		posting_comment.value = false;
+	}
+}
+
+function format_datetime(value) {
+	return value ? frappe.datetime.str_to_user(value) : "—";
+}
+
 function open_link_activity_dialog() {
 	const dialog = new frappe.ui.Dialog({
 		title: __("Link Activity"),
@@ -479,6 +526,16 @@ function open_link_activity_dialog() {
 										<span v-if="!step.is_required" class="submittal-workflow__optional">({{ __("optional") }})</span>
 									</span>
 									<span v-if="step.response" class="submittal-workflow__response">{{ step.response }}</span>
+									<a
+										v-if="step.response_attachment"
+										:href="step.response_attachment"
+										target="_blank"
+										rel="noopener"
+										class="hub-link"
+										:title="__('Response attachment')"
+									>
+										📎
+									</a>
 									<button
 										v-if="can_respond_to(step)"
 										type="button"
@@ -555,6 +612,36 @@ function open_link_activity_dialog() {
 								<StatusPill :status="row.status" />
 							</li>
 						</ul>
+					</section>
+
+					<section class="activity-detail__section">
+						<div class="activity-detail__section-title">{{ __("Comments") }}</div>
+						<EmptyState v-if="!comments.length" :title="__('No comments yet')" />
+						<ul v-else class="submittal-comments__list">
+							<li v-for="row in comments" :key="row.name" class="submittal-comments__item">
+								<div class="submittal-comments__meta">
+									<span class="submittal-comments__author">{{ row.owner }}</span>
+									<span class="submittal-comments__date">{{ format_datetime(row.creation) }}</span>
+								</div>
+								<div class="submittal-comments__content">{{ row.content }}</div>
+							</li>
+						</ul>
+						<div class="submittal-comments__composer">
+							<textarea
+								v-model="new_comment"
+								class="form-control"
+								rows="2"
+								:placeholder="__('Add a comment…')"
+							></textarea>
+							<button
+								type="button"
+								class="btn btn-xs btn-primary"
+								:disabled="posting_comment || !new_comment.trim()"
+								@click="do_post_comment"
+							>
+								{{ __("Post") }}
+							</button>
+						</div>
 					</section>
 				</template>
 			</div>
@@ -777,5 +864,47 @@ function open_link_activity_dialog() {
 .submittal-workflow__response {
 	font-size: var(--text-xs);
 	color: var(--text-muted);
+}
+
+.submittal-comments__list {
+	list-style: none;
+	margin: 0 0 12px;
+	padding: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+
+.submittal-comments__item {
+	border: 1px solid var(--border-color);
+	border-radius: var(--border-radius);
+	padding: 8px 12px;
+}
+
+.submittal-comments__meta {
+	display: flex;
+	justify-content: space-between;
+	gap: 10px;
+	font-size: var(--text-xs);
+	color: var(--text-muted);
+	margin-bottom: 4px;
+}
+
+.submittal-comments__content {
+	font-size: var(--text-sm);
+	color: var(--text-color);
+	white-space: pre-wrap;
+}
+
+.submittal-comments__composer {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	align-items: flex-end;
+}
+
+.submittal-comments__composer textarea {
+	width: 100%;
+	resize: vertical;
 }
 </style>
