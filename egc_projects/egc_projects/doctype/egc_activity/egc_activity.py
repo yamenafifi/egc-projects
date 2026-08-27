@@ -18,7 +18,7 @@ from frappe.desk.treeview import make_tree_args
 from frappe.utils import date_diff, flt, getdate, sbool, today
 from frappe.utils.nestedset import NestedSet
 
-from egc_projects.egc_projects import activity_control, project_progress
+from egc_projects.egc_projects import activity_control, project_progress, schedule_engine
 from egc_projects.egc_projects.constants import (
 	ACTIVITY_CLOSED_STATUSES,
 	ACTIVITY_COMPLETED,
@@ -87,6 +87,7 @@ class EGCActivity(NestedSet):
 		self.validate_progress()
 		self.validate_weight()
 		activity_control.assert_group_fields_not_hand_edited(self)
+		schedule_engine.assert_dependency_constraints_satisfied(self)
 
 	def validate_dates(self):
 		if self.planned_start_date and self.planned_end_date:
@@ -161,6 +162,10 @@ class EGCActivity(NestedSet):
 		super().on_update()
 		activity_control.refresh_ancestors(self.parent_egc_activity)
 		project_progress.refresh_project_percent_complete(self.project)
+		# Never re-entered by the engine's own writes below — those go through
+		# `frappe.db.set_value`, which triggers no controller hooks at all (see
+		# schedule_engine.py's module docstring).
+		schedule_engine.propagate_from(self.name)
 
 	def on_trash(self, allow_root_deletion=False):
 		# NestedSet.on_trash() clears self.parent_egc_activity on the in-memory doc before

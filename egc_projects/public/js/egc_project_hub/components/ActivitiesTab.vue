@@ -10,6 +10,8 @@ import EmptyState from "./EmptyState.vue";
 import StatusPill from "./StatusPill.vue";
 import ActivityDetail from "./ActivityDetail.vue";
 import ActivityExpandPanel from "./ActivityExpandPanel.vue";
+import ActivityGanttView from "./ActivityGanttView.vue";
+import ActivityOutlineView from "./ActivityOutlineView.vue";
 
 const props = defineProps({
 	project: { type: String, required: true },
@@ -62,6 +64,10 @@ const status_filter = ref("");
 const discipline_filter = ref("");
 const overdue_only = ref(false);
 const search = ref("");
+
+// -- view switch: Table (flat, filterable — the default) / Gantt / Outline (collapsible tree) ---
+const VIEWS = ["Table", "Gantt", "Outline"];
+const active_view = ref("Table");
 
 onMounted(() => {
 	if (consumeOverdueIntent("activities")) overdue_only.value = true;
@@ -195,16 +201,28 @@ function open_quick_add(row) {
 
 		<template v-else>
 			<div class="hub-toolbar">
-				<input v-model="search" type="text" :placeholder="__('Search code or name…')" />
-				<select v-model="status_filter">
+				<div class="hub-view-switch">
+					<button
+						v-for="view in VIEWS"
+						:key="view"
+						type="button"
+						class="hub-view-switch__btn"
+						:class="{ 'hub-view-switch__btn--active': active_view === view }"
+						@click="active_view = view"
+					>
+						{{ __(view) }}
+					</button>
+				</div>
+				<input v-if="active_view !== 'Gantt'" v-model="search" type="text" :placeholder="__('Search code or name…')" />
+				<select v-if="active_view !== 'Gantt'" v-model="status_filter">
 					<option value="">{{ __("All Statuses") }}</option>
 					<option v-for="s in statuses" :key="s" :value="s">{{ s }}</option>
 				</select>
-				<select v-model="discipline_filter">
+				<select v-if="active_view !== 'Gantt'" v-model="discipline_filter">
 					<option value="">{{ __("All Disciplines") }}</option>
 					<option v-for="d in disciplines" :key="d" :value="d">{{ d }}</option>
 				</select>
-				<label class="hub-toolbar__check">
+				<label v-if="active_view !== 'Gantt'" class="hub-toolbar__check">
 					<input v-model="overdue_only" type="checkbox" />
 					{{ __("Overdue only") }}
 				</label>
@@ -214,8 +232,17 @@ function open_quick_add(row) {
 				</button>
 			</div>
 
-			<EmptyState v-if="!filtered.length" :title="__('No activities match these filters')" />
-			<div v-else class="hub-table-wrap">
+			<ActivityGanttView v-if="active_view === 'Gantt'" :project="project" @open-activity="open_detail" />
+
+			<ActivityOutlineView
+				v-else-if="active_view === 'Outline'"
+				:rows="filtered"
+				@open-activity="open_detail"
+			/>
+
+			<template v-else>
+				<EmptyState v-if="!filtered.length" :title="__('No activities match these filters')" />
+				<div v-else class="hub-table-wrap">
 				<table class="hub-table">
 					<thead>
 						<tr>
@@ -339,6 +366,7 @@ function open_quick_add(row) {
 				</table>
 			</div>
 		</template>
+		</template>
 
 		<ActivityDetail
 			v-if="selected_activity"
@@ -434,6 +462,38 @@ function open_quick_add(row) {
 
 .hub-activities__expand-row td {
 	padding: 0 !important;
+}
+
+.hub-view-switch {
+	display: flex;
+	border: 1px solid var(--border-color);
+	border-radius: var(--border-radius);
+	overflow: hidden;
+	flex: 0 0 auto;
+}
+
+.hub-view-switch__btn {
+	appearance: none;
+	border: none;
+	background: var(--fg-color);
+	color: var(--text-muted);
+	padding: 5px 12px;
+	font-size: var(--text-sm);
+	cursor: pointer;
+}
+
+.hub-view-switch__btn + .hub-view-switch__btn {
+	border-left: 1px solid var(--border-color);
+}
+
+.hub-view-switch__btn:hover {
+	color: var(--text-color);
+}
+
+.hub-view-switch__btn--active {
+	background: var(--control-bg);
+	color: var(--text-color);
+	font-weight: 600;
 }
 
 .hub-link {

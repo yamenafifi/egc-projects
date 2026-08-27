@@ -4,9 +4,12 @@
 """`EGC Activity Dependency` — recorded, validated predecessor/successor links between two
 Activities of the same project (docs/ARCHITECTURE_V2.md §6).
 
-Deliberately does **not** drive automatic forecast-date shifting or a critical-path calculation
-— §6's own stated boundary. A dependency is recorded and validated only; the schedule fields on
-`EGC Activity` are never touched from here.
+Used to deliberately NOT drive automatic forecast-date shifting — reversed by Level 0 §27-§28,
+which wants exactly that for FORECAST dates (never Baseline, never Actual). The actual push lives
+in `schedule_engine.py`; `after_insert`/`on_update` below just call it whenever a dependency is
+created or its type/lag changes, since either can immediately put the successor's current
+forecast in violation of a constraint that didn't exist (or was weaker) a moment ago. No critical-
+path calculation is added by this — still out of scope, per §6.
 
 `project` is `fetch_from: predecessor.project` in the JSON, which the framework populates before
 `validate()` runs (`Document._validate_links()` fires ahead of the `validate` hook on both insert
@@ -26,6 +29,7 @@ import frappe
 from frappe import _
 from frappe.model.document import Document
 
+from egc_projects.egc_projects import schedule_engine
 from egc_projects.egc_projects.validators import validate_same_project
 
 
@@ -50,6 +54,13 @@ class EGCActivityDependency(Document):
 		validate_same_project(self, "successor", "EGC Activity", "Successor")
 		self.validate_no_duplicate_pair()
 		self.validate_no_cycle()
+
+	def after_insert(self):
+		schedule_engine.propagate_from(self.predecessor)
+
+	def on_update(self):
+		if self.has_value_changed("dependency_type") or self.has_value_changed("lag_days"):
+			schedule_engine.propagate_from(self.predecessor)
 
 	def validate_not_self_dependency(self):
 		if self.predecessor and self.predecessor == self.successor:
