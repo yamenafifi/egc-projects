@@ -6,6 +6,7 @@ import {
 	submit_document_revision,
 	update_revision_readiness,
 } from "./documents_api";
+import { create_submittal, create_first_submission, add_submission_document } from "./submittals_api";
 import { useHubResource } from "../composables/useHubResource";
 import LoadingState from "./LoadingState.vue";
 import ErrorState from "./ErrorState.vue";
@@ -31,6 +32,57 @@ function open_activity(row) {
 
 function open_submittal(row) {
 	frappe.set_route("Form", "EGC Submittal", row.submittal);
+}
+
+// -- bridge into starting a formal review from the document itself: not every document needs
+// one (see the hint shown next to "Not Submitted" above), but when it does, this is the
+// obvious place to start it rather than making the user go find the Submittals tab and
+// remember to attach the right revision there. Submittal Number/Title are their own identity —
+// intentionally NOT derived from the document's own number, only Title defaults for convenience.
+
+async function open_submit_for_review_dialog() {
+	const doc = data.value.document;
+	const dialog = new frappe.ui.Dialog({
+		title: __("Submit for Review"),
+		fields: [
+			{ fieldname: "submittal_number", fieldtype: "Data", label: __("Submittal Number"), reqd: 1 },
+			{ fieldname: "title", fieldtype: "Data", label: __("Title"), reqd: 1, default: doc.title },
+			{
+				fieldname: "submittal_type",
+				fieldtype: "Link",
+				label: __("Submittal Type"),
+				options: "EGC Submittal Type",
+				reqd: 1,
+			},
+			{ fieldname: "discipline", fieldtype: "Link", label: __("Discipline"), options: "EGC Discipline", default: doc.discipline },
+		],
+		primary_action_label: __("Submit for Review"),
+		async primary_action(values) {
+			try {
+				const submittal = await create_submittal(doc.project, {
+					submittal_number: values.submittal_number,
+					title: values.title,
+					submittal_type: values.submittal_type,
+					discipline: values.discipline,
+				});
+				const submission = await create_first_submission(submittal.name);
+				await add_submission_document(submission.name, doc.current_revision);
+				dialog.hide();
+				emit("changed");
+				reload();
+				frappe.msgprint({
+					title: __("Submitted for Review"),
+					message: __("Created submittal {0}. Add the reviewer(s) from its own page to start the review.", [
+						`<a href="#" onclick="frappe.set_route('Form', 'EGC Submittal', '${submittal.name}'); return false;">${frappe.utils.escape_html(values.submittal_number)}</a>`,
+					]),
+					indicator: "green",
+				});
+			} catch (e) {
+				frappe.msgprint({ title: __("Could Not Submit for Review"), message: e.message, indicator: "red" });
+			}
+		},
+	});
+	dialog.show();
 }
 
 // Mirrors `submittal_control._refresh_from_current`'s own display rule: once a submission has
@@ -207,9 +259,26 @@ function compare_rev(rev_name) {
 				<template v-else-if="data">
 					<section class="doc-detail__section">
 						<div class="doc-detail__status-row">
-							<StatusPill :status="data.document.document_status" />
-							<StatusPill :status="data.document.approval_status" />
+							<span class="doc-detail__status-item">
+								<span class="doc-detail__status-label">{{ __("Document") }}</span>
+								<StatusPill :status="data.document.document_status" />
+							</span>
+							<span class="doc-detail__status-item">
+								<span class="doc-detail__status-label">{{ __("Approval") }}</span>
+								<StatusPill :status="data.document.approval_status" />
+							</span>
+							<button
+								v-if="data.document.current_revision && data.document.approval_status === 'Not Submitted'"
+								type="button"
+								class="btn btn-xs btn-primary doc-detail__submit-for-review"
+								@click="open_submit_for_review_dialog"
+							>
+								{{ __("Submit for Review") }}
+							</button>
 						</div>
+						<p v-if="data.document.approval_status === 'Not Submitted'" class="doc-detail__hint">
+							{{ __("No review has been requested for this revision yet — that's normal unless this document needs stakeholder sign-off.") }}
+						</p>
 						<dl class="doc-detail__meta">
 							<div>
 								<dt>{{ __("Document Type") }}</dt>
@@ -506,8 +575,33 @@ function compare_rev(rev_name) {
 
 .doc-detail__status-row {
 	display: flex;
-	gap: 8px;
-	margin-bottom: 12px;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 14px;
+	margin-bottom: 4px;
+}
+
+.doc-detail__status-item {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+}
+
+.doc-detail__status-label {
+	font-size: var(--text-xs);
+	color: var(--text-muted);
+	text-transform: uppercase;
+	letter-spacing: 0.02em;
+}
+
+.doc-detail__submit-for-review {
+	margin-left: auto;
+}
+
+.doc-detail__hint {
+	font-size: var(--text-xs);
+	color: var(--text-muted);
+	margin: 0 0 12px;
 }
 
 .doc-detail__meta {

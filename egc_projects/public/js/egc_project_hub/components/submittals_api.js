@@ -76,6 +76,14 @@ export function create_first_submission(submittal) {
 	return call(`${SUBMITTALS_MODULE}.create_first_submission`, { submittal });
 }
 
+export function delete_submittal(submittal) {
+	return call(`${SUBMITTALS_MODULE}.delete_submittal`, { submittal });
+}
+
+export function update_submission_dates(submission, dates) {
+	return call(`${SUBMITTALS_MODULE}.update_submission_dates`, { submission, ...dates });
+}
+
 // -- submittal_control.py (pre-existing lifecycle + v2 step engine) -------------------------
 
 export function mark_under_review(submission) {

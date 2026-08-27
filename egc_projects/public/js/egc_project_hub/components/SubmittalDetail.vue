@@ -20,6 +20,8 @@ import {
 	remove_submission_document,
 	add_review_step,
 	remove_review_step,
+	delete_submittal,
+	update_submission_dates,
 } from "./submittals_api";
 import { link_activity_record, unlink_activity_record } from "./activities_api";
 import { add_assignment, remove_assignment } from "./assignments_api";
@@ -81,6 +83,53 @@ function stage_icon(step) {
 	if (step.status === "Skipped") return "⊘";
 	return "○";
 }
+
+// -- delete: only ever offered while every cycle is still Draft — once a submittal has real
+// review history, that history is permanent (submittals_api.delete_submittal enforces this
+// server-side too; this just avoids showing an action that would only fail). ---------------------
+
+const has_submitted_history = computed(() => (data.value?.submissions || []).some((s) => s.docstatus !== 0));
+
+async function confirm_delete_submittal() {
+	frappe.confirm(__("Delete this submittal? This cannot be undone."), () => {
+		delete_submittal(props.submittal)
+			.then(() => {
+				emit("changed");
+				emit("close");
+			})
+			.catch((e) => {
+				frappe.msgprint({ title: __("Could Not Delete"), message: e.message, indicator: "red" });
+			});
+	});
+}
+
+// -- one-line "what's going on / what's next" summary, shown right under the status pill ---------
+
+const RESPONSE_IS_FINAL_OK = ["Approved", "Approved with Comments"];
+
+const next_step_text = computed(() => {
+	const s = current_submission.value;
+	if (!s) return null;
+
+	if (s.submission_status === "Responded") {
+		return RESPONSE_IS_FINAL_OK.includes(s.response)
+			? __("{0} — no action needed.", [s.response])
+			: __("{0} — start a new submission once it's ready to resubmit.", [s.response]);
+	}
+
+	const ball_in_court = data.value?.submittal?.ball_in_court;
+	if (ball_in_court) {
+		return __("Waiting on {0} to respond.", [ball_in_court]);
+	}
+
+	if (s.docstatus === 0) {
+		return s.documents.length
+			? __("Draft — ready to submit for review, or add more reviewers/documents first.")
+			: __("Draft — add at least one document revision, then submit for review.");
+	}
+
+	return __("{0} — mark it Under Review once someone starts looking, or record the response.", [s.submission_status]);
+});
 
 const current_user = frappe.session.user;
 
@@ -160,22 +209,130 @@ function open_record_response_dialog(step) {
 	dialog.show();
 }
 
-async function do_create_next_revision() {
-	try {
-		await create_next_revision(props.submittal);
-		notify_changed();
-	} catch (e) {
-		frappe.msgprint({ title: __("Could Not Create Next Revision"), message: e.message, indicator: "red" });
-	}
-}
+// -- start a submission: ONE guided entry point instead of a maze of separately-conditioned
+// buttons. A Submittal is a formal review/approval process by definition, so this always ends
+// with at least one reviewer configured — there is deliberately no "no review" choice here.
 
-async function do_create_first_submission() {
+const DATE_FIELDS = [
+	"due_date",
+	"required_submission_date",
+	"required_approval_date",
+	"required_on_site_date",
+	"lead_time_days",
+];
+
+async function open_start_submission_dialog() {
+	let templates = [];
 	try {
-		await create_first_submission(props.submittal);
-		notify_changed();
+		templates = await get_workflow_templates();
 	} catch (e) {
-		frappe.msgprint({ title: __("Could Not Create Submission"), message: e.message, indicator: "red" });
+		// Non-fatal — the ad-hoc reviewer path still works with no templates defined.
 	}
+
+	const is_next_cycle = Boolean(current_submission.value);
+	const approach_options = templates.length
+		? ["Ad-hoc reviewer(s)", "Apply a workflow template"]
+		: ["Ad-hoc reviewer(s)"];
+
+	const dialog = new frappe.ui.Dialog({
+		title: is_next_cycle ? __("Start Next Submission") : __("Start Submission"),
+		fields: [
+			{
+				fieldname: "document_revisions",
+				fieldtype: "MultiSelectPills",
+				label: __("Document Revisions"),
+				reqd: 1,
+				get_data: (txt) =>
+					frappe.db.get_link_options("EGC Project Document Revision", txt, {
+						project: props.project,
+						docstatus: 1,
+						revision_status: "Issued",
+					}),
+			},
+			{
+				fieldname: "review_approach",
+				fieldtype: "Select",
+				label: __("Review Approach"),
+				options: approach_options,
+				default: approach_options[0],
+				reqd: 1,
+			},
+			{
+				fieldname: "template",
+				fieldtype: "Select",
+				label: __("Workflow Template"),
+				options: templates.map((t) => t.name),
+				depends_on: 'eval:doc.review_approach == "Apply a workflow template"',
+				mandatory_depends_on: 'eval:doc.review_approach == "Apply a workflow template"',
+			},
+			{ fieldtype: "Section Break", label: __("Review Dates (optional)"), collapsible: 1 },
+			{ fieldname: "due_date", fieldtype: "Date", label: __("Response Due") },
+			{ fieldname: "required_submission_date", fieldtype: "Date", label: __("Required Submission Date") },
+			{ fieldtype: "Column Break" },
+			{ fieldname: "required_approval_date", fieldtype: "Date", label: __("Required Approval Date") },
+			{ fieldname: "required_on_site_date", fieldtype: "Date", label: __("Required On-Site Date") },
+			{ fieldname: "lead_time_days", fieldtype: "Int", label: __("Lead Time (Days)") },
+		],
+		primary_action_label: is_next_cycle ? __("Start Next Submission") : __("Start Submission"),
+		async primary_action(values) {
+			dialog.disable_primary_action();
+			// Once the submission cycle itself is created below, it's a real Draft row in the
+			// database — a later step failing (e.g. a document already attached elsewhere) must
+			// NOT be reported as though nothing happened, or a retry would immediately fail again
+			// with "already has a submission" against an orphaned cycle the user can't see. Track
+			// this so the catch block below can tell the two situations apart.
+			let submission_name = null;
+			try {
+				submission_name = is_next_cycle
+					? await create_next_revision(props.submittal)
+					: (await create_first_submission(props.submittal)).name;
+
+				for (const document_revision of values.document_revisions || []) {
+					await add_submission_document(submission_name, document_revision);
+				}
+
+				const dates = {};
+				let has_dates = false;
+				for (const field of DATE_FIELDS) {
+					if (values[field]) {
+						dates[field] = values[field];
+						has_dates = true;
+					}
+				}
+				if (has_dates) await update_submission_dates(submission_name, dates);
+
+				if (values.review_approach === "Apply a workflow template") {
+					await apply_workflow_template(submission_name, values.template);
+				}
+
+				dialog.hide();
+				notify_changed();
+
+				if (values.review_approach !== "Apply a workflow template") {
+					// Ad-hoc path — immediately continue into naming the reviewer(s) rather than
+					// leaving the submission sitting there with nobody assigned to it yet.
+					open_add_reviewer_dialog();
+				}
+			} catch (e) {
+				if (submission_name) {
+					dialog.hide();
+					notify_changed();
+					frappe.msgprint({
+						title: __("Submission Started, But Incomplete"),
+						message: __(
+							"{0} was created, but this step failed: {1} Finish configuring it — documents, reviewers, dates — from this drawer.",
+							[frappe.utils.escape_html(submission_name), e.message]
+						),
+						indicator: "orange",
+					});
+				} else {
+					dialog.enable_primary_action();
+					frappe.msgprint({ title: __("Could Not Start Submission"), message: e.message, indicator: "red" });
+				}
+			}
+		},
+	});
+	dialog.show();
 }
 
 // -- apply workflow template ------------------------------------------------------------------
@@ -470,6 +627,17 @@ function open_link_activity_dialog() {
 				</div>
 				<div class="activity-detail__header-actions">
 					<a href="#" class="hub-link" @click.prevent="open_form">{{ __("Open Form") }}</a>
+					<a
+						v-if="canWrite && data && !has_submitted_history"
+						href="#"
+						class="hub-link hub-link--danger"
+						@click.prevent="confirm_delete_submittal"
+					>
+						{{ __("Delete") }}
+					</a>
+					<span v-else-if="canWrite && data" class="submittal-permanent-note" :title="__('This submittal has submitted review history, which is permanent and cannot be deleted.')">
+						{{ __("History is permanent") }}
+					</span>
 					<button type="button" class="activity-detail__close" :aria-label="__('Close')" @click="$emit('close')">
 						&times;
 					</button>
@@ -514,11 +682,14 @@ function open_link_activity_dialog() {
 
 					<section class="activity-detail__section">
 						<div class="activity-detail__head-row">
-							<div class="activity-detail__section-title">{{ __("People") }}</div>
+							<div class="activity-detail__section-title">{{ __("Team") }}</div>
 							<button v-if="canWrite" type="button" class="btn btn-xs btn-default" @click="open_add_assignment_dialog">
 								{{ __("Add Person") }}
 							</button>
 						</div>
+						<p class="submittal-section-hint">
+							{{ __("For visibility and notifications only — not the same as the Reviewers below, who must actually respond for this submission to move forward.") }}
+						</p>
 						<EmptyState v-if="!(data.assignments || []).length" :title="__('No one assigned yet')" />
 						<ul v-else class="activity-detail__list">
 							<li v-for="row in data.assignments" :key="row.name">
@@ -542,34 +713,22 @@ function open_link_activity_dialog() {
 					<section v-if="!current_submission" class="activity-detail__section">
 						<EmptyState
 							:title="__('No submission cycle yet')"
-							:description="__('Start the first submission to attach controlled document revisions and begin review.')"
-							:action-label="canWrite ? __('Create First Submission') : ''"
-							@action="do_create_first_submission"
+							:description="__('A Submittal is a formal review — start the first submission to attach the document revision(s) needing approval and name who reviews them.')"
+							:action-label="canWrite ? __('Start Submission') : ''"
+							@action="open_start_submission_dialog"
 						/>
 					</section>
 
 					<section v-if="current_submission" class="activity-detail__section">
 						<div class="activity-detail__head-row">
 							<div class="activity-detail__section-title">
-								{{ __("Current Submission") }} — {{ current_submission.revision_label }}
+								{{ __("Review Cycle") }} — {{ current_submission.revision_label }}
 							</div>
-							<div v-if="canWrite">
-								<button
-									v-if="current_submission.docstatus === 0 && !has_steps"
-									type="button"
-									class="btn btn-xs btn-default"
-									@click="open_apply_template_dialog"
-								>
-									{{ __("Apply Workflow Template") }}
-								</button>
-								<button
-									v-if="current_submission.docstatus === 0"
-									type="button"
-									class="btn btn-xs btn-default"
-									@click="open_add_reviewer_dialog"
-								>
-									{{ __("Add Reviewer") }}
-								</button>
+						</div>
+
+						<div class="submittal-next-step">
+							<p v-if="next_step_text" class="submittal-next-step__text">{{ next_step_text }}</p>
+							<div v-if="canWrite" class="submittal-next-step__actions">
 								<button
 									v-if="current_submission.docstatus === 0"
 									type="button"
@@ -599,18 +758,28 @@ function open_link_activity_dialog() {
 									v-if="current_submission.submission_status === 'Responded'"
 									type="button"
 									class="btn btn-xs btn-primary"
-									@click="do_create_next_revision"
+									@click="open_start_submission_dialog"
 								>
-									{{ __("New Submission") }}
+									{{ __("Start Next Submission") }}
 								</button>
 							</div>
 						</div>
 
-						<StatusPill :status="current_submission.response || current_submission.submission_status" />
-
 						<!-- Workflow timeline: only rendered when this cycle actually has review steps. -->
 						<div v-if="has_steps" class="submittal-workflow">
+							<div class="activity-detail__head-row">
+								<div class="activity-detail__dep-label">{{ __("Reviewers") }}</div>
+								<button
+									v-if="canWrite && current_submission.docstatus === 0"
+									type="button"
+									class="btn btn-xs btn-default"
+									@click="open_add_reviewer_dialog"
+								>
+									{{ __("Add Reviewer") }}
+								</button>
+							</div>
 							<div v-for="stage in stages" :key="stage.sequence" class="submittal-workflow__stage">
+								<div class="submittal-workflow__stage-label">{{ __("Stage {0}", [stage.sequence + 1]) }}</div>
 								<div
 									v-for="step in stage.steps"
 									:key="step.name"
@@ -656,6 +825,14 @@ function open_link_activity_dialog() {
 								</div>
 							</div>
 						</div>
+						<div v-else-if="canWrite && current_submission.docstatus === 0" class="submittal-workflow-empty">
+							<button type="button" class="btn btn-xs btn-default" @click="open_apply_template_dialog">
+								{{ __("Apply Workflow Template") }}
+							</button>
+							<button type="button" class="btn btn-xs btn-default" @click="open_add_reviewer_dialog">
+								{{ __("Add Reviewer") }}
+							</button>
+						</div>
 
 						<div class="activity-detail__head-row" style="margin-top: 14px">
 							<div class="activity-detail__dep-label">{{ __("Documents") }}</div>
@@ -687,7 +864,7 @@ function open_link_activity_dialog() {
 					</section>
 
 					<section v-if="history_submissions.length" class="activity-detail__section">
-						<div class="activity-detail__section-title">{{ __("Submission History") }}</div>
+						<div class="activity-detail__section-title">{{ __("Earlier Review Cycles") }}</div>
 						<ul class="activity-detail__list">
 							<li v-for="row in history_submissions" :key="row.name">
 								<span>{{ row.revision_label }} — {{ format_date(row.date_submitted) }}</span>
@@ -804,6 +981,16 @@ function open_link_activity_dialog() {
 	align-items: center;
 	gap: 12px;
 	flex: 0 0 auto;
+}
+
+.hub-link--danger {
+	color: var(--red-500, #d1483e);
+}
+
+.submittal-permanent-note {
+	font-size: var(--text-xs);
+	color: var(--text-muted);
+	cursor: help;
 }
 
 .activity-detail__close {
@@ -925,11 +1112,56 @@ function open_link_activity_dialog() {
 	   (e.g. a divider) has a single place to land. */
 }
 
+.submittal-section-hint {
+	font-size: var(--text-xs);
+	color: var(--text-muted);
+	margin: -4px 0 10px;
+}
+
+.submittal-next-step {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	flex-wrap: wrap;
+	gap: 8px 12px;
+	background: var(--subtle-fg, var(--control-bg));
+	border: 1px solid var(--border-color);
+	border-radius: var(--border-radius);
+	padding: 10px 12px;
+	margin-bottom: 12px;
+}
+
+.submittal-next-step__text {
+	margin: 0;
+	font-size: var(--text-sm);
+	color: var(--text-color);
+}
+
+.submittal-next-step__actions {
+	display: flex;
+	gap: 8px;
+	flex: 0 0 auto;
+}
+
+.submittal-workflow-empty {
+	display: flex;
+	gap: 8px;
+	margin: 4px 0 14px;
+}
+
 .submittal-workflow {
 	display: flex;
 	flex-direction: column;
 	gap: 10px;
 	margin: 12px 0;
+}
+
+.submittal-workflow__stage-label {
+	font-size: var(--text-xs);
+	font-weight: 600;
+	color: var(--text-muted);
+	text-transform: uppercase;
+	letter-spacing: 0.02em;
 }
 
 .submittal-workflow__stage {

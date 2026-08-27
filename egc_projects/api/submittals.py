@@ -14,7 +14,7 @@ from __future__ import annotations
 import frappe
 from frappe import _
 
-from egc_projects.egc_projects import assignments, relationships, submittal_control, validators
+from egc_projects.egc_projects import assignments, constants as c, relationships, submittal_control, validators
 
 # --- add/remove a controlled document revision on a Draft submission --------------------------
 
@@ -33,6 +33,33 @@ def add_submission_document(submission: str, document_revision: str) -> dict:
 			_("Documents can only be added while the submission is Draft; {0} is {1}.").format(
 				frappe.bold(doc.name), _(doc.submission_status)
 			),
+			exc=frappe.ValidationError,
+		)
+
+	# A document revision can only be under review through ONE submittal's lineage at a time —
+	# otherwise `document_control.get_approval_status` would have no reliable way to say which
+	# submittal's outcome is "the" approval status (its own ordering is only reliable within a
+	# single submittal's revisions; `submission_seq` is scoped per-submittal, not globally
+	# unique). Re-attaching to a LATER revision of the SAME submittal stays allowed — that's the
+	# ordinary "resubmit the same drawing for another look" case — and so does re-attaching after
+	# the earlier attachment's submission was cancelled.
+	conflict = frappe.get_all(
+		"EGC Submittal Revision",
+		filters=[
+			["EGC Submittal Revision", "submittal", "!=", doc.submittal],
+			["EGC Submittal Revision", "submission_status", "!=", c.SUBMISSION_CANCELLED],
+			["EGC Submittal Document Item", "document_revision", "=", document_revision],
+		],
+		fields=["submittal"],
+		limit=1,
+	)
+	if conflict:
+		frappe.throw(
+			_(
+				"Document Revision {0} is already attached to submittal {1}. A document revision"
+				" can only be under review through one submittal at a time."
+			).format(frappe.bold(document_revision), frappe.bold(conflict[0].submittal)),
+			title=_("Already Attached Elsewhere"),
 			exc=frappe.ValidationError,
 		)
 
@@ -56,6 +83,45 @@ def remove_submission_document(submission: str, row_name: str) -> dict:
 
 	doc.documents = [row for row in doc.documents if row.name != row_name]
 	doc.save()
+	return {"name": doc.name}
+
+
+# --- update_submission_dates (review/lead-time dates set at or after Start Submission) ---------
+
+_DATE_FIELDS = (
+	"due_date",
+	"required_submission_date",
+	"required_approval_date",
+	"final_due_date",
+	"required_on_site_date",
+	"lead_time_days",
+)
+
+
+@frappe.whitelist()
+def update_submission_dates(submission: str, **kwargs) -> dict:
+	"""Sets whichever of the submission's plain review/lead-time date fields were provided.
+	These are ordinary user-entered fields (see `egc_submittal_revision.json`) — none of them are
+	engine-guarded like `submission_status`/`response`/etc. in `submittal_control.py`, so a plain
+	`save()` here is correct and doesn't need to go through that module."""
+	doc = frappe.get_doc("EGC Submittal Revision", submission)
+	frappe.has_permission("EGC Submittal Revision", "write", doc=doc, throw=True)
+
+	if doc.docstatus != 0:
+		frappe.throw(
+			_("Review dates can only be set while the submission is Draft; {0} is {1}.").format(
+				frappe.bold(doc.name), _(doc.submission_status)
+			),
+			exc=frappe.ValidationError,
+		)
+
+	changed = False
+	for field in _DATE_FIELDS:
+		if kwargs.get(field) is not None:
+			doc.set(field, kwargs[field])
+			changed = True
+	if changed:
+		doc.save()
 	return {"name": doc.name}
 
 
@@ -129,6 +195,39 @@ def create_submittal(project: str, **kwargs) -> dict:
 	doc = frappe.get_doc({"doctype": "EGC Submittal", "project": project, **values})
 	doc.insert()
 	return {"name": doc.name}
+
+
+# --- delete_submittal (Draft-only; submitted review history is permanent, no bypass) -----------
+
+
+@frappe.whitelist()
+def delete_submittal(submittal: str) -> None:
+	"""Deletes a Submittal and every Draft revision it has — but only while EVERY revision is
+	still Draft. The moment any revision has ever been submitted, this refuses outright: a
+	submitted review cycle is history, and unlike a lone submission revision (which a System
+	Manager may still purge after cancelling it, via the raw doctype form — see
+	`submittal_control.on_submission_trash`), a Submittal that has real history is never
+	deletable through this app's own workflow, for any role. There is deliberately no
+	cancel-then-delete path here."""
+	doc = frappe.get_doc("EGC Submittal", submittal)
+	project = validators.get_project_of("EGC Submittal", submittal)
+	validators.require_project_permission(project, "write")
+	frappe.has_permission("EGC Submittal", "delete", doc=doc, throw=True)
+
+	revisions = frappe.get_all("EGC Submittal Revision", filters={"submittal": submittal}, fields=["name", "docstatus"])
+	if any(row.docstatus != 0 for row in revisions):
+		frappe.throw(
+			_(
+				"{0} has submitted review history, which is permanent and cannot be deleted. Only a"
+				" Draft submittal with no review history can be deleted."
+			).format(frappe.bold(submittal)),
+			title=_("Cannot Delete"),
+			exc=frappe.ValidationError,
+		)
+
+	for row in revisions:
+		frappe.delete_doc("EGC Submittal Revision", row.name, ignore_permissions=True)
+	frappe.delete_doc("EGC Submittal", submittal, ignore_permissions=True)
 
 
 # --- get_submittal_detail --------------------------------------------------------------------

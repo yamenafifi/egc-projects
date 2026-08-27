@@ -554,3 +554,128 @@ class TestSubmittalWorkflow(IntegrationTestCase):
 		frappe.set_user(self.consultant_user)
 		mine_consultant = submittals_api.get_my_open_reviews()
 		self.assertFalse(any(row["submittal"] == submittal.name for row in mine_consultant))
+
+	# -- add_submission_document: a document revision can only be live in ONE submittal ------
+
+	def test_document_revision_cannot_be_attached_to_two_open_submittals(self):
+		doc = self._make_document("DOC-EXCL-1")
+		rev = self._make_issued_revision(doc.name, "00")
+
+		holder = self._make_submittal("SUB-EXCL-HOLDER")
+		other = self._make_submittal("SUB-EXCL-OTHER")
+
+		frappe.set_user(self.manager_user)
+		s1 = submittals_api.create_first_submission(holder.name)
+		submittals_api.add_submission_document(s1["name"], rev.name)
+
+		s2 = submittals_api.create_first_submission(other.name)
+		with self.assertRaises(frappe.ValidationError):
+			submittals_api.add_submission_document(s2["name"], rev.name)
+
+	def test_document_revision_can_move_to_next_revision_of_same_submittal(self):
+		doc = self._make_document("DOC-EXCL-2")
+		rev = self._make_issued_revision(doc.name, "00")
+		submittal = self._make_submittal("SUB-EXCL-SAME")
+
+		frappe.set_user(self.manager_user)
+		s1 = submittals_api.create_first_submission(submittal.name)
+		submittals_api.add_submission_document(s1["name"], rev.name)
+		submittals_api.submit_submission(s1["name"])
+		submittal_control.record_response(s1["name"], c.RESPONSE_REVISE_AND_RESUBMIT)
+
+		s2_name = submittal_control.create_next_revision(submittal.name)
+		# Re-attaching the SAME document revision to a later revision of the SAME submittal is
+		# the ordinary resubmission case and must stay allowed.
+		submittals_api.add_submission_document(s2_name, rev.name)
+
+	def test_document_revision_frees_up_once_its_submission_is_cancelled(self):
+		doc = self._make_document("DOC-EXCL-3")
+		rev = self._make_issued_revision(doc.name, "00")
+
+		holder = self._make_submittal("SUB-EXCL-CANCEL-HOLDER")
+		other = self._make_submittal("SUB-EXCL-CANCEL-OTHER")
+
+		frappe.set_user(self.manager_user)
+		s1 = submittals_api.create_first_submission(holder.name)
+		submittals_api.add_submission_document(s1["name"], rev.name)
+		submittals_api.submit_submission(s1["name"])
+
+		frappe.set_user("Administrator")
+		s1_doc = frappe.get_doc("EGC Submittal Revision", s1["name"])
+		s1_doc.cancel()
+
+		frappe.set_user(self.manager_user)
+		s2 = submittals_api.create_first_submission(other.name)
+		submittals_api.add_submission_document(s2["name"], rev.name)
+
+	# -- delete_submittal: Draft-only, permanent history has no bypass -----------------------
+
+	def test_delete_submittal_succeeds_when_every_revision_is_still_draft(self):
+		submittal = self._make_submittal("SUB-DEL-DRAFT")
+		frappe.set_user(self.manager_user)
+		submittals_api.create_first_submission(submittal.name)
+
+		submittals_api.delete_submittal(submittal.name)
+		self.assertFalse(frappe.db.exists("EGC Submittal", submittal.name))
+
+	def test_delete_submittal_with_submitted_history_is_refused_for_every_role(self):
+		doc = self._make_document("DOC-DEL-1")
+		rev = self._make_issued_revision(doc.name, "00")
+		submittal = self._make_submittal("SUB-DEL-HISTORY")
+
+		frappe.set_user(self.manager_user)
+		s1 = submittals_api.create_first_submission(submittal.name)
+		submittals_api.add_submission_document(s1["name"], rev.name)
+		submittals_api.submit_submission(s1["name"])
+
+		with self.assertRaises(frappe.ValidationError):
+			submittals_api.delete_submittal(submittal.name)
+
+		# Not even a System Manager can delete it through this API — history is permanent,
+		# not merely role-gated.
+		frappe.set_user("Administrator")
+		with self.assertRaises(frappe.ValidationError):
+			submittals_api.delete_submittal(submittal.name)
+		self.assertTrue(frappe.db.exists("EGC Submittal", submittal.name))
+
+	# -- update_submission_dates ---------------------------------------------------------------
+
+	def test_update_submission_dates_sets_only_provided_fields(self):
+		submittal = self._make_submittal("SUB-DATES-1")
+		frappe.set_user(self.manager_user)
+		s1 = submittals_api.create_first_submission(submittal.name)
+
+		submittals_api.update_submission_dates(s1["name"], due_date="2026-09-01", lead_time_days=14)
+
+		sub = frappe.get_doc("EGC Submittal Revision", s1["name"])
+		self.assertEqual(str(sub.due_date), "2026-09-01")
+		self.assertEqual(sub.lead_time_days, 14)
+		self.assertIsNone(sub.required_submission_date)
+
+	def test_update_submission_dates_rejected_once_submitted(self):
+		doc = self._make_document("DOC-DATES-2")
+		rev = self._make_issued_revision(doc.name, "00")
+		submittal = self._make_submittal("SUB-DATES-2")
+
+		frappe.set_user(self.manager_user)
+		s1 = submittals_api.create_first_submission(submittal.name)
+		submittals_api.add_submission_document(s1["name"], rev.name)
+		submittals_api.submit_submission(s1["name"])
+
+		with self.assertRaises(frappe.ValidationError):
+			submittals_api.update_submission_dates(s1["name"], due_date="2026-09-01")
+
+	# -- on_submission_submit sets date_submitted ------------------------------------------------
+
+	def test_submit_sets_date_submitted(self):
+		doc = self._make_document("DOC-DATESUB-1")
+		rev = self._make_issued_revision(doc.name, "00")
+		submittal = self._make_submittal("SUB-DATESUB-1")
+
+		frappe.set_user(self.manager_user)
+		s1 = submittals_api.create_first_submission(submittal.name)
+		submittals_api.add_submission_document(s1["name"], rev.name)
+		submittals_api.submit_submission(s1["name"])
+
+		sub = frappe.get_doc("EGC Submittal Revision", s1["name"])
+		self.assertEqual(str(sub.date_submitted), today())

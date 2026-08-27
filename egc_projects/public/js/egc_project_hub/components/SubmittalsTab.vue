@@ -22,6 +22,10 @@ watch(() => props.project, reload, { immediate: true });
 const WRITE_ROLES = ["EGC Project Manager", "EGC Project Engineer", "EGC Document Controller", "System Manager"];
 const can_write = computed(() => (frappe.user_roles || []).some((role) => WRITE_ROLES.includes(role)));
 
+const submittals_empty_state_description = __(
+	"A Submittal is a formal review/approval process for a document revision — not every document needs one, only those requiring stakeholder sign-off (shop drawings, method statements, and the like). Start one here, or from a document's own page via Submit for Review."
+);
+
 const selected_submittal = ref(null);
 function open_detail(name) {
 	selected_submittal.value = name;
@@ -132,7 +136,7 @@ function days_overdue(row) {
 		<EmptyState
 			v-else-if="!(data || []).length"
 			:title="__('No submittals yet')"
-			:description="__('Submittals track review cycles for controlled documents on this project.')"
+			:description="submittals_empty_state_description"
 			:action-label="__('+ New Submittal')"
 			@action="open_create_dialog"
 		/>

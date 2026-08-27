@@ -222,7 +222,7 @@ def _refresh_documents(doc) -> None:
 
 
 def on_submission_submit(doc, method=None) -> None:
-	_engine_set_submission(doc.name, {"submission_status": c.SUBMISSION_SUBMITTED})
+	_engine_set_submission(doc.name, {"submission_status": c.SUBMISSION_SUBMITTED, "date_submitted": today()})
 	# Additive: a submission with no EGC Submittal Review Step rows has nothing for
 	# start_review() to do, so this is a no-op for every v1-style submission and the
 	# submission's own status stays Submitted, exactly as before this module grew steps.

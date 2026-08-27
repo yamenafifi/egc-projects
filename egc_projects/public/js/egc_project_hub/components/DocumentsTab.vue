@@ -17,6 +17,10 @@ const props = defineProps({
 const { data, loading, error, reload } = useHubResource(() => get_documents(props.project));
 watch(() => props.project, reload, { immediate: true });
 
+const documents_empty_state_description = __(
+	"Every controlled document on this project lives here — drawings and non-drawing documents alike. Not every document needs formal review; use Submit for Review on a document, or the Submittals tab, only for the ones that do."
+);
+
 const search = ref("");
 const document_type_filter = ref("");
 const discipline_filter = ref("");
@@ -127,9 +131,7 @@ function open_create_dialog() {
 		<EmptyState
 			v-else-if="!(data || []).length"
 			:title="__('No controlled documents yet')"
-			:description="
-				__('Every controlled document on this project lives here — drawings and non-drawing documents alike.')
-			"
+			:description="documents_empty_state_description"
 			:action-label="__('New Document')"
 			@action="open_create_dialog"
 		/>
