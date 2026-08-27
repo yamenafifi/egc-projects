@@ -81,8 +81,9 @@ export function get_my_open_items(project) {
 	return call_hub("get_my_open_items", { project });
 }
 
-// No save_project_info: Project Information is edited on the native `Project` form now
-// (custom_egc_* fields, see project_custom_fields.py), never through the Hub.
+// Read-only. The write side (save_project_profile/add_stakeholder/remove_stakeholder/
+// add_equipment_item/remove_equipment_item) lives in project_profile.py, not api/hub.py — see
+// components/project_profile_api.js.
 export function get_project_info(project) {
 	return call_hub("get_project_info", { project });
 }

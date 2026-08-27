@@ -1001,67 +1001,25 @@ def get_financial_transactions(project: str, metric: str) -> list[dict]:
 	return fn(project)
 
 
-# --- Project Information: get_project_info, read-only (ARCHITECTURE_V2.md §1) -----------------
+# --- Project Information: get_project_info (Level 0 §8) ----------------------------------------
 #
-# There is no `save_project_info` — this data is edited on the native `Project` form, the same
-# way egc_hr's Supervisors/Project Location fields already are. This endpoint exists only to
-# give the Hub's own read-side (a curated summary view, not a duplicate edit form) a single call
-# instead of one `frappe.db.get_value` per field.
-
-#: External name -> the actual `custom_egc_*` fieldname on `Project`. Keeps the Hub-facing
-#: contract stable and free of Frappe's custom-field naming convention, and is the one place
-#: that would need editing if a field were ever renamed on `Project` itself.
-_PROFILE_FIELD_MAP = {
-	"project_code": "custom_egc_project_code",
-	"project_stage": "custom_egc_project_stage",
-	"sector": "custom_egc_sector",
-	"delivery_method": "custom_egc_delivery_method",
-	"contract_type": "custom_egc_contract_type",
-	"project_description": "custom_egc_project_description",
-	"project_image": "custom_egc_project_image",
-	"country": "custom_egc_country",
-	"region": "custom_egc_region",
-	"city": "custom_egc_city",
-	"address": "custom_egc_address",
-	"time_zone": "custom_egc_time_zone",
-	"site_contact_name": "custom_egc_site_contact_name",
-	"site_contact_phone": "custom_egc_site_contact_phone",
-	"site_contact_email": "custom_egc_site_contact_email",
-	"contract_date": "custom_egc_contract_date",
-	"forecast_completion_date": "custom_egc_forecast_completion_date",
-	"warranty_start_date": "custom_egc_warranty_start_date",
-	"dlp_end_date": "custom_egc_dlp_end_date",
-}
-
-_STAKEHOLDER_ROW_FIELDS = ("role", "party_name", "organization", "user", "contact", "email", "phone", "is_primary")
-_EQUIPMENT_ROW_FIELDS = (
-	"facility",
-	"department",
-	"modality",
-	"wbs_node",
-	"equipment_manufacturer",
-	"equipment_model",
-	"oem_reference",
-	"equipment_delivery_target",
-	"room_ready_target",
-	"oem_installation_target",
-	"commissioning_target",
-	"notes",
-)
+# Read-side only — `save_project_profile`/`add_stakeholder`/`remove_stakeholder`/
+# `add_equipment_item`/`remove_equipment_item` (the write side) live in `project_profile.py`
+# alongside the field maps they share with this function, not here.
 
 
 @frappe.whitelist()
 def get_project_info(project: str) -> dict:
 	validators.require_project_permission(project)
 
-	raw = frappe.db.get_value("Project", project, list(_PROFILE_FIELD_MAP.values()), as_dict=True)
-	data = {external: raw[internal] for external, internal in _PROFILE_FIELD_MAP.items()}
+	raw = frappe.db.get_value("Project", project, list(project_profile.PROFILE_FIELD_MAP.values()), as_dict=True)
+	data = {external: raw[internal] for external, internal in project_profile.PROFILE_FIELD_MAP.items()}
 	data["project"] = project
 	data["stakeholders"] = project_profile.get_stakeholders(project)
 	data["equipment_items"] = frappe.get_all(
 		"EGC Project Equipment Item",
 		filters={"parent": project, "parenttype": "Project"},
-		fields=list(_EQUIPMENT_ROW_FIELDS),
+		fields=["name", *project_profile.EQUIPMENT_ROW_FIELDS],
 		order_by="idx asc",
 	)
 	return data

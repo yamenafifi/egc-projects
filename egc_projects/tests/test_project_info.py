@@ -1,14 +1,16 @@
 # Copyright (c) 2026, EGC and contributors
 # For license information, please see license.txt
 
-"""Tests for Project Information (ARCHITECTURE_V2.md §1/§2/§3): `custom_egc_*` fields on the
-core `Project` doctype (see `project_custom_fields.py`), `project_profile.py`'s stable
-`resolve_role_user`/`get_stakeholders` contract, and `api/hub.py`'s `get_project_info` /
-extended `get_project_context`.
+"""Tests for Project Information (ARCHITECTURE_V2.md §1/§2/§3; Level 0 §8): `custom_egc_*`
+fields on the core `Project` doctype (see `project_custom_fields.py`), `project_profile.py`'s
+stable `resolve_role_user`/`get_stakeholders` contract plus its write-side
+(`save_project_profile`/`add_stakeholder`/`remove_stakeholder`/`add_equipment_item`/
+`remove_equipment_item`), and `api/hub.py`'s `get_project_info` / extended `get_project_context`.
 
-There is no `save_project_info` — this data is edited on the native `Project` form now, not
-through the Hub, so every fixture here writes directly to `Project` via `frappe.get_doc(...)
-.save()`, exactly as a user editing the native form would.
+Read-side fixtures still write directly to `Project` via `frappe.get_doc(...).save()` — that
+stays a valid way to set this data (the native form isn't disabled), it's just no longer the only
+one. The write-side tests below go through `project_profile.py`'s own whitelisted functions
+instead, since those are what the Hub itself now calls.
 
 Fixture style matches `test_hub_api.py`: one shared set of masters in `setUpClass`, one
 dedicated `Project` per test in `setUp`. EGC roles are additive and grant nothing on core
@@ -246,6 +248,95 @@ class TestProjectInfo(IntegrationTestCase):
 		direct = project_profile.get_stakeholders(self.project)
 		self.assertEqual(len(direct), 2)
 		self.assertEqual({row.role for row in direct}, {self.role_pm, self.role_client})
+
+	# -- 7. save_project_profile (Level 0 §8: routine edits now go through the Hub) -------------
+
+	def test_save_project_profile_writes_the_scalar_fields(self):
+		frappe.set_user(self.manager_user)
+		project_profile.save_project_profile(
+			self.project, {"project_code": "PC-HUB", "sector": "Healthcare", "delivery_method": "EPC"}
+		)
+
+		result = hub.get_project_info(self.project)
+		self.assertEqual(result["project_code"], "PC-HUB")
+		self.assertEqual(result["sector"], "Healthcare")
+		self.assertEqual(result["delivery_method"], "EPC")
+
+	def test_save_project_profile_ignores_unknown_keys(self):
+		# Only PROFILE_FIELD_MAP's own external names are honoured — an unrelated key in the
+		# payload must not reach `doc.set()` at all, let alone touch a core Project field.
+		frappe.set_user(self.manager_user)
+		project_profile.save_project_profile(self.project, {"project_code": "PC-SAFE", "status": "Cancelled"})
+
+		self.assertEqual(frappe.db.get_value("Project", self.project, "status"), "Open")
+
+	# -- 8. add_stakeholder / remove_stakeholder --------------------------------------------------
+
+	def test_add_stakeholder_round_trips(self):
+		frappe.set_user(self.manager_user)
+		row_name = project_profile.add_stakeholder(
+			self.project, {"role": self.role_client, "party_name": "Acme Client"}
+		)
+
+		stakeholders = project_profile.get_stakeholders(self.project)
+		self.assertEqual(len(stakeholders), 1)
+		self.assertEqual(stakeholders[0]["name"], row_name)
+		self.assertEqual(stakeholders[0]["party_name"], "Acme Client")
+
+	def test_add_stakeholder_via_person_fetches_display_fields(self):
+		org = "EGC-PI-Test-Org"
+		if not frappe.db.exists("EGC Organization", org):
+			frappe.get_doc({"doctype": "EGC Organization", "organization_name": org}).insert(ignore_permissions=True)
+		person = frappe.get_doc(
+			{"doctype": "EGC Person", "full_name": "Directory Person", "organization": org, "email": "dp@example.com"}
+		)
+		person.insert(ignore_permissions=True)
+
+		frappe.set_user(self.manager_user)
+		project_profile.add_stakeholder(self.project, {"role": self.role_pm, "person": person.name})
+
+		stakeholders = project_profile.get_stakeholders(self.project)
+		self.assertEqual(stakeholders[0]["party_name"], "Directory Person")
+		self.assertEqual(stakeholders[0]["organization"], org)
+		self.assertEqual(stakeholders[0]["email"], "dp@example.com")
+
+	def test_remove_stakeholder(self):
+		frappe.set_user(self.manager_user)
+		row_name = project_profile.add_stakeholder(
+			self.project, {"role": self.role_pm, "party_name": "Jane PM"}
+		)
+		project_profile.remove_stakeholder(self.project, row_name)
+
+		self.assertEqual(project_profile.get_stakeholders(self.project), [])
+
+	# -- 9. add_equipment_item / remove_equipment_item --------------------------------------------
+
+	def test_add_equipment_item_round_trips(self):
+		frappe.set_user(self.manager_user)
+		row_name = project_profile.add_equipment_item(
+			self.project, {"facility": "Radiology", "equipment_model": "Model-X"}
+		)
+
+		result = hub.get_project_info(self.project)
+		self.assertEqual(len(result["equipment_items"]), 1)
+		self.assertEqual(result["equipment_items"][0]["name"], row_name)
+		self.assertEqual(result["equipment_items"][0]["facility"], "Radiology")
+
+	def test_add_equipment_item_cross_project_wbs_node_rejected(self):
+		other_project = _make_project(self.company)
+		other_wbs = _make_wbs_node(other_project, "EQ-HUB-X")
+
+		frappe.set_user(self.manager_user)
+		with self.assertRaises(frappe.ValidationError):
+			project_profile.add_equipment_item(self.project, {"facility": "Radiology", "wbs_node": other_wbs})
+
+	def test_remove_equipment_item(self):
+		frappe.set_user(self.manager_user)
+		row_name = project_profile.add_equipment_item(self.project, {"facility": "Radiology"})
+		project_profile.remove_equipment_item(self.project, row_name)
+
+		result = hub.get_project_info(self.project)
+		self.assertEqual(result["equipment_items"], [])
 
 
 def _get_or_create_stakeholder_role(role_name, is_egc_internal=0):
