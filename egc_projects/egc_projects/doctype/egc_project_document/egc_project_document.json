@@ -14,6 +14,7 @@
 		"document_type",
 		"section_break_classification",
 		"discipline",
+		"originator_person",
 		"originator",
 		"column_break_2",
 		"wbs_node",
@@ -86,9 +87,17 @@
 			"options": "EGC Discipline"
 		},
 		{
+			"fieldname": "originator_person",
+			"fieldtype": "Link",
+			"label": "Originator (Person)",
+			"options": "EGC Person",
+			"description": "The normal path (Level 1 §30/§33) — picks a Project Directory entry and keeps Originator mirroring it. Leave blank and fill Originator directly only for a one-off party that genuinely isn't in the Directory yet."
+		},
+		{
 			"fieldname": "originator",
 			"fieldtype": "Data",
-			"label": "Originator"
+			"label": "Originator",
+			"read_only_depends_on": "eval:doc.originator_person"
 		},
 		{
 			"fieldname": "column_break_2",

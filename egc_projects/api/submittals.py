@@ -112,7 +112,8 @@ def submit_submission(submission: str) -> dict:
 # --- create_submittal ("+ New Submittal" from the Hub) ----------------------------------------
 
 _CREATE_FIELDS = ("submittal_number", "title", "submittal_type", "discipline", "wbs_node", "description",
-	"responsible_party", "received_from", "submittal_manager", "specification_section")
+	"responsible_organization", "responsible_party", "received_from_person", "received_from",
+	"submittal_manager", "specification_section")
 
 
 @frappe.whitelist()
@@ -141,7 +142,9 @@ _SUBMITTAL_FIELDS = (
 	"discipline",
 	"wbs_node",
 	"description",
+	"responsible_organization",
 	"responsible_party",
+	"received_from_person",
 	"received_from",
 	"submittal_manager",
 	"specification_section",

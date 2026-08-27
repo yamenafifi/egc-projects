@@ -18,7 +18,9 @@
   "wbs_node",
   "description",
   "section_break_parties",
+  "responsible_organization",
   "responsible_party",
+  "received_from_person",
   "received_from",
   "submittal_manager",
   "specification_section",
@@ -163,14 +165,30 @@
    "label": "Parties"
   },
   {
+   "fieldname": "responsible_organization",
+   "fieldtype": "Link",
+   "label": "Responsible Organization",
+   "options": "EGC Organization",
+   "description": "The normal path (Level 1 §30) — picks a Project Directory entry and keeps Responsible Party mirroring it. Leave blank and fill Responsible Party directly only for a one-off party that genuinely isn't in the Directory yet."
+  },
+  {
    "fieldname": "responsible_party",
    "fieldtype": "Data",
-   "label": "Responsible Party"
+   "label": "Responsible Party",
+   "read_only_depends_on": "eval:doc.responsible_organization"
+  },
+  {
+   "fieldname": "received_from_person",
+   "fieldtype": "Link",
+   "label": "Received From (Person)",
+   "options": "EGC Person",
+   "description": "The normal path — picks a Project Directory entry and keeps Received From mirroring it. Leave blank and fill Received From directly only for a one-off party that genuinely isn't in the Directory yet."
   },
   {
    "fieldname": "received_from",
    "fieldtype": "Data",
-   "label": "Received From"
+   "label": "Received From",
+   "read_only_depends_on": "eval:doc.received_from_person"
   },
   {
    "fieldname": "submittal_manager",

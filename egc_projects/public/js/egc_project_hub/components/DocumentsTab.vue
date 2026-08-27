@@ -81,6 +81,13 @@ function open_create_dialog() {
 				reqd: 1,
 			},
 			{ fieldname: "discipline", fieldtype: "Link", label: __("Discipline"), options: "EGC Discipline" },
+			{
+				fieldname: "originator_person",
+				fieldtype: "Link",
+				label: __("Originator (Person)"),
+				options: "EGC Person",
+				description: __("Pick a Project Directory entry, or leave blank and type a one-off party below."),
+			},
 			{ fieldname: "originator", fieldtype: "Data", label: __("Originator") },
 			{
 				fieldname: "wbs_node",

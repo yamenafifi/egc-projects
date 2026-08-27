@@ -24,6 +24,10 @@ class EGCSubmittal(Document):
 		discipline: DF.Link | None
 		last_response_date: DF.Date | None
 		project: DF.Link
+		received_from: DF.Data | None
+		received_from_person: DF.Link | None
+		responsible_organization: DF.Link | None
+		responsible_party: DF.Data | None
 		submission_history_html: DF.HTML | None
 		submittal_number: DF.Data
 		submittal_status: DF.Literal[
@@ -43,6 +47,19 @@ class EGCSubmittal(Document):
 	def validate(self):
 		validators.validate_unique_in_project(self, "submittal_number", _("Submittal"))
 		validators.validate_same_project(self, "wbs_node", "EGC WBS Node", _("WBS Node"))
+		self.fetch_from_directory()
+
+	def fetch_from_directory(self):
+		"""Level 1 §30: once a Directory reference is set, the matching free-text field always
+		mirrors it — same discipline as `EGCProjectStakeholder.fetch_from_person`. The free-text
+		field stays directly editable only when no Directory reference is linked (a genuine
+		one-off party not worth adding to the Directory)."""
+		if self.responsible_organization:
+			self.responsible_party = frappe.db.get_value(
+				"EGC Organization", self.responsible_organization, "organization_name"
+			)
+		if self.received_from_person:
+			self.received_from = frappe.db.get_value("EGC Person", self.received_from_person, "full_name")
 
 
 @frappe.whitelist()

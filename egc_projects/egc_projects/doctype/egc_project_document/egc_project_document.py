@@ -38,6 +38,7 @@ class EGCProjectDocument(Document):
 		drawing_date: DF.Date | None
 		drawing_set: DF.Link | None
 		originator: DF.Data | None
+		originator_person: DF.Link | None
 		project: DF.Link
 		received_date: DF.Date | None
 		revision_history_html: DF.HTML | None
@@ -50,6 +51,14 @@ class EGCProjectDocument(Document):
 		validators.validate_same_project(self, "wbs_node", "EGC WBS Node", _("WBS Node"))
 		validators.validate_same_project(self, "drawing_set", "EGC Drawing Set", _("Drawing Set"))
 		validators.validate_same_project(self, "drawing_area", "EGC Drawing Area", _("Drawing Area"))
+		self.fetch_from_directory()
+
+	def fetch_from_directory(self):
+		"""Level 1 §30/§33: once `originator_person` is set, Originator always mirrors it — same
+		discipline as `EGCProjectStakeholder.fetch_from_person` and `EGCSubmittal.fetch_from_
+		directory`. Stays directly editable only when no Directory reference is linked."""
+		if self.originator_person:
+			self.originator = frappe.db.get_value("EGC Person", self.originator_person, "full_name")
 
 
 @frappe.whitelist()
