@@ -12,6 +12,14 @@ in Z was CHANGE orders" — by partitioning the SAME set of submitted Sales Orde
 
 Y + Z always equals X by construction, since every submitted Sales Order falls into exactly one
 side of that partition — there is no separate running total to drift out of sync.
+
+FROZEN (Level 1 §37): this is a deliberately simple wrapper around an existing Sales Order, not
+the app's real commercial architecture. Do not expand it — no new fields, no new workflow states,
+no growing it toward what a proper Change Order actually needs (cost impact review, schedule
+impact, client vs. vendor/subcontract distinction, a Change Event that PRECEDES approval rather
+than wrapping an already-submitted Sales Order). That design is Level 5's job (§60: Change Event
+→ Evaluation → Proposal → Client Change Order, and separately Vendor/Subcontract Change Order).
+Bug fixes and safe migrations are fine here; new commercial capability is not.
 """
 
 from __future__ import annotations

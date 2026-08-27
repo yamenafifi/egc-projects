@@ -14,6 +14,11 @@ wrapped by a submitted Change Order; Change Orders is every submitted Sales Orde
 sides read `Sales Order.base_net_total` directly — the exact figure core's own
 `Project.update_sales_amount()` sums into `total_sales_amount` — so the two halves always add up
 to the project's existing headline contract value with no second source of truth.
+
+FROZEN (Level 1 §37) — see `api/change_orders.py`'s own module docstring. This doctype is a
+deliberately simple approval wrapper, not the app's real commercial architecture; it isn't the
+foundation to build cost/schedule impact, Change Events, or the client-vs-vendor distinction on
+top of. That design belongs to Level 5 (§60).
 """
 
 from __future__ import annotations
