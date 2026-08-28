@@ -5,7 +5,7 @@ Every rollup figure comes from the parent's already-fetched `get_wbs_summary` ma
 component never fetches its own data. It only ever DISPLAYS a number; nothing here computes or
 stores one, matching api/wbs.py's own "derive, don't store" rule. -->
 <script setup>
-import { ref, computed } from "vue";
+import { ref, computed, onMounted, onBeforeUnmount } from "vue";
 import StatusPill from "./StatusPill.vue";
 
 const props = defineProps({
@@ -32,6 +32,30 @@ function open_form() {
 function format_date(value) {
 	return value ? frappe.datetime.str_to_user(value) : "—";
 }
+
+// -- row actions: one "⋯" menu instead of four cramped icon-only buttons — a row here already
+// carries name, discipline, two rollup metrics, a progress bar and a status pill; four more
+// unlabeled targets was too dense to be legible. -------------------------------------------------
+
+const menu_open = ref(null);
+const menu_container = ref(null);
+
+function toggle_menu() {
+	menu_open.value = !menu_open.value;
+}
+
+function run(action) {
+	menu_open.value = false;
+	action();
+}
+
+function on_document_click(e) {
+	if (menu_open.value && menu_container.value && !menu_container.value.contains(e.target)) {
+		menu_open.value = false;
+	}
+}
+onMounted(() => document.addEventListener("click", on_document_click));
+onBeforeUnmount(() => document.removeEventListener("click", on_document_click));
 </script>
 
 <template>
@@ -48,8 +72,8 @@ function format_date(value) {
 			<span class="wbs-node__name">{{ node.wbs_name }}</span>
 			<span class="wbs-node__discipline">{{ node.discipline || "—" }}</span>
 
-			<span v-if="summary" class="wbs-node__metric" :title="__('Activities')">
-				{{ summary.activity_completed }}/{{ summary.activity_total }}
+			<span v-if="summary" class="wbs-node__metric">
+				{{ __("{0}/{1} activities", [summary.activity_completed, summary.activity_total]) }}
 			</span>
 			<span v-if="summary && summary.activity_total" class="wbs-node__progress">
 				<span class="wbs-node__progress-track">
@@ -57,15 +81,11 @@ function format_date(value) {
 				</span>
 			</span>
 			<span v-else class="wbs-node__progress" />
-			<span v-if="summary && summary.activity_overdue_count" class="wbs-node__overdue" :title="__('Overdue activities')">
-				{{ summary.activity_overdue_count }} {{ __("overdue") }}
+			<span v-if="summary && summary.activity_overdue_count" class="wbs-node__overdue">
+				{{ __("{0} overdue", [summary.activity_overdue_count]) }}
 			</span>
-			<span
-				v-if="summary"
-				class="wbs-node__metric"
-				:title="__('{0} documents ({1} drawings) · {2} open submittals', [summary.document_count, summary.drawing_count, summary.submittal_open_count])"
-			>
-				{{ summary.document_count }}📄 {{ summary.submittal_open_count }}📝
+			<span v-if="summary" class="wbs-node__metric">
+				{{ __("{0} docs · {1} open submittals", [summary.document_count, summary.submittal_open_count]) }}
 			</span>
 			<span v-if="summary && (summary.planned_start || summary.planned_finish)" class="wbs-node__dates">
 				{{ format_date(summary.planned_start) }} – {{ format_date(summary.planned_finish) }}
@@ -73,36 +93,34 @@ function format_date(value) {
 
 			<StatusPill :status="node.status" />
 
-			<span v-if="canWrite" class="wbs-node__actions">
-				<button
-					type="button"
-					class="wbs-node__action-btn"
-					:disabled="siblingIndex === 0"
-					:title="__('Move up')"
-					@click.stop="emit('move', node, -1)"
-				>
-					↑
+			<span v-if="canWrite" ref="menu_container" class="wbs-node__menu">
+				<button type="button" class="wbs-node__menu-trigger" :title="__('Actions')" @click.stop="toggle_menu">
+					⋯
 				</button>
-				<button
-					type="button"
-					class="wbs-node__action-btn"
-					:disabled="siblingIndex === siblingCount - 1"
-					:title="__('Move down')"
-					@click.stop="emit('move', node, 1)"
-				>
-					↓
-				</button>
-				<button type="button" class="wbs-node__action-btn" :title="__('Edit')" @click.stop="emit('edit', node)">
-					✎
-				</button>
-				<button
-					type="button"
-					class="wbs-node__action-btn"
-					:title="__('Add child')"
-					@click.stop="emit('quick-add', node)"
-				>
-					+
-				</button>
+				<div v-if="menu_open" class="wbs-node__menu-dropdown" role="menu">
+					<button type="button" role="menuitem" @click.stop="run(() => emit('edit', node))">
+						{{ __("Edit") }}
+					</button>
+					<button type="button" role="menuitem" @click.stop="run(() => emit('quick-add', node))">
+						{{ __("Add Child") }}
+					</button>
+					<button
+						type="button"
+						role="menuitem"
+						:disabled="siblingIndex === 0"
+						@click.stop="run(() => emit('move', node, -1))"
+					>
+						{{ __("Move Up") }}
+					</button>
+					<button
+						type="button"
+						role="menuitem"
+						:disabled="siblingIndex === siblingCount - 1"
+						@click.stop="run(() => emit('move', node, 1))"
+					>
+						{{ __("Move Down") }}
+					</button>
+				</div>
 			</span>
 		</div>
 		<div v-if="has_children && expanded" class="wbs-node__children">
@@ -218,13 +236,12 @@ function format_date(value) {
 	white-space: nowrap;
 }
 
-.wbs-node__actions {
+.wbs-node__menu {
+	position: relative;
 	flex: 0 0 auto;
-	display: flex;
-	gap: 2px;
 }
 
-.wbs-node__action-btn {
+.wbs-node__menu-trigger {
 	appearance: none;
 	border: 1px solid var(--border-color);
 	border-radius: var(--border-radius);
@@ -233,16 +250,47 @@ function format_date(value) {
 	width: 22px;
 	height: 22px;
 	line-height: 1;
-	font-size: 11px;
+	font-size: 13px;
 	cursor: pointer;
 }
 
-.wbs-node__action-btn:hover:not(:disabled) {
+.wbs-node__menu-trigger:hover {
 	color: var(--text-color);
 	background: var(--control-bg);
 }
 
-.wbs-node__action-btn:disabled {
+.wbs-node__menu-dropdown {
+	position: absolute;
+	top: calc(100% + 4px);
+	right: 0;
+	z-index: 10;
+	min-width: 130px;
+	display: flex;
+	flex-direction: column;
+	border: 1px solid var(--border-color);
+	border-radius: var(--border-radius-lg);
+	background: var(--fg-color);
+	box-shadow: var(--shadow-lg, 0 4px 16px rgba(0, 0, 0, 0.12));
+	padding: 4px;
+}
+
+.wbs-node__menu-dropdown button {
+	appearance: none;
+	background: none;
+	border: none;
+	text-align: left;
+	padding: 6px 10px;
+	font-size: var(--text-sm);
+	color: var(--text-color);
+	border-radius: var(--border-radius);
+	cursor: pointer;
+}
+
+.wbs-node__menu-dropdown button:hover:not(:disabled) {
+	background: var(--control-bg);
+}
+
+.wbs-node__menu-dropdown button:disabled {
 	opacity: 0.35;
 	cursor: default;
 }

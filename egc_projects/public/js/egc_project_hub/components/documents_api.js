@@ -49,6 +49,10 @@ export function get_document_detail(document) {
 	return call_documents("get_document_detail", { document });
 }
 
+export function get_drawing_document_types() {
+	return call_documents("get_drawing_document_types", {});
+}
+
 export function create_document(args) {
 	return call_documents("create_document", args);
 }

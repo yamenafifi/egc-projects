@@ -64,6 +64,11 @@ _DOCUMENT_LIST_FIELDS = (
 	"originator",
 	"current_revision_date",
 	"current_file",
+	# Drawing-only fields — meaningless on a non-drawing document, but harmless to always fetch;
+	# lets the Hub's "Drawings only" toggle filter without a second round trip. See
+	# get_drawing_document_types() below for what actually counts as a drawing.
+	"drawing_set",
+	"drawing_area",
 )
 
 
@@ -86,6 +91,17 @@ def get_documents(project: str, filters=None) -> list[dict]:
 		fields=list(_DOCUMENT_LIST_FIELDS),
 		order_by="document_number asc",
 	)
+
+
+@frappe.whitelist()
+def get_drawing_document_types() -> list[str]:
+	"""Every `EGC Document Type` flagged as a drawing type — what the Hub's Documents tab uses
+	for its "Drawings only" filter (a Drawing is not a separate record, just a Document whose
+	type is flagged this way). Reuses `api/hub.py`'s own definition rather than a second one, so
+	the two can never drift apart."""
+	from egc_projects.api.hub import get_drawing_document_types as _get_drawing_document_types
+
+	return _get_drawing_document_types()
 
 
 # --- get_document_detail -------------------------------------------------------------------------

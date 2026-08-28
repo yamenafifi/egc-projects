@@ -23,11 +23,48 @@ const { data: open_items, loading: open_items_loading, reload: reload_open_items
 watch(() => props.project, reload, { immediate: true });
 watch(() => props.project, reload_open_items, { immediate: true });
 
+// Label says "Drawings", not "Documents" — the backend signal behind this key
+// (_drawings_health in api/hub.py) only ever looks at drawings' review due dates, not every
+// controlled document, so a label matching what it actually measures beats a generic one that
+// implies more than it delivers.
 const HEALTH_LABELS = {
 	schedule: __("Schedule"),
 	submittals: __("Submittals"),
-	documents: __("Documents"),
+	documents: __("Drawings"),
 	financials: __("Financials"),
+};
+
+// What each color means, PER dimension — colors aren't a shared scale across dimensions (e.g.
+// Financials only ever shows green/red, never orange), so a generic "red = bad" legend would be
+// wrong for at least one of these. Mirrors the exact rules in api/hub.py's _schedule_health /
+// _submittals_health / _drawings_health / _financials_health.
+const HEALTH_TOOLTIPS = {
+	schedule: {
+		green: __("No overdue activities."),
+		orange: __("Activities are overdue, but were updated in the last 14 days."),
+		red: __("Activities are overdue and haven't been updated in over 14 days."),
+	},
+	submittals: {
+		green: __("Nothing overdue or awaiting resubmission."),
+		orange: __("At least one submittal needs resubmission (Rejected or Revise & Resubmit)."),
+		red: __("At least one submittal is past its due date and still open."),
+	},
+	documents: {
+		green: __("No drawings under review are past their due date."),
+		orange: __("At least one drawing under review is past its due date."),
+		red: __("At least one drawing under review is past its due date."),
+	},
+	financials: {
+		green: __("Gross margin is not negative (or not yet tracked)."),
+		red: __("Gross margin is negative."),
+	},
+};
+
+const HEALTH_TARGET_TAB = {
+	schedule: "activities",
+	submittals: "submittals",
+	documents: "documents",
+	financials: "financials",
 };
 
 const health_entries = computed(() => {
@@ -36,8 +73,15 @@ const health_entries = computed(() => {
 		key,
 		label: HEALTH_LABELS[key] || key,
 		color,
+		tooltip: (HEALTH_TOOLTIPS[key] || {})[color] || "",
 	}));
 });
+
+function goto_health(key) {
+	if (key === "schedule") return goto_overdue("activities");
+	if (key === "submittals") return goto_overdue("submittals");
+	setTab(HEALTH_TARGET_TAB[key] || key);
+}
 
 function open_item(item) {
 	frappe.set_route("Form", item.doctype, item.name);
@@ -55,7 +99,7 @@ function goto_overdue(section) {
 
 function goto_approved_drawings() {
 	drawingsIntent.approvalStatus = "Approved";
-	setTab("drawings");
+	setTab("documents");
 }
 
 function open_route(doctype, name) {
@@ -115,10 +159,17 @@ const recent_entries = computed(() => {
 			<div v-if="health_entries.length" class="hub-card hub-health">
 				<div class="hub-card__title">{{ __("Project Health") }}</div>
 				<div class="hub-health__row">
-					<div v-for="entry in health_entries" :key="entry.key" class="hub-health__item">
+					<button
+						v-for="entry in health_entries"
+						:key="entry.key"
+						type="button"
+						class="hub-health__item"
+						:title="entry.tooltip"
+						@click="goto_health(entry.key)"
+					>
 						<span class="hub-health__dot" :class="`hub-health__dot--${entry.color}`"></span>
 						<span class="hub-health__label">{{ entry.label }}</span>
-					</div>
+					</button>
 				</div>
 			</div>
 
@@ -269,9 +320,20 @@ const recent_entries = computed(() => {
 }
 
 .hub-health__item {
+	appearance: none;
+	border: none;
+	background: none;
+	padding: 4px 6px;
+	margin: -4px -6px;
+	border-radius: var(--border-radius);
 	display: flex;
 	align-items: center;
 	gap: 6px;
+	cursor: pointer;
+}
+
+.hub-health__item:hover {
+	background: var(--control-bg);
 }
 
 .hub-health__dot {

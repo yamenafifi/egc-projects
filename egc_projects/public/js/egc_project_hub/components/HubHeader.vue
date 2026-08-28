@@ -2,7 +2,6 @@
      Project identity (name/status/progress) and navigation (project switcher, Toolbox) both live
      in HubTopBar.vue now; this row is purely "what tool am I in, what can I do with it." -->
 <script setup>
-import QuickActions from "./QuickActions.vue";
 import { useHubRoute } from "../composables/useHubRoute";
 
 defineProps({
@@ -26,7 +25,6 @@ function goto_project_info() {
 			<button type="button" class="btn btn-sm btn-default" @click="goto_project_info">
 				{{ __("Project Details") }}
 			</button>
-			<QuickActions v-if="context" />
 		</div>
 	</div>
 </template>

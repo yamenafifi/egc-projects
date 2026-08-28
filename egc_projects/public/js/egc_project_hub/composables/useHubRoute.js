@@ -8,16 +8,13 @@ import { reactive, readonly } from "vue";
 // "documents" (Documents register) and "project-info" (Project Information) were added in
 // WP-11 alongside the WP-10/WP-09 packages that own their tab content. Order here drives
 // HubTopBar's Toolbox menu order via EgcProjectHub.vue's tab_defs.
-export const TABS = [
-	"overview",
-	"wbs",
-	"activities",
-	"submittals",
-	"documents",
-	"drawings",
-	"financials",
-	"project-info",
-];
+//
+// "drawings" was removed as a separate tab — a Drawing is just an EGC Project Document whose
+// Document Type has is_drawing=1, not a distinct record type, so it never needed a second
+// register with its own parallel create-dialog and filter bar. DocumentsTab.vue's "Drawings
+// only" toggle covers the same ground now; a bare "drawings" tab in an old bookmark/localStorage
+// falls through to DEFAULT_TAB via the TABS.includes() guard in read_route() below.
+export const TABS = ["overview", "wbs", "activities", "submittals", "documents", "financials", "project-info"];
 const DEFAULT_TAB = TABS[0];
 const STORAGE_KEY = "egc_project_hub:last_project";
 

@@ -151,6 +151,23 @@ class TestDocumentsAPI(IntegrationTestCase):
 		self.assertEqual(by_number["DA-DRW-001"].document_type, self.drawing_type)
 		self.assertEqual(by_number["DA-MS-001"].document_type, self.document_type)
 
+	def test_get_documents_includes_drawing_set_and_area_fields(self):
+		"""Drawings folded into this same register (no more separate Drawings tab) — the fields
+		its Set/Area filters need must come back on the one shared list call."""
+		doc = self._make_document("DA-DRW-002", document_type=self.drawing_type, title="A Drawing With Set/Area")
+		rows = documents.get_documents(self.project)
+		row = next(r for r in rows if r.document == doc.name)
+		self.assertIn("drawing_set", row)
+		self.assertIn("drawing_area", row)
+
+	def test_get_drawing_document_types_matches_hub_definition(self):
+		"""The Documents tab's "Drawings only" toggle must use the exact same definition of
+		"drawing" as everywhere else (health checks, the Drawing Register report) — one source of
+		truth, not a second copy that could drift."""
+		types = documents.get_drawing_document_types()
+		self.assertIn(self.drawing_type, types)
+		self.assertNotIn(self.document_type, types)
+
 	def test_get_documents_reflects_current_revision_and_status(self):
 		doc = self._make_document("DA-002")
 		self._make_issued_revision(doc.name, "00")

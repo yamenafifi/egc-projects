@@ -1,8 +1,8 @@
 <script setup>
 import { computed, ref, watch, onMounted } from "vue";
-import { get_documents, create_document } from "./documents_api";
+import { get_documents, create_document, get_drawing_document_types } from "./documents_api";
 import { useHubResource } from "../composables/useHubResource";
-import { consumeCreateIntent } from "../composables/useCreateIntent";
+import { consumeDrawingsApprovalIntent } from "../composables/useDrawingsIntent";
 import LoadingState from "./LoadingState.vue";
 import ErrorState from "./ErrorState.vue";
 import EmptyState from "./EmptyState.vue";
@@ -27,10 +27,28 @@ const discipline_filter = ref("");
 const document_status_filter = ref("");
 const approval_filter = ref("");
 
+// A Drawing isn't a separate record — it's an EGC Project Document whose Document Type is
+// flagged is_drawing=1 (see api/documents.py's get_drawing_document_types). This tab used to
+// have a twin, DrawingsTab.vue, that just pre-filtered the exact same list with its own parallel
+// toolbar and create dialog; folded in here as a toggle instead of a second tab.
+const drawing_types = ref([]);
+const drawings_only = ref(false);
+const set_filter = ref("");
+const area_filter = ref("");
+
 const selected_document = ref(null);
 
-onMounted(() => {
-	if (consumeCreateIntent("documents")) open_create_dialog();
+onMounted(async () => {
+	const approval_intent = consumeDrawingsApprovalIntent();
+	if (approval_intent) {
+		drawings_only.value = true;
+		approval_filter.value = approval_intent;
+	}
+	try {
+		drawing_types.value = await get_drawing_document_types();
+	} catch (e) {
+		// Non-fatal — the "Drawings only" toggle just has nothing to match against.
+	}
 });
 
 const document_types = computed(() =>
@@ -45,14 +63,23 @@ const document_statuses = computed(() =>
 const approval_statuses = computed(() =>
 	[...new Set((data.value || []).map((r) => r.approval_status).filter(Boolean))].sort()
 );
+const sets = computed(() => [...new Set((data.value || []).map((r) => r.drawing_set).filter(Boolean))].sort());
+const areas = computed(() => [...new Set((data.value || []).map((r) => r.drawing_area).filter(Boolean))].sort());
+
+function is_drawing(row) {
+	return drawing_types.value.includes(row.document_type);
+}
 
 const filtered = computed(() => {
 	const term = search.value.trim().toLowerCase();
 	return (data.value || []).filter((row) => {
+		if (drawings_only.value && !is_drawing(row)) return false;
 		if (document_type_filter.value && row.document_type !== document_type_filter.value) return false;
 		if (discipline_filter.value && row.discipline !== discipline_filter.value) return false;
 		if (document_status_filter.value && row.document_status !== document_status_filter.value) return false;
 		if (approval_filter.value && row.approval_status !== approval_filter.value) return false;
+		if (drawings_only.value && set_filter.value && row.drawing_set !== set_filter.value) return false;
+		if (drawings_only.value && area_filter.value && row.drawing_area !== area_filter.value) return false;
 		if (
 			term &&
 			![row.document_number, row.title, row.originator].some((value) =>
@@ -106,6 +133,29 @@ function open_create_dialog() {
 				get_query: () => ({ filters: { project: props.project } }),
 			},
 			{ fieldname: "description", fieldtype: "Small Text", label: __("Description") },
+			{
+				fieldtype: "Section Break",
+				label: __("Drawing Details (optional)"),
+				collapsible: 1,
+				description: __("Only meaningful if the Document Type above is a drawing type."),
+			},
+			{
+				fieldname: "drawing_set",
+				fieldtype: "Link",
+				label: __("Drawing Set"),
+				options: "EGC Drawing Set",
+				get_query: () => ({ filters: { project: props.project } }),
+			},
+			{
+				fieldname: "drawing_area",
+				fieldtype: "Link",
+				label: __("Drawing Area"),
+				options: "EGC Drawing Area",
+				get_query: () => ({ filters: { project: props.project } }),
+			},
+			{ fieldtype: "Column Break" },
+			{ fieldname: "drawing_date", fieldtype: "Date", label: __("Drawing Date") },
+			{ fieldname: "received_date", fieldtype: "Date", label: __("Received Date") },
 		],
 		primary_action_label: __("Create"),
 		primary_action(values) {
@@ -155,6 +205,20 @@ function open_create_dialog() {
 					<option value="">{{ __("All Approval Statuses") }}</option>
 					<option v-for="s in approval_statuses" :key="s" :value="s">{{ s }}</option>
 				</select>
+				<label class="hub-toolbar__check">
+					<input v-model="drawings_only" type="checkbox" />
+					{{ __("Drawings only") }}
+				</label>
+				<template v-if="drawings_only">
+					<select v-model="set_filter">
+						<option value="">{{ __("All Sets") }}</option>
+						<option v-for="s in sets" :key="s" :value="s">{{ s }}</option>
+					</select>
+					<select v-model="area_filter">
+						<option value="">{{ __("All Areas") }}</option>
+						<option v-for="a in areas" :key="a" :value="a">{{ a }}</option>
+					</select>
+				</template>
 				<button type="button" class="btn btn-sm btn-primary hub-documents__new" @click="open_create_dialog">
 					{{ __("+ New Document") }}
 				</button>
@@ -169,6 +233,10 @@ function open_create_dialog() {
 							<th>{{ __("Title") }}</th>
 							<th>{{ __("Document Type") }}</th>
 							<th>{{ __("Discipline") }}</th>
+							<template v-if="drawings_only">
+								<th>{{ __("Set") }}</th>
+								<th>{{ __("Area") }}</th>
+							</template>
 							<th>{{ __("Current Revision") }}</th>
 							<th>{{ __("Document Status") }}</th>
 							<th>{{ __("Approval Status") }}</th>
@@ -186,6 +254,10 @@ function open_create_dialog() {
 							<td class="hub-table__truncate" :title="row.title">{{ row.title }}</td>
 							<td>{{ row.document_type }}</td>
 							<td>{{ row.discipline || "—" }}</td>
+							<template v-if="drawings_only">
+								<td>{{ row.drawing_set || "—" }}</td>
+								<td>{{ row.drawing_area || "—" }}</td>
+							</template>
 							<td>{{ row.current_revision_label || "—" }}</td>
 							<td><StatusPill :status="row.document_status" /></td>
 							<td><StatusPill :status="row.approval_status" /></td>
@@ -208,5 +280,14 @@ function open_create_dialog() {
 <style scoped>
 .hub-documents__new {
 	margin-left: auto;
+}
+
+.hub-toolbar__check {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	font-size: var(--text-sm);
+	color: var(--text-color);
+	white-space: nowrap;
 }
 </style>
