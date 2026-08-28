@@ -152,6 +152,7 @@ def add_assignment(
 		}
 	)
 	doc.insert()
+	_refresh_ball_in_court_if_relevant(parent_doctype, parent_name)
 	return doc.name
 
 
@@ -159,4 +160,27 @@ def add_assignment(
 def remove_assignment(name: str) -> None:
 	doc = frappe.get_doc("EGC Assignment", name)
 	frappe.has_permission(doc.parent_doctype, "write", doc=doc.parent_name, throw=True)
+	parent_doctype, parent_name = doc.parent_doctype, doc.parent_name
 	frappe.delete_doc("EGC Assignment", name)
+	_refresh_ball_in_court_if_relevant(parent_doctype, parent_name)
+
+
+def _refresh_ball_in_court_if_relevant(parent_doctype: str, parent_name: str) -> None:
+	"""A Submittal's `ball_in_court` can fall back to its (or its linked Activity's) Responsible
+	assignee once EGC owes a resubmission (see `submittal_control._needs_egc_action_ball_in_court`)
+	— that fallback is only ever recomputed at specific review-lifecycle events, so adding or
+	removing the very assignment it reads must poke the same recompute, or "reassign it in Team"
+	would silently do nothing until the next unrelated engine event. One-directional import only
+	(submittal_control.py never imports this module), so no circular-import risk."""
+	from egc_projects.egc_projects import submittal_control
+
+	if parent_doctype == "EGC Submittal":
+		submittal_control.refresh_submittal_state(parent_name)
+	elif parent_doctype == "EGC Activity":
+		submittals = frappe.get_all(
+			"EGC Activity Link",
+			filters={"activity": parent_name, "link_doctype": "EGC Submittal"},
+			pluck="link_name",
+		)
+		for submittal in submittals:
+			submittal_control.refresh_submittal_state(submittal)

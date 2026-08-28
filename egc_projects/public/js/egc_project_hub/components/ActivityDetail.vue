@@ -39,6 +39,10 @@ function notify_changed() {
 	reload();
 }
 
+// "Expand" widens the drawer in place rather than navigating away — see SubmittalDetail.vue's
+// identical pattern for the reasoning. `open_form` stays as a small secondary escape hatch.
+const expanded = ref(false);
+
 function open_form() {
 	frappe.set_route("Form", "EGC Activity", props.activity);
 }
@@ -54,9 +58,11 @@ function open_edit_dialog() {
 		{ fieldname: "activity_name", fieldtype: "Data", label: __("Activity Name"), default: activity.activity_name, reqd: 1 },
 		{ fieldname: "wbs_node", fieldtype: "Link", label: __("WBS Node"), options: "EGC WBS Node", default: activity.wbs_node, get_query: () => ({ filters: { project: props.project } }) },
 		{ fieldname: "discipline", fieldtype: "Link", label: __("Discipline"), options: "EGC Discipline", default: activity.discipline },
+		{ fieldname: "description", fieldtype: "Small Text", label: __("Description"), default: activity.description },
 	];
 	if (!activity.is_group) {
 		fields.push(
+			{ fieldname: "weight_pct", fieldtype: "Percent", label: __("Weight %"), default: activity.weight_pct },
 			{ fieldname: "planned_start_date", fieldtype: "Date", label: __("Planned Start"), default: activity.planned_start_date },
 			{ fieldname: "planned_end_date", fieldtype: "Date", label: __("Planned Finish"), default: activity.planned_end_date },
 			{ fieldname: "forecast_start_date", fieldtype: "Date", label: __("Forecast Start"), default: activity.forecast_start_date },
@@ -304,7 +310,7 @@ function confirm_remove_dependency(name) {
 
 <template>
 	<div class="activity-detail__backdrop" @click.self="$emit('close')">
-		<div class="activity-detail__panel" role="dialog" aria-modal="true">
+		<div class="activity-detail__panel" :class="{ 'activity-detail__panel--expanded': expanded }" role="dialog" aria-modal="true">
 			<div class="activity-detail__header">
 				<div class="activity-detail__identity">
 					<div class="activity-detail__code">{{ data?.activity?.activity_code || activity }}</div>
@@ -312,7 +318,12 @@ function confirm_remove_dependency(name) {
 				</div>
 				<div class="activity-detail__header-actions">
 					<a v-if="canWrite && data" href="#" class="hub-link" @click.prevent="open_edit_dialog">{{ __("Edit") }}</a>
-					<a href="#" class="hub-link" @click.prevent="open_form">{{ __("Open Form") }}</a>
+					<a href="#" class="hub-link" @click.prevent="expanded = !expanded">
+						{{ expanded ? __("Collapse") : __("Expand") }}
+					</a>
+					<a v-if="expanded" href="#" class="hub-link hub-link--muted" @click.prevent="open_form">
+						{{ __("View raw record ↗") }}
+					</a>
 					<button type="button" class="activity-detail__close" :aria-label="__('Close')" @click="$emit('close')">
 						&times;
 					</button>
@@ -376,7 +387,12 @@ function confirm_remove_dependency(name) {
 								<dt>{{ __("Discipline") }}</dt>
 								<dd>{{ data.activity.discipline || "—" }}</dd>
 							</div>
+							<div v-if="!data.activity.is_group">
+								<dt>{{ __("Weight %") }}</dt>
+								<dd>{{ data.activity.weight_pct ? `${data.activity.weight_pct}%` : "—" }}</dd>
+							</div>
 						</dl>
+						<p v-if="data.activity.description" class="activity-detail__description">{{ data.activity.description }}</p>
 					</section>
 
 					<section class="activity-detail__section">
@@ -589,6 +605,23 @@ function confirm_remove_dependency(name) {
 	display: flex;
 	flex-direction: column;
 	overflow: hidden;
+	transition: width 0.15s ease;
+}
+
+.activity-detail__panel--expanded {
+	width: min(900px, 100vw);
+}
+
+.hub-link--muted {
+	color: var(--text-muted);
+	font-size: var(--text-xs);
+}
+
+.activity-detail__description {
+	font-size: var(--text-sm);
+	color: var(--text-color);
+	white-space: pre-wrap;
+	margin: 8px 0 0;
 }
 
 .activity-detail__header {

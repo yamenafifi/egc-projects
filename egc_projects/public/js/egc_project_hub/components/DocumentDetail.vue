@@ -22,6 +22,10 @@ const emit = defineEmits(["close", "changed"]);
 const { data, loading, error, reload } = useHubResource(() => get_document_detail(props.document));
 watch(() => props.document, reload, { immediate: true });
 
+// "Expand" widens the drawer in place rather than navigating away — see SubmittalDetail.vue's
+// identical pattern for the reasoning. `open_form` stays as a small secondary escape hatch.
+const expanded = ref(false);
+
 function open_form() {
 	frappe.set_route("Form", "EGC Project Document", props.document);
 }
@@ -238,14 +242,19 @@ function compare_rev(rev_name) {
 
 <template>
 	<div class="doc-detail__backdrop" @click.self="$emit('close')">
-		<div class="doc-detail__panel" role="dialog" aria-modal="true">
+		<div class="doc-detail__panel" :class="{ 'doc-detail__panel--expanded': expanded }" role="dialog" aria-modal="true">
 			<div class="doc-detail__header">
 				<div class="doc-detail__identity">
 					<div class="doc-detail__number">{{ data?.document?.document_number || document }}</div>
 					<div class="doc-detail__title">{{ data?.document?.title || "" }}</div>
 				</div>
 				<div class="doc-detail__header-actions">
-					<a href="#" class="hub-link" @click.prevent="open_form">{{ __("Open Form") }}</a>
+					<a href="#" class="hub-link" @click.prevent="expanded = !expanded">
+						{{ expanded ? __("Collapse") : __("Expand") }}
+					</a>
+					<a v-if="expanded" href="#" class="hub-link hub-link--muted" @click.prevent="open_form">
+						{{ __("View raw record ↗") }}
+					</a>
 					<button type="button" class="doc-detail__close" :aria-label="__('Close')" @click="$emit('close')">
 						&times;
 					</button>
@@ -500,6 +509,16 @@ function compare_rev(rev_name) {
 	display: flex;
 	flex-direction: column;
 	overflow: hidden;
+	transition: width 0.15s ease;
+}
+
+.doc-detail__panel--expanded {
+	width: min(880px, 100vw);
+}
+
+.hub-link--muted {
+	color: var(--text-muted);
+	font-size: var(--text-xs);
 }
 
 .doc-detail__header {

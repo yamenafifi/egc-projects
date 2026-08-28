@@ -32,6 +32,7 @@ _ACTIVITY_DETAIL_FIELDS = (
 	"parent_egc_activity",
 	"is_group",
 	"sequence",
+	"weight_pct",
 	"wbs_node",
 	"discipline",
 	"planned_start_date",

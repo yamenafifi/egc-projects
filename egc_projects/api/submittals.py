@@ -302,6 +302,22 @@ def _submission_documents(submission: str) -> list[dict]:
 	)
 
 
+def _tracked_documents(latest_submission_documents: list[dict]) -> list[dict]:
+	"""The distinct Documents the latest cycle is about, each resolved LIVE against
+	`EGC Project Document` — not frozen to whatever that cycle actually attached. This is what
+	lets the Hub say "this submittal is about M-101, latest issued revision is 02" even when the
+	cycle in hand reviewed an older one, or a newer revision has since appeared."""
+	document_names = list({row.document for row in latest_submission_documents if row.document})
+	if not document_names:
+		return []
+	return frappe.get_all(
+		"EGC Project Document",
+		filters={"name": ("in", document_names)},
+		fields=["name", "document_number", "title", "current_revision", "current_revision_label", "document_status"],
+		order_by="document_number asc",
+	)
+
+
 @frappe.whitelist()
 def get_submittal_detail(submittal: str) -> dict:
 	if not submittal or not frappe.db.exists("EGC Submittal", submittal):
@@ -338,6 +354,9 @@ def get_submittal_detail(submittal: str) -> dict:
 	return {
 		"submittal": submittal_doc,
 		"submissions": submissions,
+		# The document(s) the latest cycle is about, with each one's LIVE current revision — see
+		# _tracked_documents. Empty when there's no submission cycle yet.
+		"tracked_documents": _tracked_documents(submissions[0]["documents"] if submissions else []),
 		# Reverse direction of EGC Activity Link — every Activity linked to this Submittal.
 		"related_activities": relationships.get_activities_for("EGC Submittal", submittal),
 		# Level 1 §31: multiple responsible people/organizations, beyond the single primary

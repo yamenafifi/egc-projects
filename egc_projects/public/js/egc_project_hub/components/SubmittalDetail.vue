@@ -47,6 +47,12 @@ function notify_changed() {
 	reload();
 }
 
+// "Expand" widens the drawer in place rather than navigating away — the drawer already shows
+// every field this doctype has; expanding just gives the denser blocks (dates, tracked
+// documents) more room. `open_form` (the actual navigate-away) is kept as a small, secondary
+// escape hatch inside the expanded view, not the primary way to see detail.
+const expanded = ref(false);
+
 function open_form() {
 	frappe.set_route("Form", "EGC Submittal", props.submittal);
 }
@@ -107,19 +113,39 @@ async function confirm_delete_submittal() {
 
 const RESPONSE_IS_FINAL_OK = ["Approved", "Approved with Comments"];
 
+const ball_in_court = computed(() => data.value?.submittal?.ball_in_court);
+
+// -- tracked documents: the document(s) this submittal is actually about, at their LIVE latest
+// issued revision — not frozen to whatever a given cycle happened to attach. Flags when the
+// current cycle's own attached revision has fallen behind. ---------------------------------------
+
+const tracked_documents_display = computed(() => {
+	const current_doc_revisions = new Set((current_submission.value?.documents || []).map((d) => d.document_revision));
+	return (data.value?.tracked_documents || []).map((doc) => ({
+		...doc,
+		is_current_in_this_cycle: current_doc_revisions.has(doc.current_revision),
+	}));
+});
+
 const next_step_text = computed(() => {
 	const s = current_submission.value;
 	if (!s) return null;
 
 	if (s.submission_status === "Responded") {
-		return RESPONSE_IS_FINAL_OK.includes(s.response)
-			? __("{0} — no action needed.", [s.response])
+		if (RESPONSE_IS_FINAL_OK.includes(s.response)) {
+			return __("{0} — no action needed.", [s.response]);
+		}
+		// ball_in_court, once Responded, is only ever non-empty here because
+		// submittal_control.py found a Responsible owner for the fix — see the "resubmission
+		// needed" suffix it appends. When nobody's marked Responsible yet, fall back to the
+		// generic prompt instead of implying a reassignable owner that doesn't exist.
+		return ball_in_court.value
+			? __("{0} — {1}. Reassign it in Team below if it should be someone else's.", [s.response, ball_in_court.value])
 			: __("{0} — start a new submission once it's ready to resubmit.", [s.response]);
 	}
 
-	const ball_in_court = data.value?.submittal?.ball_in_court;
-	if (ball_in_court) {
-		return __("Waiting on {0} to respond.", [ball_in_court]);
+	if (ball_in_court.value) {
+		return __("Waiting on {0} to respond.", [ball_in_court.value]);
 	}
 
 	if (s.docstatus === 0) {
@@ -234,6 +260,13 @@ async function open_start_submission_dialog() {
 		? ["Ad-hoc reviewer(s)", "Apply a workflow template"]
 		: ["Ad-hoc reviewer(s)"];
 
+	// Next cycle after a rejection/resubmit request: default straight to whichever document(s)
+	// this submittal is already tracking, at their CURRENT issued revision — not a blank picker
+	// that makes the user rediscover what this was even about. Still fully editable.
+	const tracked_revisions = is_next_cycle
+		? (data.value?.tracked_documents || []).map((d) => d.current_revision).filter(Boolean)
+		: [];
+
 	const dialog = new frappe.ui.Dialog({
 		title: is_next_cycle ? __("Start Next Submission") : __("Start Submission"),
 		fields: [
@@ -242,6 +275,7 @@ async function open_start_submission_dialog() {
 				fieldtype: "MultiSelectPills",
 				label: __("Document Revisions"),
 				reqd: 1,
+				default: tracked_revisions,
 				get_data: (txt) =>
 					frappe.db.get_link_options("EGC Project Document Revision", txt, {
 						project: props.project,
@@ -330,6 +364,50 @@ async function open_start_submission_dialog() {
 					frappe.msgprint({ title: __("Could Not Start Submission"), message: e.message, indicator: "red" });
 				}
 			}
+		},
+	});
+	dialog.show();
+}
+
+// -- edit the current cycle's review dates after the fact (not just at Start Submission time) --
+
+function open_edit_dates_dialog() {
+	const s = current_submission.value;
+	const dialog = new frappe.ui.Dialog({
+		title: __("Edit Review Dates"),
+		fields: [
+			{ fieldname: "due_date", fieldtype: "Date", label: __("Response Due"), default: s.due_date },
+			{
+				fieldname: "required_submission_date",
+				fieldtype: "Date",
+				label: __("Required Submission Date"),
+				default: s.required_submission_date,
+			},
+			{ fieldtype: "Column Break" },
+			{
+				fieldname: "required_approval_date",
+				fieldtype: "Date",
+				label: __("Required Approval Date"),
+				default: s.required_approval_date,
+			},
+			{
+				fieldname: "required_on_site_date",
+				fieldtype: "Date",
+				label: __("Required On-Site Date"),
+				default: s.required_on_site_date,
+			},
+			{ fieldname: "lead_time_days", fieldtype: "Int", label: __("Lead Time (Days)"), default: s.lead_time_days },
+		],
+		primary_action_label: __("Save"),
+		primary_action(values) {
+			update_submission_dates(s.name, values)
+				.then(() => {
+					dialog.hide();
+					notify_changed();
+				})
+				.catch((e) => {
+					frappe.msgprint({ title: __("Could Not Save"), message: e.message, indicator: "red" });
+				});
 		},
 	});
 	dialog.show();
@@ -619,14 +697,19 @@ function open_link_activity_dialog() {
 
 <template>
 	<div class="activity-detail__backdrop" @click.self="$emit('close')">
-		<div class="activity-detail__panel" role="dialog" aria-modal="true">
+		<div class="activity-detail__panel" :class="{ 'activity-detail__panel--expanded': expanded }" role="dialog" aria-modal="true">
 			<div class="activity-detail__header">
 				<div class="activity-detail__identity">
 					<div class="activity-detail__code">{{ data?.submittal?.submittal_number || submittal }}</div>
 					<div class="activity-detail__name">{{ data?.submittal?.title || "" }}</div>
 				</div>
 				<div class="activity-detail__header-actions">
-					<a href="#" class="hub-link" @click.prevent="open_form">{{ __("Open Form") }}</a>
+					<a href="#" class="hub-link" @click.prevent="expanded = !expanded">
+						{{ expanded ? __("Collapse") : __("Expand") }}
+					</a>
+					<a v-if="expanded" href="#" class="hub-link hub-link--muted" @click.prevent="open_form">
+						{{ __("View raw record ↗") }}
+					</a>
 					<a
 						v-if="canWrite && data && !has_submitted_history"
 						href="#"
@@ -723,6 +806,20 @@ function open_link_activity_dialog() {
 						<div class="activity-detail__head-row">
 							<div class="activity-detail__section-title">
 								{{ __("Review Cycle") }} — {{ current_submission.revision_label }}
+							</div>
+						</div>
+
+						<div v-if="tracked_documents_display.length" class="submittal-tracked-docs">
+							<div v-for="doc in tracked_documents_display" :key="doc.name" class="submittal-tracked-docs__item">
+								<a href="#" class="hub-link" @click.prevent="frappe.set_route('Form', 'EGC Project Document', doc.name)">
+									{{ doc.document_number }} — {{ doc.title }}
+								</a>
+								<span class="submittal-tracked-docs__rev">
+									{{ __("Latest issued revision") }}: {{ doc.current_revision_label || "—" }}
+								</span>
+								<span v-if="!doc.is_current_in_this_cycle && doc.current_revision" class="indicator-pill orange">
+									{{ __("Newer revision available") }}
+								</span>
 							</div>
 						</div>
 
@@ -861,6 +958,48 @@ function open_link_activity_dialog() {
 								</button>
 							</li>
 						</ul>
+
+						<div class="activity-detail__head-row" style="margin-top: 14px">
+							<div class="activity-detail__dep-label">{{ __("Review Dates") }}</div>
+							<button
+								v-if="canWrite && current_submission.docstatus === 0"
+								type="button"
+								class="btn btn-xs btn-default"
+								@click="open_edit_dates_dialog"
+							>
+								{{ __("Edit Dates") }}
+							</button>
+						</div>
+						<dl class="activity-detail__meta">
+							<div>
+								<dt>{{ __("Date Submitted") }}</dt>
+								<dd>{{ format_date(current_submission.date_submitted) }}</dd>
+							</div>
+							<div>
+								<dt>{{ __("Submitted By") }}</dt>
+								<dd>{{ current_submission.submitted_by || "—" }}</dd>
+							</div>
+							<div>
+								<dt>{{ __("Response Due") }}</dt>
+								<dd>{{ format_date(current_submission.due_date) }}</dd>
+							</div>
+							<div>
+								<dt>{{ __("Required Submission Date") }}</dt>
+								<dd>{{ format_date(current_submission.required_submission_date) }}</dd>
+							</div>
+							<div>
+								<dt>{{ __("Required Approval Date") }}</dt>
+								<dd>{{ format_date(current_submission.required_approval_date) }}</dd>
+							</div>
+							<div>
+								<dt>{{ __("Required On-Site Date") }}</dt>
+								<dd>{{ format_date(current_submission.required_on_site_date) }}</dd>
+							</div>
+							<div>
+								<dt>{{ __("Lead Time (Days)") }}</dt>
+								<dd>{{ current_submission.lead_time_days || "—" }}</dd>
+							</div>
+						</dl>
 					</section>
 
 					<section v-if="history_submissions.length" class="activity-detail__section">
@@ -952,6 +1091,16 @@ function open_link_activity_dialog() {
 	display: flex;
 	flex-direction: column;
 	overflow: hidden;
+	transition: width 0.15s ease;
+}
+
+.activity-detail__panel--expanded {
+	width: min(900px, 100vw);
+}
+
+.hub-link--muted {
+	color: var(--text-muted);
+	font-size: var(--text-xs);
 }
 
 .activity-detail__header {
@@ -1116,6 +1265,26 @@ function open_link_activity_dialog() {
 	font-size: var(--text-xs);
 	color: var(--text-muted);
 	margin: -4px 0 10px;
+}
+
+.submittal-tracked-docs {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	margin-bottom: 10px;
+}
+
+.submittal-tracked-docs__item {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 6px 10px;
+	font-size: var(--text-sm);
+}
+
+.submittal-tracked-docs__rev {
+	color: var(--text-muted);
+	font-size: var(--text-xs);
 }
 
 .submittal-next-step {

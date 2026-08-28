@@ -145,6 +145,58 @@ def _latest_response_date(submittal: str, exclude: str | None = None):
 	return rows[0].response_date if rows else None
 
 
+#: Responses that end a submission cycle with EGC itself now owing the next move (fix the
+#: document, issue a new revision, resubmit) — as opposed to Approved/Approved with Comments,
+#: where nobody owes anything further on this cycle.
+_RESPONSES_NEEDING_EGC_ACTION = (c.RESPONSE_REJECTED, c.RESPONSE_REVISE_AND_RESUBMIT)
+
+
+def _first_responsible_label(parent_doctype: str, parent_name: str) -> str | None:
+	"""The display name of `parent_doctype`/`parent_name`'s "Responsible" assignee, if any.
+
+	Deliberately a raw query, not `assignments.get_assignments_for` — this runs inside the
+	engine's own state-recompute path (see `_refresh_from_current`), which can be reached from an
+	external reviewer's session recording their response. That session may well lack read
+	permission on `EGC Activity`; a permission-checked lookup here would crash the response
+	recording itself over a fallback label, not just fail to find one.
+	"""
+	rows = frappe.get_all(
+		"EGC Assignment",
+		filters={"parent_doctype": parent_doctype, "parent_name": parent_name, "assignment_role": "Responsible"},
+		fields=["person_label", "organization"],
+		order_by="is_primary desc, creation asc",
+		limit=1,
+	)
+	if not rows:
+		return None
+	if rows[0].person_label:
+		return rows[0].person_label
+	if rows[0].organization:
+		return frappe.db.get_value("EGC Organization", rows[0].organization, "organization_name")
+	return None
+
+
+def _needs_egc_action_ball_in_court(submittal: str) -> str | None:
+	"""Who owns getting a Rejected/Revise & Resubmit submittal fixed and resubmitted — the
+	Submittal's own Responsible assignee, falling back to any linked Activity's. Raw queries
+	throughout, for the same permission-safety reason as `_first_responsible_label`."""
+	label = _first_responsible_label("EGC Submittal", submittal)
+	if label:
+		return label
+
+	activities = frappe.get_all(
+		"EGC Activity Link",
+		filters={"link_doctype": "EGC Submittal", "link_name": submittal},
+		pluck="activity",
+		order_by="creation asc",
+	)
+	for activity in activities:
+		label = _first_responsible_label("EGC Activity", activity)
+		if label:
+			return label
+	return None
+
+
 def _refresh_from_current(submittal: str, exclude: str | None = None) -> None:
 	current = _load_current_submission_row(submittal, exclude=exclude)
 	if not current:
@@ -162,16 +214,26 @@ def _refresh_from_current(submittal: str, exclude: str | None = None) -> None:
 			if current.submission_status == c.SUBMISSION_RESPONDED and current.response
 			else current.submission_status
 		)
+		# Already computed onto the submission row by _refresh_ball_in_court whenever its
+		# review-step state changes — copied up here, never recomputed independently, so there
+		# is exactly one place that derives it from live step rows. EXCEPT: once every reviewer
+		# is done and the answer was Rejected/Revise & Resubmit, that label goes empty (nobody's
+		# still "In Review") even though the cycle isn't actually finished from EGC's side — the
+		# ball just moved to whoever has to fix it. Only compute this fallback in that specific
+		# gap, so it can never disagree with a genuinely live review step.
+		ball_in_court = current.ball_in_court_label
+		if not ball_in_court and current.submission_status == c.SUBMISSION_RESPONDED and current.response in _RESPONSES_NEEDING_EGC_ACTION:
+			responsible = _needs_egc_action_ball_in_court(submittal)
+			if responsible:
+				ball_in_court = _("{0} — resubmission needed").format(responsible)
+
 		state = {
 			"current_submission": current.name,
 			"current_submission_label": current.revision_label,
 			"submittal_status": submittal_status,
 			"current_due_date": current.due_date,
 			"last_response_date": _latest_response_date(submittal, exclude=exclude),
-			# Already computed onto the submission row by _refresh_ball_in_court whenever its
-			# review-step state changes — copied up here, never recomputed independently, so
-			# there is exactly one place that derives it from live step rows.
-			"ball_in_court": current.ball_in_court_label,
+			"ball_in_court": ball_in_court,
 		}
 	frappe.get_doc("EGC Submittal", submittal).db_set(state, update_modified=False)
 

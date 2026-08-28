@@ -12,7 +12,7 @@ from frappe.tests import IntegrationTestCase
 from frappe.utils import today
 
 from egc_projects.api import submittals as submittals_api
-from egc_projects.egc_projects import constants as c
+from egc_projects.egc_projects import assignments, constants as c, relationships
 from egc_projects.egc_projects import submittal_control
 
 
@@ -679,3 +679,138 @@ class TestSubmittalWorkflow(IntegrationTestCase):
 
 		sub = frappe.get_doc("EGC Submittal Revision", s1["name"])
 		self.assertEqual(str(sub.date_submitted), today())
+
+	# -- ball-in-court falls to whoever owns resubmitting after a Rejected/Revise & Resubmit ----
+
+	def _make_person(self, full_name):
+		return frappe.get_doc({"doctype": "EGC Person", "full_name": full_name}).insert(ignore_permissions=True)
+
+	def test_ball_in_court_falls_to_submittal_responsible_after_rejection(self):
+		doc = self._make_document("DOC-BIC-1")
+		rev = self._make_issued_revision(doc.name, "00")
+		submittal = self._make_submittal("SUB-BIC-1")
+		person = self._make_person("BIC Responsible One")
+		assignments.add_assignment("EGC Submittal", submittal.name, "Responsible", person=person.name, is_primary=True)
+
+		frappe.set_user(self.manager_user)
+		s1 = submittals_api.create_first_submission(submittal.name)
+		submittals_api.add_submission_document(s1["name"], rev.name)
+		submittals_api.submit_submission(s1["name"])
+		submittal_control.record_response(s1["name"], c.RESPONSE_REJECTED)
+
+		submittal.reload()
+		self.assertIn("BIC Responsible One", submittal.ball_in_court)
+		self.assertIn("resubmission needed", submittal.ball_in_court)
+
+	def test_ball_in_court_updates_when_responsible_assigned_after_the_fact(self):
+		"""The realistic order of events: reject first (nobody's Responsible yet, so Ball in
+		Court is empty), THEN hand ownership to someone — that assignment write must itself
+		refresh Ball in Court, not just the next unrelated engine event."""
+		doc = self._make_document("DOC-BIC-5")
+		rev = self._make_issued_revision(doc.name, "00")
+		submittal = self._make_submittal("SUB-BIC-5")
+
+		frappe.set_user(self.manager_user)
+		s1 = submittals_api.create_first_submission(submittal.name)
+		submittals_api.add_submission_document(s1["name"], rev.name)
+		submittals_api.submit_submission(s1["name"])
+		submittal_control.record_response(s1["name"], c.RESPONSE_REJECTED)
+
+		submittal.reload()
+		self.assertFalse(submittal.ball_in_court)
+
+		person = self._make_person("BIC Responsible Five")
+		assignments.add_assignment("EGC Submittal", submittal.name, "Responsible", person=person.name, is_primary=True)
+
+		submittal.reload()
+		self.assertIn("BIC Responsible Five", submittal.ball_in_court)
+
+		assignment_name = frappe.db.get_value(
+			"EGC Assignment", {"parent_name": submittal.name, "person": person.name}, "name"
+		)
+		assignments.remove_assignment(assignment_name)
+
+		submittal.reload()
+		self.assertFalse(submittal.ball_in_court)
+
+	def test_ball_in_court_falls_back_to_linked_activity_responsible(self):
+		doc = self._make_document("DOC-BIC-2")
+		rev = self._make_issued_revision(doc.name, "00")
+		submittal = self._make_submittal("SUB-BIC-2")
+		person = self._make_person("BIC Responsible Two")
+
+		activity = frappe.get_doc(
+			{
+				"doctype": "EGC Activity",
+				"project": self.project,
+				"activity_code": "BIC-ACT-2",
+				"activity_name": "BIC Test Activity 2",
+			}
+		).insert(ignore_permissions=True)
+		relationships.add_link(activity.name, "EGC Submittal", submittal.name)
+		assignments.add_assignment("EGC Activity", activity.name, "Responsible", person=person.name, is_primary=True)
+
+		frappe.set_user(self.manager_user)
+		s1 = submittals_api.create_first_submission(submittal.name)
+		submittals_api.add_submission_document(s1["name"], rev.name)
+		submittals_api.submit_submission(s1["name"])
+		submittal_control.record_response(s1["name"], c.RESPONSE_REVISE_AND_RESUBMIT)
+
+		submittal.reload()
+		self.assertIn("BIC Responsible Two", submittal.ball_in_court)
+
+	def test_ball_in_court_stays_empty_with_no_responsible_anywhere(self):
+		doc = self._make_document("DOC-BIC-3")
+		rev = self._make_issued_revision(doc.name, "00")
+		submittal = self._make_submittal("SUB-BIC-3")
+
+		frappe.set_user(self.manager_user)
+		s1 = submittals_api.create_first_submission(submittal.name)
+		submittals_api.add_submission_document(s1["name"], rev.name)
+		submittals_api.submit_submission(s1["name"])
+		submittal_control.record_response(s1["name"], c.RESPONSE_REJECTED)
+
+		submittal.reload()
+		self.assertFalse(submittal.ball_in_court)
+
+	def test_ball_in_court_not_affected_when_response_is_approved(self):
+		doc = self._make_document("DOC-BIC-4")
+		rev = self._make_issued_revision(doc.name, "00")
+		submittal = self._make_submittal("SUB-BIC-4")
+		person = self._make_person("BIC Responsible Four")
+		assignments.add_assignment("EGC Submittal", submittal.name, "Responsible", person=person.name, is_primary=True)
+
+		frappe.set_user(self.manager_user)
+		s1 = submittals_api.create_first_submission(submittal.name)
+		submittals_api.add_submission_document(s1["name"], rev.name)
+		submittals_api.submit_submission(s1["name"])
+		submittal_control.record_response(s1["name"], c.RESPONSE_APPROVED)
+
+		submittal.reload()
+		self.assertFalse(submittal.ball_in_court)
+
+	# -- get_submittal_detail: tracked_documents shows the live latest issued revision ----------
+
+	def test_tracked_documents_reflects_live_current_revision(self):
+		doc = self._make_document("DOC-TRACK-1")
+		rev00 = self._make_issued_revision(doc.name, "00")
+		submittal = self._make_submittal("SUB-TRACK-1")
+
+		frappe.set_user(self.manager_user)
+		s1 = submittals_api.create_first_submission(submittal.name)
+		submittals_api.add_submission_document(s1["name"], rev00.name)
+
+		detail = submittals_api.get_submittal_detail(submittal.name)
+		self.assertEqual(len(detail["tracked_documents"]), 1)
+		self.assertEqual(detail["tracked_documents"][0]["current_revision_label"], "00")
+
+		frappe.set_user("Administrator")
+		self._make_issued_revision(doc.name, "01")
+
+		detail = submittals_api.get_submittal_detail(submittal.name)
+		self.assertEqual(detail["tracked_documents"][0]["current_revision_label"], "01")
+
+	def test_tracked_documents_empty_with_no_submission_yet(self):
+		submittal = self._make_submittal("SUB-TRACK-2")
+		detail = submittals_api.get_submittal_detail(submittal.name)
+		self.assertEqual(detail["tracked_documents"], [])
