@@ -80,6 +80,10 @@ export function delete_submittal(submittal) {
 	return call(`${SUBMITTALS_MODULE}.delete_submittal`, { submittal });
 }
 
+export function get_documents_with_current_revision(project, documents) {
+	return call(`${SUBMITTALS_MODULE}.get_documents_with_current_revision`, { project, documents });
+}
+
 export function update_submission_dates(submission, dates) {
 	return call(`${SUBMITTALS_MODULE}.update_submission_dates`, { submission, ...dates });
 }

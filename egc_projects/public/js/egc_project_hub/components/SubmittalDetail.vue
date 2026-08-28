@@ -22,6 +22,7 @@ import {
 	remove_review_step,
 	delete_submittal,
 	update_submission_dates,
+	get_documents_with_current_revision,
 } from "./submittals_api";
 import { link_activity_record, unlink_activity_record } from "./activities_api";
 import { add_assignment, remove_assignment } from "./assignments_api";
@@ -141,7 +142,7 @@ const next_step_text = computed(() => {
 		// generic prompt instead of implying a reassignable owner that doesn't exist.
 		return ball_in_court.value
 			? __("{0} — {1}. Reassign it in Team below if it should be someone else's.", [s.response, ball_in_court.value])
-			: __("{0} — start a new submission once it's ready to resubmit.", [s.response]);
+			: __("{0} — ready to resubmit once it's fixed.", [s.response]);
 	}
 
 	if (ball_in_court.value) {
@@ -155,6 +156,15 @@ const next_step_text = computed(() => {
 	}
 
 	return __("{0} — mark it Under Review once someone starts looking, or record the response.", [s.submission_status]);
+});
+
+// The actual reason behind a Rejected/Revise & Resubmit response, surfaced prominently instead
+// of only living on whichever individual reviewer step caused it (or, for the no-steps path,
+// nowhere in the UI at all — it was captured in the database and simply never displayed).
+const rejection_reason_text = computed(() => {
+	const s = current_submission.value;
+	if (!s || s.submission_status !== "Responded" || RESPONSE_IS_FINAL_OK.includes(s.response)) return null;
+	return s.response_remarks || null;
 });
 
 const current_user = frappe.session.user;
@@ -201,7 +211,16 @@ function open_record_response_dialog(step) {
 	const is_step = Boolean(step);
 	const fields = [
 		{ fieldname: "response", fieldtype: "Select", label: __("Response"), options: RESPONSES, reqd: 1 },
-		{ fieldname: "remarks", fieldtype: "Small Text", label: __("Remarks") },
+		{
+			fieldname: "remarks",
+			fieldtype: "Small Text",
+			label: __("Remarks"),
+			// Required specifically for Rejected/Revise & Resubmit — approving with nothing to
+			// say is fine, but sending something back with no reason leaves whoever inherits the
+			// resubmission with nothing to act on.
+			mandatory_depends_on: 'eval:["Rejected", "Revise & Resubmit"].includes(doc.response)',
+			description: __("Required when rejecting or requesting a revision — this is what shows as the reason."),
+		},
 	];
 	// Only a review step already has a docname to attach the file to (the step is inserted the
 	// moment a reviewer is added) — the no-steps v1 path has nothing to bind an Attach field to.
@@ -248,6 +267,9 @@ const DATE_FIELDS = [
 ];
 
 async function open_start_submission_dialog() {
+	// FIRST cycle only — resubmitting after a Rejected/Revise & Resubmit response goes through
+	// open_resubmit_dialog() below instead, which is deliberately much lighter: the document(s)
+	// and reviewer roster are already known, so there's nothing left to ask for.
 	let templates = [];
 	try {
 		templates = await get_workflow_templates();
@@ -255,32 +277,23 @@ async function open_start_submission_dialog() {
 		// Non-fatal — the ad-hoc reviewer path still works with no templates defined.
 	}
 
-	const is_next_cycle = Boolean(current_submission.value);
 	const approach_options = templates.length
 		? ["Ad-hoc reviewer(s)", "Apply a workflow template"]
 		: ["Ad-hoc reviewer(s)"];
 
-	// Next cycle after a rejection/resubmit request: default straight to whichever document(s)
-	// this submittal is already tracking, at their CURRENT issued revision — not a blank picker
-	// that makes the user rediscover what this was even about. Still fully editable.
-	const tracked_revisions = is_next_cycle
-		? (data.value?.tracked_documents || []).map((d) => d.current_revision).filter(Boolean)
-		: [];
-
 	const dialog = new frappe.ui.Dialog({
-		title: is_next_cycle ? __("Start Next Submission") : __("Start Submission"),
+		title: __("Start Submission"),
 		fields: [
 			{
-				fieldname: "document_revisions",
+				fieldname: "documents",
 				fieldtype: "MultiSelectPills",
-				label: __("Document Revisions"),
+				label: __("Documents"),
 				reqd: 1,
-				default: tracked_revisions,
+				description: __("Pick the document(s) this is about — the current issued revision of each is used automatically. You never pick a revision directly."),
 				get_data: (txt) =>
-					frappe.db.get_link_options("EGC Project Document Revision", txt, {
+					frappe.db.get_link_options("EGC Project Document", txt, {
 						project: props.project,
-						docstatus: 1,
-						revision_status: "Issued",
+						document_status: "Issued",
 					}),
 			},
 			{
@@ -307,7 +320,7 @@ async function open_start_submission_dialog() {
 			{ fieldname: "required_on_site_date", fieldtype: "Date", label: __("Required On-Site Date") },
 			{ fieldname: "lead_time_days", fieldtype: "Int", label: __("Lead Time (Days)") },
 		],
-		primary_action_label: is_next_cycle ? __("Start Next Submission") : __("Start Submission"),
+		primary_action_label: __("Start Submission"),
 		async primary_action(values) {
 			dialog.disable_primary_action();
 			// Once the submission cycle itself is created below, it's a real Draft row in the
@@ -317,12 +330,18 @@ async function open_start_submission_dialog() {
 			// this so the catch block below can tell the two situations apart.
 			let submission_name = null;
 			try {
-				submission_name = is_next_cycle
-					? await create_next_revision(props.submittal)
-					: (await create_first_submission(props.submittal)).name;
+				const resolved = await get_documents_with_current_revision(props.project, values.documents || []);
+				const missing = resolved.filter((d) => !d.current_revision);
+				if (missing.length) {
+					throw new Error(
+						__("{0} has no issued revision yet.", [missing.map((d) => d.document_number).join(", ")])
+					);
+				}
 
-				for (const document_revision of values.document_revisions || []) {
-					await add_submission_document(submission_name, document_revision);
+				submission_name = (await create_first_submission(props.submittal)).name;
+
+				for (const doc of resolved) {
+					await add_submission_document(submission_name, doc.current_revision);
 				}
 
 				const dates = {};
@@ -362,6 +381,100 @@ async function open_start_submission_dialog() {
 				} else {
 					dialog.enable_primary_action();
 					frappe.msgprint({ title: __("Could Not Start Submission"), message: e.message, indicator: "red" });
+				}
+			}
+		},
+	});
+	dialog.show();
+}
+
+// -- resubmit: the SAME submittal, picking straight back up with whatever it's already tracking
+// — the current issued revision of the same document(s), the same reviewer roster — rather than
+// re-asking the user to reconfigure a "new" submission from scratch. A new EGC Submittal
+// Revision row is still created underneath (the review history genuinely must stay separable
+// cycle by cycle — that's what lets a Rejected round and the Approved round after it both stay
+// visible), but nothing about using this action should feel like starting something new.
+
+async function open_resubmit_dialog() {
+	const previous = current_submission.value;
+	const tracked = data.value?.tracked_documents || [];
+
+	if (!tracked.length) {
+		frappe.msgprint({
+			title: __("Nothing to Resubmit"),
+			message: __("This submittal has no document to resubmit yet — use Start Submission instead."),
+			indicator: "orange",
+		});
+		return;
+	}
+	const missing_revision = tracked.filter((d) => !d.current_revision);
+	if (missing_revision.length) {
+		frappe.msgprint({
+			title: __("No Issued Revision Yet"),
+			message: __("{0} doesn't have an issued revision yet — issue one before resubmitting.", [
+				missing_revision.map((d) => d.document_number).join(", "),
+			]),
+			indicator: "orange",
+		});
+		return;
+	}
+
+	const previous_steps = previous.steps || [];
+	const doc_rows = tracked
+		.map(
+			(d) =>
+				`<li>${frappe.utils.escape_html(d.document_number)} — ${frappe.utils.escape_html(d.title)}: <strong>${__("Rev")} ${frappe.utils.escape_html(d.current_revision_label || "—")}</strong></li>`
+		)
+		.join("");
+	const reviewer_labels = [...new Set(previous_steps.map((s) => s.reviewer_label || s.reviewer_role))];
+	const reviewer_html = reviewer_labels.length
+		? `<ul>${reviewer_labels.map((label) => `<li>${frappe.utils.escape_html(label)}</li>`).join("")}</ul>`
+		: `<p>${__("No formal review steps on the last cycle — this resubmits directly.")}</p>`;
+
+	const dialog = new frappe.ui.Dialog({
+		title: __("Resubmit"),
+		fields: [
+			{
+				fieldname: "summary",
+				fieldtype: "HTML",
+				options: `<div>
+					<div style="margin-bottom: 12px;"><strong>${__("Documents")}</strong>${doc_rows ? `<ul style="margin: 4px 0 0; padding-left: 18px;">${doc_rows}</ul>` : ""}</div>
+					<div><strong>${__("Reviewers")}</strong><div style="margin-top: 4px;">${reviewer_html}</div></div>
+				</div>`,
+			},
+		],
+		primary_action_label: __("Resubmit"),
+		async primary_action() {
+			dialog.disable_primary_action();
+			let submission_name = null;
+			try {
+				submission_name = await create_next_revision(props.submittal);
+
+				for (const doc of tracked) {
+					await add_submission_document(submission_name, doc.current_revision);
+				}
+				for (const step of previous_steps) {
+					await add_review_step(submission_name, step.sequence, step.reviewer_role, step.reviewer_user, Boolean(step.is_required));
+				}
+				await submit_submission(submission_name);
+
+				dialog.hide();
+				notify_changed();
+			} catch (e) {
+				if (submission_name) {
+					dialog.hide();
+					notify_changed();
+					frappe.msgprint({
+						title: __("Resubmission Started, But Incomplete"),
+						message: __("{0} was created, but this step failed: {1} Finish configuring it from this drawer.", [
+							frappe.utils.escape_html(submission_name),
+							e.message,
+						]),
+						indicator: "orange",
+					});
+				} else {
+					dialog.enable_primary_action();
+					frappe.msgprint({ title: __("Could Not Resubmit"), message: e.message, indicator: "red" });
 				}
 			}
 		},
@@ -823,6 +936,11 @@ function open_link_activity_dialog() {
 							</div>
 						</div>
 
+						<div v-if="rejection_reason_text" class="submittal-rejection-reason">
+							<div class="submittal-rejection-reason__label">{{ current_submission.response }}:</div>
+							<p class="submittal-rejection-reason__text">{{ rejection_reason_text }}</p>
+						</div>
+
 						<div class="submittal-next-step">
 							<p v-if="next_step_text" class="submittal-next-step__text">{{ next_step_text }}</p>
 							<div v-if="canWrite" class="submittal-next-step__actions">
@@ -852,12 +970,12 @@ function open_link_activity_dialog() {
 									{{ __("Record Response") }}
 								</button>
 								<button
-									v-if="current_submission.submission_status === 'Responded'"
+									v-if="current_submission.submission_status === 'Responded' && !RESPONSE_IS_FINAL_OK.includes(current_submission.response)"
 									type="button"
 									class="btn btn-xs btn-primary"
-									@click="open_start_submission_dialog"
+									@click="open_resubmit_dialog"
 								>
-									{{ __("Start Next Submission") }}
+									{{ __("Resubmit") }}
 								</button>
 							</div>
 						</div>
@@ -962,7 +1080,7 @@ function open_link_activity_dialog() {
 						<div class="activity-detail__head-row" style="margin-top: 14px">
 							<div class="activity-detail__dep-label">{{ __("Review Dates") }}</div>
 							<button
-								v-if="canWrite && current_submission.docstatus === 0"
+								v-if="canWrite"
 								type="button"
 								class="btn btn-xs btn-default"
 								@click="open_edit_dates_dialog"
@@ -1285,6 +1403,30 @@ function open_link_activity_dialog() {
 .submittal-tracked-docs__rev {
 	color: var(--text-muted);
 	font-size: var(--text-xs);
+}
+
+.submittal-rejection-reason {
+	border: 1px solid var(--red-200, var(--border-color));
+	border-left: 3px solid var(--red-500, #d1483e);
+	border-radius: var(--border-radius);
+	padding: 8px 12px;
+	margin-bottom: 10px;
+}
+
+.submittal-rejection-reason__label {
+	font-size: var(--text-xs);
+	font-weight: 600;
+	color: var(--red-500, #d1483e);
+	text-transform: uppercase;
+	letter-spacing: 0.02em;
+	margin-bottom: 2px;
+}
+
+.submittal-rejection-reason__text {
+	margin: 0;
+	font-size: var(--text-sm);
+	color: var(--text-color);
+	white-space: pre-wrap;
 }
 
 .submittal-next-step {

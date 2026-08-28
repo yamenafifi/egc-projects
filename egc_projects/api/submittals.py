@@ -102,26 +102,25 @@ _DATE_FIELDS = (
 def update_submission_dates(submission: str, **kwargs) -> dict:
 	"""Sets whichever of the submission's plain review/lead-time date fields were provided.
 	These are ordinary user-entered fields (see `egc_submittal_revision.json`) — none of them are
-	engine-guarded like `submission_status`/`response`/etc. in `submittal_control.py`, so a plain
-	`save()` here is correct and doesn't need to go through that module."""
+	engine-guarded like `submission_status`/`response`/etc. in `submittal_control.py`, and unlike
+	those they're plain planning/reference data with no reason to freeze once the submission is
+	no longer Draft (e.g. logging the "Required Approval Date" a client verbally committed to,
+	after the package already went out). None of them carry `allow_on_submit` in the doctype, so
+	a submitted doc needs `frappe.db.set_value` (bypasses the submit field-lock, same as
+	`submittal_control.py`'s own engine writes) rather than `doc.save()`, which Frappe would
+	reject outright."""
 	doc = frappe.get_doc("EGC Submittal Revision", submission)
 	frappe.has_permission("EGC Submittal Revision", "write", doc=doc, throw=True)
 
-	if doc.docstatus != 0:
-		frappe.throw(
-			_("Review dates can only be set while the submission is Draft; {0} is {1}.").format(
-				frappe.bold(doc.name), _(doc.submission_status)
-			),
-			exc=frappe.ValidationError,
-		)
+	values = {field: kwargs[field] for field in _DATE_FIELDS if kwargs.get(field) is not None}
+	if not values:
+		return {"name": doc.name}
 
-	changed = False
-	for field in _DATE_FIELDS:
-		if kwargs.get(field) is not None:
-			doc.set(field, kwargs[field])
-			changed = True
-	if changed:
+	if doc.docstatus == 0:
+		doc.update(values)
 		doc.save()
+	else:
+		frappe.db.set_value("EGC Submittal Revision", submission, values, update_modified=False)
 	return {"name": doc.name}
 
 
@@ -302,12 +301,11 @@ def _submission_documents(submission: str) -> list[dict]:
 	)
 
 
-def _tracked_documents(latest_submission_documents: list[dict]) -> list[dict]:
-	"""The distinct Documents the latest cycle is about, each resolved LIVE against
-	`EGC Project Document` — not frozen to whatever that cycle actually attached. This is what
-	lets the Hub say "this submittal is about M-101, latest issued revision is 02" even when the
-	cycle in hand reviewed an older one, or a newer revision has since appeared."""
-	document_names = list({row.document for row in latest_submission_documents if row.document})
+def _resolve_documents(document_names: list[str]) -> list[dict]:
+	"""Live `EGC Project Document` identity + current revision for a set of document names —
+	the single place both `_tracked_documents` (below) and the Hub's document-picker resolver
+	go through, so "what's the current revision of this document" is never derived twice."""
+	document_names = list(dict.fromkeys(document_names))
 	if not document_names:
 		return []
 	return frappe.get_all(
@@ -316,6 +314,28 @@ def _tracked_documents(latest_submission_documents: list[dict]) -> list[dict]:
 		fields=["name", "document_number", "title", "current_revision", "current_revision_label", "document_status"],
 		order_by="document_number asc",
 	)
+
+
+def _tracked_documents(latest_submission_documents: list[dict]) -> list[dict]:
+	"""The distinct Documents the latest cycle is about, each resolved LIVE against
+	`EGC Project Document` — not frozen to whatever that cycle actually attached. This is what
+	lets the Hub say "this submittal is about M-101, latest issued revision is 02" even when the
+	cycle in hand reviewed an older one, or a newer revision has since appeared."""
+	document_names = [row.document for row in latest_submission_documents if row.document]
+	return _resolve_documents(document_names)
+
+
+@frappe.whitelist()
+def get_documents_with_current_revision(project: str, documents) -> list[dict]:
+	"""For each Document (picked by name, not revision), its live current Issued revision and
+	identity fields. This is what lets the "Start Submission" dialog offer a plain Document
+	picker instead of a Document Revision picker — nobody choosing what to submit for review
+	should have to already know or hunt down a specific revision number; the current one is
+	always what's meant. See SubmittalDetail.vue's `open_start_submission_dialog`."""
+	if isinstance(documents, str):
+		documents = frappe.parse_json(documents)
+	validators.require_project_permission(project)
+	return _resolve_documents(documents or [])
 
 
 @frappe.whitelist()

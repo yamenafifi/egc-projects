@@ -801,7 +801,7 @@ def _evaluate_stage(submission: str) -> None:
 	stage_rows = frappe.get_all(
 		"EGC Submittal Review Step",
 		filters={"submittal_revision": submission, "status": ("in", (c.STEP_IN_REVIEW, c.STEP_RESPONDED))},
-		fields=["name", "status", "response", "is_required"],
+		fields=["name", "status", "response", "is_required", "response_remarks"],
 	)
 	if not stage_rows:
 		_refresh_ball_in_court(submission)
@@ -824,7 +824,11 @@ def _evaluate_stage(submission: str) -> None:
 				_close_step_assignment(row.name, frappe.db.get_value("EGC Submittal Review Step", row.name, "reviewer_user"))
 				_engine_set_step(row.name, {"status": c.STEP_SKIPPED})
 		submission_doc = frappe.get_doc("EGC Submittal Revision", submission)
-		_apply_response_and_refresh(submission_doc, blocking.response, remarks=None)
+		# The blocking reviewer's own remarks — not None. Without this, the SUBMISSION's own
+		# `response_remarks` (what the Hub's "why" line reads) stayed permanently blank for every
+		# step-based rejection, even though the exact same text was sitting right there on the
+		# step row that caused it.
+		_apply_response_and_refresh(submission_doc, blocking.response, remarks=blocking.response_remarks)
 		_refresh_ball_in_court(submission)
 		return
 

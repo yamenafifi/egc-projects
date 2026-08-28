@@ -400,6 +400,10 @@ class TestSubmittalWorkflow(IntegrationTestCase):
 		submission.reload()
 		self.assertEqual(submission.submission_status, c.SUBMISSION_RESPONDED)
 		self.assertEqual(submission.response, c.RESPONSE_REVISE_AND_RESUBMIT)
+		# The blocking reviewer's own remarks must propagate up to the SUBMISSION's own
+		# response_remarks, not just sit on their step row — that's what the Hub's "why" line
+		# reads for a step-based rejection/resubmit-request.
+		self.assertEqual(submission.response_remarks, "Needs rework")
 
 		# The consultant's step never got a chance to respond — a single terminal response ends
 		# the submission immediately without fabricating a response for every other reviewer,
@@ -652,7 +656,10 @@ class TestSubmittalWorkflow(IntegrationTestCase):
 		self.assertEqual(sub.lead_time_days, 14)
 		self.assertIsNone(sub.required_submission_date)
 
-	def test_update_submission_dates_rejected_once_submitted(self):
+	def test_update_submission_dates_still_settable_once_submitted(self):
+		"""These are plain planning/reference fields, not engine state — nothing about being
+		submitted should freeze them (e.g. logging a client's verbally-committed approval date
+		after the package already went out)."""
 		doc = self._make_document("DOC-DATES-2")
 		rev = self._make_issued_revision(doc.name, "00")
 		submittal = self._make_submittal("SUB-DATES-2")
@@ -662,8 +669,11 @@ class TestSubmittalWorkflow(IntegrationTestCase):
 		submittals_api.add_submission_document(s1["name"], rev.name)
 		submittals_api.submit_submission(s1["name"])
 
-		with self.assertRaises(frappe.ValidationError):
-			submittals_api.update_submission_dates(s1["name"], due_date="2026-09-01")
+		submittals_api.update_submission_dates(s1["name"], due_date="2026-09-01", lead_time_days=21)
+
+		sub = frappe.get_doc("EGC Submittal Revision", s1["name"])
+		self.assertEqual(str(sub.due_date), "2026-09-01")
+		self.assertEqual(sub.lead_time_days, 21)
 
 	# -- on_submission_submit sets date_submitted ------------------------------------------------
 
@@ -814,3 +824,12 @@ class TestSubmittalWorkflow(IntegrationTestCase):
 		submittal = self._make_submittal("SUB-TRACK-2")
 		detail = submittals_api.get_submittal_detail(submittal.name)
 		self.assertEqual(detail["tracked_documents"], [])
+
+	def test_get_documents_with_current_revision_resolves_by_document_not_revision(self):
+		doc = self._make_document("DOC-RESOLVE-1")
+		self._make_issued_revision(doc.name, "00")
+		self._make_issued_revision(doc.name, "01")
+
+		rows = submittals_api.get_documents_with_current_revision(self.project, [doc.name])
+		self.assertEqual(len(rows), 1)
+		self.assertEqual(rows[0]["current_revision_label"], "01")
