@@ -8,6 +8,7 @@ anything on core `Project` — a test user also needs `Projects User`).
 
 import frappe
 from frappe.tests import IntegrationTestCase
+from frappe.utils import add_days, today
 
 from egc_projects.api import activities
 from egc_projects.egc_projects import constants as c
@@ -183,6 +184,38 @@ class TestActivityDependency(IntegrationTestCase):
 		self.assertTrue(frappe.db.exists("EGC Activity Dependency", name))
 		activities.remove_dependency(name)
 		self.assertFalse(frappe.db.exists("EGC Activity Dependency", name))
+
+	def test_get_activity_detail_includes_is_overdue(self):
+		overdue = make_activity(
+			self.project, "OD-A", "Overdue", planned_end_date=add_days(today(), -3), status=c.ACTIVITY_NOT_STARTED
+		)
+		on_track = make_activity(
+			self.project, "OD-B", "On Track", planned_end_date=add_days(today(), 3), status=c.ACTIVITY_NOT_STARTED
+		)
+		self.assertTrue(activities.get_activity_detail(overdue.name)["activity"]["is_overdue"])
+		self.assertFalse(activities.get_activity_detail(on_track.name)["activity"]["is_overdue"])
+
+	def test_get_activity_history_empty_for_freshly_created_activity(self):
+		leaf = make_activity(self.project, "HIST-NEW", "Fresh")
+		self.assertEqual(activities.get_activity_history(leaf.name), [])
+
+	def test_get_activity_history_tracks_progress_and_status_changes(self):
+		leaf = make_activity(self.project, "HIST-A", "Leaf")
+		activities.update_activity_progress(leaf.name, 40, status=c.ACTIVITY_IN_PROGRESS)
+		activities.update_activity_progress(leaf.name, 80)
+
+		events = activities.get_activity_history(leaf.name)
+		self.assertEqual(len(events), 2)
+
+		first_fields = {change["field"] for change in events[0]["changes"]}
+		self.assertIn("percent_complete", first_fields)
+		self.assertIn("status", first_fields)
+		first_progress = next(ch for ch in events[0]["changes"] if ch["field"] == "percent_complete")
+		self.assertEqual(first_progress["to"], "40.0%")  # get_diff formats Percent fields as text
+
+		second_fields = {change["field"] for change in events[1]["changes"]}
+		self.assertIn("percent_complete", second_fields)
+		self.assertNotIn("status", second_fields)  # unchanged on the second call, so no diff row for it
 
 	# -- project isolation ------------------------------------------------------------------------
 

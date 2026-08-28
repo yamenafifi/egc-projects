@@ -14,6 +14,8 @@ a forecast date or computes a critical path — that stays out of scope per §6'
 
 from __future__ import annotations
 
+import json
+
 import frappe
 from frappe import _
 from frappe.utils import flt
@@ -62,7 +64,25 @@ _CHILD_ROW_FIELDS = (
 	"is_milestone",
 )
 
-_DEPENDENCY_EDGE_FIELDS = ("name", "dependency_type", "lag_days")
+_DEPENDENCY_EDGE_FIELDS = ("name", "dependency_type", "lag_days", "creation")
+
+#: Fields whose changes are worth surfacing in the Activity timeline, with the label the frontend
+#: renders — deliberately excludes free-text/identity fields (activity_name, description) and
+#: nested-set internals (lft/rgt/old_parent/parent_egc_activity) that would be noise, not signal.
+_HISTORY_FIELDS = {
+	"status": "Status",
+	"percent_complete": "% Complete",
+	"planned_start_date": "Planned Start",
+	"planned_end_date": "Planned Finish",
+	"actual_start_date": "Actual Start",
+	"actual_end_date": "Actual Finish",
+	"forecast_start_date": "Forecast Start",
+	"forecast_end_date": "Forecast Finish",
+	"is_milestone": "Milestone",
+	"weight_pct": "Weight %",
+	"discipline": "Discipline",
+	"wbs_node": "WBS Node",
+}
 
 
 def _activity_dict(activity: str) -> dict:
@@ -139,8 +159,11 @@ def get_activity_detail(activity: str) -> dict:
 	project = validators.get_project_of("EGC Activity", activity)
 	validators.require_project_permission(project)
 
+	activity_dict = _activity_dict(activity)
+	activity_dict["is_overdue"] = is_overdue(activity_dict.status, activity_dict.planned_end_date)
+
 	return {
-		"activity": _activity_dict(activity),
+		"activity": activity_dict,
 		"children": _children_rows(activity),
 		"dependencies": _dependency_rows(activity),
 		# Reuses relationships.py's existing registry-driven join rather than reimplementing it
@@ -303,5 +326,55 @@ def update_activity_progress(activity: str, percent_complete, status: str | None
 	doc.percent_complete = percent_complete
 	if status:
 		doc.status = status
-	doc.save()
+	# `ignore_version=False` overrides Frappe's own `flags.ignore_version = frappe.in_test`
+	# default (see frappe/model/document.py `_save()`), which otherwise silently skips Version
+	# creation under `bench run-tests` — get_activity_history() below reads this doctype's
+	# Version log as its only source of "what changed and when", so this write path needs that
+	# log populated reliably in both production and tests, not just production.
+	doc.save(ignore_version=False)
 	return _activity_dict(activity)
+
+
+# --- get_activity_history --------------------------------------------------------------------------
+
+
+@frappe.whitelist()
+def get_activity_history(activity: str) -> list[dict]:
+	"""Every meaningful field change on `activity`, reconstructed from Frappe's own Version log
+	(`EGC Activity` has `track_changes: 1`) — there is no dedicated audit doctype for Activities
+	the way `EGC Submittal Revision` is one for Submittals, so this is the only source for "what
+	changed and when" beyond each field's current live value.
+
+	A group Activity's rollup writes (`activity_control.py`) go through `frappe.db.set_value(...,
+	update_modified=False)`, which bypasses `doc.save()` entirely and therefore never creates a
+	Version — so a group's derived status/progress changes never show up here. That's by design:
+	only genuine user-driven edits (via `update_activity_progress`, the Edit dialog, or the native
+	form) are "things that happened" worth narrating; a rollup recompute is not an event.
+	"""
+	if not activity or not frappe.db.exists("EGC Activity", activity):
+		frappe.throw(_("Activity {0} not found.").format(activity), exc=frappe.DoesNotExistError)
+	project = validators.get_project_of("EGC Activity", activity)
+	validators.require_project_permission(project)
+
+	versions = frappe.get_all(
+		"Version",
+		filters={"ref_doctype": "EGC Activity", "docname": activity},
+		fields=["name", "owner", "creation", "data"],
+		order_by="creation asc",
+	)
+
+	events = []
+	for version in versions:
+		try:
+			payload = json.loads(version.data or "{}")
+		except ValueError:
+			continue
+		changes = [
+			{"field": row[0], "label": _HISTORY_FIELDS[row[0]], "from": row[1], "to": row[2]}
+			for row in payload.get("changed") or []
+			if row[0] in _HISTORY_FIELDS
+		]
+		if not changes:
+			continue
+		events.append({"name": version.name, "owner": version.owner, "creation": version.creation, "changes": changes})
+	return events

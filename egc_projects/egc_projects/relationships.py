@@ -91,6 +91,7 @@ def get_links_for_activity(activity: str) -> list[dict]:
 			"link_purpose",
 			"is_blocking",
 			"remarks",
+			"creation",
 		],
 		order_by="creation asc",
 	)

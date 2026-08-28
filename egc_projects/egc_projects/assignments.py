@@ -68,6 +68,7 @@ def get_assignments_for(parent_doctype: str, parent_name: str) -> list[dict]:
 			"person_label",
 			"organization",
 			"remarks",
+			"creation",
 		],
 		order_by="is_primary desc, creation asc",
 	)
@@ -112,6 +113,7 @@ def get_assignments_for(parent_doctype: str, parent_name: str) -> list[dict]:
 				"organization": row.organization,
 				"organization_name": orgs.get(row.organization),
 				"remarks": row.remarks,
+				"creation": row.creation,
 			}
 		)
 	return result
