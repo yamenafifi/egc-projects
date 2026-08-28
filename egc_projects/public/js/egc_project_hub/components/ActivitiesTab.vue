@@ -9,7 +9,7 @@ import ErrorState from "./ErrorState.vue";
 import EmptyState from "./EmptyState.vue";
 import StatusPill from "./StatusPill.vue";
 import ActivityDetail from "./ActivityDetail.vue";
-import ActivityExpandPanel from "./ActivityExpandPanel.vue";
+import ActivityFullPage from "./ActivityFullPage.vue";
 import ActivityGanttView from "./ActivityGanttView.vue";
 import ActivityOutlineView from "./ActivityOutlineView.vue";
 
@@ -29,7 +29,7 @@ const WRITE_ROLES = ["EGC Project Manager", "EGC Project Engineer", "System Mana
 const can_write = computed(() => (frappe.user_roles || []).some((role) => WRITE_ROLES.includes(role)));
 
 const selected_activity = ref(null);
-const expanded = ref(new Set());
+const full_page_activity = ref(null);
 
 function open_detail(name) {
 	selected_activity.value = name;
@@ -39,11 +39,13 @@ function close_detail() {
 	selected_activity.value = null;
 }
 
-function toggle_expand(name) {
-	const next = new Set(expanded.value);
-	if (next.has(name)) next.delete(name);
-	else next.add(name);
-	expanded.value = next;
+function open_full_page(name) {
+	selected_activity.value = null;
+	full_page_activity.value = name;
+}
+
+function close_full_page() {
+	full_page_activity.value = null;
 }
 
 function on_detail_changed() {
@@ -62,9 +64,6 @@ const active_view = ref("Table");
 onMounted(() => {
 	if (consumeOverdueIntent("activities")) overdue_only.value = true;
 });
-
-// Toggle column + the 12 data columns, + 1 more when the trailing "+" quick-add column is shown.
-const column_count = computed(() => 13 + (can_write.value ? 1 : 0));
 
 const statuses = computed(() => [...new Set((data.value || []).map((r) => r.status).filter(Boolean))].sort());
 const disciplines = computed(() =>
@@ -182,6 +181,17 @@ function open_quick_add(row) {
 
 <template>
 	<div class="hub-activities">
+		<ActivityFullPage
+			v-if="full_page_activity"
+			:activity="full_page_activity"
+			:project="project"
+			:can-write="can_write"
+			@close="close_full_page"
+			@changed="on_detail_changed"
+			@open-activity="open_full_page"
+		/>
+
+		<template v-else>
 		<LoadingState v-if="loading" :rows="8" />
 		<ErrorState v-else-if="error" :message="error" @retry="reload" />
 		<EmptyState
@@ -239,7 +249,6 @@ function open_quick_add(row) {
 				<table class="hub-table">
 					<thead>
 						<tr>
-							<th class="hub-activities__toggle-col"></th>
 							<th>{{ __("Code") }}</th>
 							<th>{{ __("Name") }}</th>
 							<th>{{ __("WBS") }}</th>
@@ -257,18 +266,7 @@ function open_quick_add(row) {
 					</thead>
 					<tbody>
 						<template v-for="row in filtered" :key="row.name">
-							<tr class="hub-table__row--clickable" @click="toggle_expand(row.name)">
-								<td class="hub-activities__toggle-col">
-									<button
-										type="button"
-										class="hub-activities__toggle"
-										:class="{ 'hub-activities__toggle--open': expanded.has(row.name) }"
-										:title="__('Show linked records')"
-										@click.stop="toggle_expand(row.name)"
-									>
-										▶
-									</button>
-								</td>
+							<tr class="hub-table__row--clickable" @click="open_full_page(row.name)">
 								<td>
 									<span class="hub-activities__indent" :style="{ width: (row.indent || 0) * 18 + 'px' }" />
 									<a href="#" class="hub-link" @click.stop.prevent="open_detail(row.name)">{{ row.activity_code }}</a>
@@ -342,22 +340,11 @@ function open_quick_add(row) {
 									</button>
 								</td>
 							</tr>
-							<tr v-if="expanded.has(row.name)" class="hub-activities__expand-row">
-								<td :colspan="column_count">
-									<ActivityExpandPanel
-										:activity="row.name"
-										:project="project"
-										:can-write="can_write"
-										:link-counts="row.link_counts || {}"
-										@open-detail="open_detail"
-										@changed="reload"
-									/>
-								</td>
-							</tr>
 						</template>
 					</tbody>
 				</table>
 			</div>
+		</template>
 		</template>
 		</template>
 
@@ -369,39 +356,12 @@ function open_quick_add(row) {
 			@close="close_detail"
 			@changed="on_detail_changed"
 			@open-activity="open_detail"
+			@open-full-page="open_full_page"
 		/>
 	</div>
 </template>
 
 <style scoped>
-.hub-activities__toggle-col {
-	width: 28px;
-}
-
-.hub-activities__toggle {
-	appearance: none;
-	border: none;
-	background: none;
-	padding: 0;
-	width: 20px;
-	height: 20px;
-	color: var(--text-muted);
-	font-size: 10px;
-	cursor: pointer;
-	transition: transform 0.15s ease;
-}
-
-.hub-activities__toggle--open {
-	transform: rotate(90deg);
-	color: var(--text-color);
-}
-
-.hub-activities__expand-row td {
-	padding: 0;
-	background: var(--subtle-fg, var(--fg-color));
-	border-bottom: 1px solid var(--border-color);
-}
-
 .hub-activities__indent {
 	display: inline-block;
 	vertical-align: middle;

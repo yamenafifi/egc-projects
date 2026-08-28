@@ -92,6 +92,7 @@ def get_links_for_activity(activity: str) -> list[dict]:
 			"is_blocking",
 			"remarks",
 			"creation",
+			"owner",
 		],
 		order_by="creation asc",
 	)

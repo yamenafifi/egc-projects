@@ -59,6 +59,10 @@ export function update_activity_progress(activity, percent_complete, status) {
 	return call_activities("update_activity_progress", { activity, percent_complete, status });
 }
 
+export function get_activity_history(activity) {
+	return call_activities("get_activity_history", { activity });
+}
+
 // -- Everything below calls Frappe's own generic client API, or the pre-existing (not owned by
 // this wave's Activities package) `relationships.py` module, directly — `api/activities.py`'s
 // documented contract has no create/field-edit/link endpoints, and this file is still the one

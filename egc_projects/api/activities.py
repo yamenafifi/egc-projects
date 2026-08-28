@@ -50,6 +50,7 @@ _ACTIVITY_DETAIL_FIELDS = (
 	"description",
 	"creation",
 	"modified",
+	"owner",
 )
 
 _CHILD_ROW_FIELDS = (
@@ -64,7 +65,7 @@ _CHILD_ROW_FIELDS = (
 	"is_milestone",
 )
 
-_DEPENDENCY_EDGE_FIELDS = ("name", "dependency_type", "lag_days", "creation")
+_DEPENDENCY_EDGE_FIELDS = ("name", "dependency_type", "lag_days", "creation", "owner")
 
 #: Fields whose changes are worth surfacing in the Activity timeline, with the label the frontend
 #: renders — deliberately excludes free-text/identity fields (activity_name, description) and
@@ -108,6 +109,8 @@ def _shape_dependency_edge(edge: dict, other_id: str | None, activities: dict[st
 		"status": other.status if other else None,
 		"dependency_type": edge["dependency_type"],
 		"lag_days": edge["lag_days"],
+		"creation": edge["creation"],
+		"owner": edge["owner"],
 	}
 
 

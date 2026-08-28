@@ -7,7 +7,7 @@
      view renders them read-only with a small "derived from children" note rather than pretend
      they are editable, matching the DocType's own read_only_depends_on rule. -->
 <script setup>
-import { ref, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import {
 	get_activity_detail,
 	add_dependency,
@@ -29,7 +29,7 @@ const props = defineProps({
 	project: { type: String, required: true },
 	canWrite: { type: Boolean, default: false },
 });
-const emit = defineEmits(["close", "changed", "open-activity"]);
+const emit = defineEmits(["close", "changed", "open-activity", "open-full-page"]);
 
 const { data, loading, error, reload } = useHubResource(() => get_activity_detail(props.activity));
 watch(() => props.activity, reload, { immediate: true });
@@ -39,13 +39,47 @@ function notify_changed() {
 	reload();
 }
 
-// "Expand" widens the drawer in place rather than navigating away — see SubmittalDetail.vue's
-// identical pattern for the reasoning. `open_form` stays as a small secondary escape hatch.
-const expanded = ref(false);
-
 function open_form() {
 	frappe.set_route("Form", "EGC Activity", props.activity);
 }
+
+// This drawer stays a quick glance/edit surface — anything needing the full picture (every
+// change that's happened, linked Submittals/Documents as real tables, comments) belongs on the
+// full-screen page instead, reached from here rather than duplicated here.
+function open_full_page() {
+	emit("open-full-page", props.activity);
+}
+
+// -- one-line "what's true right now" summary, mirroring SubmittalDetail.vue's next_step_text --
+
+const status_summary_text = computed(() => {
+	const a = data.value?.activity;
+	if (!a) return null;
+	if (a.is_group) {
+		return __("Group Activity — status and progress are derived from {0} child activit{1}.", [
+			data.value.children.length,
+			data.value.children.length === 1 ? "y" : "ies",
+		]);
+	}
+	if (a.is_overdue) {
+		const days = frappe.datetime.get_diff(frappe.datetime.get_today(), a.planned_end_date);
+		return __("Overdue by {0} day{1} — planned finish was {2}.", [days, days === 1 ? "" : "s", format_date(a.planned_end_date)]);
+	}
+	if (a.status === "Completed") {
+		return __("Completed{0}.", [a.actual_end_date ? __(" on {0}", [format_date(a.actual_end_date)]) : ""]);
+	}
+	if (a.status === "Cancelled") return __("Cancelled.");
+	if (a.status === "On Hold") return __("On hold.");
+	if (a.status === "In Progress") {
+		return __("In progress — {0}% complete, planned finish {1}.", [
+			Math.round(a.percent_complete || 0),
+			format_date(a.planned_end_date),
+		]);
+	}
+	return a.planned_start_date
+		? __("Not started yet — planned to begin {0}.", [format_date(a.planned_start_date)])
+		: __("Not started yet — no planned start date set.");
+});
 
 // Deliberately a small, fixed field set here (not a generic form builder) — dates, discipline
 // and WBS cover the routine "fix a typo / reschedule" edit without reimplementing the native
@@ -310,7 +344,7 @@ function confirm_remove_dependency(name) {
 
 <template>
 	<div class="activity-detail__backdrop" @click.self="$emit('close')">
-		<div class="activity-detail__panel" :class="{ 'activity-detail__panel--expanded': expanded }" role="dialog" aria-modal="true">
+		<div class="activity-detail__panel" role="dialog" aria-modal="true">
 			<div class="activity-detail__header">
 				<div class="activity-detail__identity">
 					<div class="activity-detail__code">{{ data?.activity?.activity_code || activity }}</div>
@@ -318,10 +352,8 @@ function confirm_remove_dependency(name) {
 				</div>
 				<div class="activity-detail__header-actions">
 					<a v-if="canWrite && data" href="#" class="hub-link" @click.prevent="open_edit_dialog">{{ __("Edit") }}</a>
-					<a href="#" class="hub-link" @click.prevent="expanded = !expanded">
-						{{ expanded ? __("Collapse") : __("Expand") }}
-					</a>
-					<a v-if="expanded" href="#" class="hub-link hub-link--muted" @click.prevent="open_form">
+					<a href="#" class="hub-link" @click.prevent="open_full_page">{{ __("Open full page ↗") }}</a>
+					<a href="#" class="hub-link hub-link--muted" @click.prevent="open_form">
 						{{ __("View raw record ↗") }}
 					</a>
 					<button type="button" class="activity-detail__close" :aria-label="__('Close')" @click="$emit('close')">
@@ -338,9 +370,12 @@ function confirm_remove_dependency(name) {
 					<section class="activity-detail__section">
 						<div class="activity-detail__status-row">
 							<StatusPill :status="data.activity.status" />
+							<span v-if="data.activity.is_overdue" class="indicator-pill red">{{ __("Overdue") }}</span>
 							<span v-if="data.activity.is_milestone" class="indicator-pill blue">{{ __("Milestone") }}</span>
 							<span v-if="data.activity.is_group" class="indicator-pill gray">{{ __("Group") }}</span>
 						</div>
+
+						<p v-if="status_summary_text" class="activity-detail__status-summary">{{ status_summary_text }}</p>
 
 						<div class="activity-detail__progress-row">
 							<div class="hub-percent">
@@ -608,10 +643,6 @@ function confirm_remove_dependency(name) {
 	transition: width 0.15s ease;
 }
 
-.activity-detail__panel--expanded {
-	width: min(900px, 100vw);
-}
-
 .hub-link--muted {
 	color: var(--text-muted);
 	font-size: var(--text-xs);
@@ -700,6 +731,12 @@ function confirm_remove_dependency(name) {
 	align-items: center;
 	gap: 8px;
 	margin-bottom: 12px;
+}
+
+.activity-detail__status-summary {
+	margin: 0 0 12px;
+	font-size: var(--text-sm);
+	color: var(--text-color);
 }
 
 .activity-detail__progress-row {
