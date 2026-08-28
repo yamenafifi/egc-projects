@@ -129,6 +129,16 @@ function days_overdue(row) {
 
 <template>
 	<div class="hub-submittals">
+		<SubmittalDetail
+			v-if="selected_submittal"
+			:submittal="selected_submittal"
+			:project="project"
+			:can-write="can_write"
+			@close="close_detail"
+			@changed="on_detail_changed"
+		/>
+
+		<template v-else>
 		<LoadingState v-if="loading" :rows="8" />
 		<ErrorState v-else-if="error" :message="error" @retry="reload" />
 		<EmptyState
@@ -200,15 +210,7 @@ function days_overdue(row) {
 				</table>
 			</div>
 		</template>
-
-		<SubmittalDetail
-			v-if="selected_submittal"
-			:submittal="selected_submittal"
-			:project="project"
-			:can-write="can_write"
-			@close="close_detail"
-			@changed="on_detail_changed"
-		/>
+		</template>
 	</div>
 </template>
 

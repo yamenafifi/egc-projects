@@ -1,9 +1,14 @@
-<!-- Submittal detail workspace (docs/ARCHITECTURE_V2.md §7, §16 of the original brief). Same
-     right-hand drawer shell as DocumentDetail.vue/ActivityDetail.vue.
+<!-- Submittal detail workspace — a full-page view that REPLACES the Submittals tab's list
+     (SubmittalsTab.vue swaps the list out for this, it doesn't overlay it — see that file's
+     `selected_submittal` branch). Modeled on a GitHub pull request page: a status banner up top
+     for "what's true right now and what to do about it", a single chronological timeline down
+     the middle for "everything that has happened" (every cycle started, submitted, and responded
+     to, comments interleaved by real timestamp), and a sidebar for the standing facts that don't
+     belong in a history feed (documents, reviewers still pending, team, dates).
 
      Shows EVERY submission cycle, not just the current one — "confirm full history remains
-     visible" is one of the build brief's own acceptance checks, and a Revise & Resubmit cycle
-     is exactly the case where hiding history would be actively misleading. -->
+     visible" is one of the build brief's own acceptance checks, and a Revise & Resubmit cycle is
+     exactly the case where hiding history would be actively misleading. -->
 <script setup>
 import { computed, ref, watch } from "vue";
 import {
@@ -48,12 +53,6 @@ function notify_changed() {
 	reload();
 }
 
-// "Expand" widens the drawer in place rather than navigating away — the drawer already shows
-// every field this doctype has; expanding just gives the denser blocks (dates, tracked
-// documents) more room. `open_form` (the actual navigate-away) is kept as a small, secondary
-// escape hatch inside the expanded view, not the primary way to see detail.
-const expanded = ref(false);
-
 function open_form() {
 	frappe.set_route("Form", "EGC Submittal", props.submittal);
 }
@@ -66,10 +65,13 @@ function format_date(value) {
 	return value ? frappe.datetime.str_to_user(value) : "—";
 }
 
+function format_datetime(value) {
+	return value ? frappe.datetime.str_to_user(value) : "—";
+}
+
 // The current cycle is always the FIRST row — submissions are returned newest-first
 // (submission_seq desc), matching the register's own "current" convention.
 const current_submission = computed(() => (data.value?.submissions || [])[0] || null);
-const history_submissions = computed(() => (data.value?.submissions || []).slice(1));
 
 const has_steps = computed(() => (current_submission.value?.steps || []).length > 0);
 const stages = computed(() => {
@@ -83,13 +85,6 @@ const stages = computed(() => {
 		.sort((a, b) => a - b)
 		.map((seq) => ({ sequence: seq, steps: by_sequence[seq] }));
 });
-
-function stage_icon(step) {
-	if (step.status === "Responded") return "✓";
-	if (step.status === "In Review") return "●";
-	if (step.status === "Skipped") return "⊘";
-	return "○";
-}
 
 // -- delete: only ever offered while every cycle is still Draft — once a submittal has real
 // review history, that history is permanent (submittals_api.delete_submittal enforces this
@@ -110,11 +105,26 @@ async function confirm_delete_submittal() {
 	});
 }
 
-// -- one-line "what's going on / what's next" summary, shown right under the status pill ---------
+// -- one-line "what's going on / what's next" summary, shown in the banner right under the title -
 
 const RESPONSE_IS_FINAL_OK = ["Approved", "Approved with Comments"];
 
+function response_tone(response) {
+	if (RESPONSE_IS_FINAL_OK.includes(response)) return "green";
+	if (response === "Rejected") return "red";
+	if (response === "Revise & Resubmit") return "orange";
+	return "grey";
+}
+
 const ball_in_court = computed(() => data.value?.submittal?.ball_in_court);
+
+const banner_tone = computed(() => {
+	const s = current_submission.value;
+	if (!s) return "grey";
+	if (s.submission_status === "Responded") return response_tone(s.response);
+	if (s.docstatus === 0) return "grey";
+	return "blue";
+});
 
 // -- tracked documents: the document(s) this submittal is actually about, at their LIVE latest
 // issued revision — not frozen to whatever a given cycle happened to attach. Flags when the
@@ -158,9 +168,10 @@ const next_step_text = computed(() => {
 	return __("{0} — mark it Under Review once someone starts looking, or record the response.", [s.submission_status]);
 });
 
-// The actual reason behind a Rejected/Revise & Resubmit response, surfaced prominently instead
-// of only living on whichever individual reviewer step caused it (or, for the no-steps path,
-// nowhere in the UI at all — it was captured in the database and simply never displayed).
+// The actual reason behind a Rejected/Revise & Resubmit response, surfaced prominently in the
+// banner instead of only living on whichever individual reviewer step caused it (or, for the
+// no-steps path, nowhere in the UI at all — it was captured in the database and simply never
+// displayed). It also appears in its own place in the timeline below, in context.
 const rejection_reason_text = computed(() => {
 	const s = current_submission.value;
 	if (!s || s.submission_status !== "Responded" || RESPONSE_IS_FINAL_OK.includes(s.response)) return null;
@@ -373,7 +384,7 @@ async function open_start_submission_dialog() {
 					frappe.msgprint({
 						title: __("Submission Started, But Incomplete"),
 						message: __(
-							"{0} was created, but this step failed: {1} Finish configuring it — documents, reviewers, dates — from this drawer.",
+							"{0} was created, but this step failed: {1} Finish configuring it — documents, reviewers, dates — below.",
 							[frappe.utils.escape_html(submission_name), e.message]
 						),
 						indicator: "orange",
@@ -466,7 +477,7 @@ async function open_resubmit_dialog() {
 					notify_changed();
 					frappe.msgprint({
 						title: __("Resubmission Started, But Incomplete"),
-						message: __("{0} was created, but this step failed: {1} Finish configuring it from this drawer.", [
+						message: __("{0} was created, but this step failed: {1} Finish configuring it below.", [
 							frappe.utils.escape_html(submission_name),
 							e.message,
 						]),
@@ -742,10 +753,9 @@ function confirm_remove_document(row) {
 	});
 }
 
-// -- related activities ------------------------------------------------------------------------
-
 // -- comments (generic thread, reachable by external reviewers too — comments.py's only gate is
-// read access to the Submittal itself, same as everything else on this drawer) -----------------
+// read access to the Submittal itself, same as everything else on this page). Rendered as part
+// of the unified timeline below, not a separate box — see `timeline_events`. -------------------
 
 const comments = ref([]);
 const new_comment = ref("");
@@ -772,10 +782,6 @@ async function do_post_comment() {
 	} finally {
 		posting_comment.value = false;
 	}
-}
-
-function format_datetime(value) {
-	return value ? frappe.datetime.str_to_user(value) : "—";
 }
 
 function open_link_activity_dialog() {
@@ -806,218 +812,334 @@ function open_link_activity_dialog() {
 	});
 	dialog.show();
 }
+
+// -- unified timeline: every cycle's start/submit/response, plus comments, merged into ONE
+// chronological feed sorted by real timestamp — this is what replaced the old "Review Cycle"
+// box (current cycle only, vague icons) and the separate "Earlier Review Cycles" list (one line
+// per cycle, no reasons visible). Everything that happened is here, in the order it happened,
+// same shape as a GitHub pull request's conversation thread. ------------------------------------
+
+function event_response(event) {
+	return event.type === "step_responded" ? event.step.response : event.submission.response;
+}
+
+function event_tone(event) {
+	if (event.type === "submitted") return "blue";
+	if (event.type === "step_responded" || event.type === "responded") return response_tone(event_response(event));
+	return "grey";
+}
+
+function event_icon(event) {
+	if (event.type === "started") return "+";
+	if (event.type === "submitted") return "↑";
+	if (event.type === "comment") return "●";
+	const response = event_response(event);
+	if (RESPONSE_IS_FINAL_OK.includes(response)) return "✓";
+	if (response === "Rejected") return "✕";
+	if (response === "Revise & Resubmit") return "↺";
+	return "○";
+}
+
+// `date_submitted`/`response_date` are Date fields (day-only, see the doctype JSON) — sorting the
+// whole feed by those directly interleaves them wrongly against same-day Datetime fields like
+// `creation` (a response recorded at 18:00 the day it was requested would sort BEFORE the 09:00
+// "started" event, since midnight < 18:00). Sidestepping that: events within one cycle are built
+// in a structurally guaranteed order (started, then submitted, then each response as it actually
+// came in — ranked by the step's own `modified`, a real Datetime — then the no-steps response),
+// and only comments (which DO have a real Datetime `creation`) are interleaved across that
+// sequence, matched against the real Datetimes the other events do have (`creation`/`modified`).
+const timeline_events = computed(() => {
+	const submissions = [...(data.value?.submissions || [])].reverse(); // oldest cycle first
+
+	const groups = submissions.map((s) => {
+		const events = [];
+		events.push({ type: "started", key: `${s.name}-started`, timestamp: s.creation, submission: s });
+		if (s.docstatus === 1) {
+			events.push({ type: "submitted", key: `${s.name}-submitted`, timestamp: s.creation, submission: s });
+		}
+		const responded_steps = (s.steps || [])
+			.filter((step) => step.status === "Responded")
+			.sort((a, b) => new Date(a.modified) - new Date(b.modified));
+		for (const step of responded_steps) {
+			events.push({ type: "step_responded", key: step.name, timestamp: step.modified, submission: s, step });
+		}
+		if (!(s.steps || []).length && s.submission_status === "Responded") {
+			events.push({
+				type: "responded",
+				key: `${s.name}-responded`,
+				timestamp: s.modified || s.response_date,
+				submission: s,
+			});
+		}
+		return { anchor: s.creation, events };
+	});
+
+	for (const c of comments.value) {
+		const comment_time = new Date(c.creation).getTime();
+		let bucket = groups[0];
+		for (const g of groups) {
+			if (new Date(g.anchor).getTime() <= comment_time) bucket = g;
+		}
+		if (!bucket) continue;
+		let insert_at = bucket.events.length;
+		for (let i = 0; i < bucket.events.length; i++) {
+			if (new Date(bucket.events[i].timestamp).getTime() > comment_time) {
+				insert_at = i;
+				break;
+			}
+		}
+		bucket.events.splice(insert_at, 0, { type: "comment", key: `comment-${c.name}`, timestamp: c.creation, comment: c });
+	}
+
+	return groups.flatMap((g) => g.events);
+});
 </script>
 
 <template>
-	<div class="activity-detail__backdrop" @click.self="$emit('close')">
-		<div class="activity-detail__panel" :class="{ 'activity-detail__panel--expanded': expanded }" role="dialog" aria-modal="true">
-			<div class="activity-detail__header">
-				<div class="activity-detail__identity">
-					<div class="activity-detail__code">{{ data?.submittal?.submittal_number || submittal }}</div>
-					<div class="activity-detail__name">{{ data?.submittal?.title || "" }}</div>
-				</div>
-				<div class="activity-detail__header-actions">
-					<a href="#" class="hub-link" @click.prevent="expanded = !expanded">
-						{{ expanded ? __("Collapse") : __("Expand") }}
-					</a>
-					<a v-if="expanded" href="#" class="hub-link hub-link--muted" @click.prevent="open_form">
+	<div class="submittal-page">
+		<LoadingState v-if="loading" :rows="8" />
+		<ErrorState v-else-if="error" :message="error" @retry="reload" />
+
+		<template v-else-if="data">
+			<div class="submittal-page__topbar">
+				<a href="#" class="hub-link submittal-page__back" @click.prevent="$emit('close')">
+					{{ __("← Back to Submittals") }}
+				</a>
+				<div class="submittal-page__topbar-actions">
+					<a href="#" class="hub-link hub-link--muted" @click.prevent="open_form">
 						{{ __("View raw record ↗") }}
 					</a>
 					<a
-						v-if="canWrite && data && !has_submitted_history"
+						v-if="canWrite && !has_submitted_history"
 						href="#"
 						class="hub-link hub-link--danger"
 						@click.prevent="confirm_delete_submittal"
 					>
 						{{ __("Delete") }}
 					</a>
-					<span v-else-if="canWrite && data" class="submittal-permanent-note" :title="__('This submittal has submitted review history, which is permanent and cannot be deleted.')">
+					<span v-else-if="canWrite" class="submittal-permanent-note" :title="__('This submittal has submitted review history, which is permanent and cannot be deleted.')">
 						{{ __("History is permanent") }}
 					</span>
-					<button type="button" class="activity-detail__close" :aria-label="__('Close')" @click="$emit('close')">
-						&times;
-					</button>
 				</div>
 			</div>
 
-			<div class="activity-detail__body">
-				<LoadingState v-if="loading" :rows="6" />
-				<ErrorState v-else-if="error" :message="error" @retry="reload" />
+			<div class="submittal-page__identity">
+				<div class="submittal-page__code">{{ data.submittal.submittal_number }}</div>
+				<h1 class="submittal-page__title">{{ data.submittal.title }}</h1>
+				<div class="submittal-page__status-row">
+					<StatusPill :status="data.submittal.submittal_status" />
+					<span v-if="data.submittal.ball_in_court" class="indicator-pill blue">
+						{{ __("Ball in Court") }}: {{ data.submittal.ball_in_court }}
+					</span>
+					<span class="submittal-page__meta-inline">
+						{{ data.submittal.submittal_type || "—" }}<template v-if="data.submittal.discipline"> · {{ data.submittal.discipline }}</template>
+					</span>
+				</div>
+			</div>
 
-				<template v-else-if="data">
-					<section class="activity-detail__section">
-						<div class="activity-detail__status-row">
-							<StatusPill :status="data.submittal.submittal_status" />
-							<span v-if="data.submittal.ball_in_court" class="indicator-pill blue">
-								{{ __("Ball in Court") }}: {{ data.submittal.ball_in_court }}
-							</span>
+			<section v-if="!current_submission" class="submittal-page__empty-cycle">
+				<EmptyState
+					:title="__('No submission cycle yet')"
+					:description="__('A Submittal is a formal review — start the first submission to attach the document revision(s) needing approval and name who reviews them.')"
+					:action-label="canWrite ? __('Start Submission') : ''"
+					@action="open_start_submission_dialog"
+				/>
+			</section>
+
+			<template v-else>
+				<div class="submittal-banner" :class="`submittal-banner--${banner_tone}`">
+					<div class="submittal-banner__main">
+						<p class="submittal-banner__text">{{ next_step_text }}</p>
+						<div v-if="rejection_reason_text" class="submittal-banner__reason">
+							<span class="submittal-banner__reason-label">{{ current_submission.response }}:</span>
+							{{ rejection_reason_text }}
 						</div>
-						<dl class="activity-detail__meta">
-							<div>
-								<dt>{{ __("Type") }}</dt>
-								<dd>{{ data.submittal.submittal_type || "—" }}</dd>
-							</div>
-							<div>
-								<dt>{{ __("Discipline") }}</dt>
-								<dd>{{ data.submittal.discipline || "—" }}</dd>
-							</div>
-							<div>
-								<dt>{{ __("Responsible Party") }}</dt>
-								<dd>{{ data.submittal.responsible_party || "—" }}</dd>
-							</div>
-							<div>
-								<dt>{{ __("Submittal Manager") }}</dt>
-								<dd>{{ data.submittal.submittal_manager || "—" }}</dd>
-							</div>
-							<div>
-								<dt>{{ __("Due Date") }}</dt>
-								<dd>{{ format_date(data.submittal.current_due_date) }}</dd>
-							</div>
-						</dl>
-					</section>
+					</div>
+					<div v-if="canWrite" class="submittal-banner__actions">
+						<button
+							v-if="current_submission.docstatus === 0"
+							type="button"
+							class="btn btn-sm btn-primary"
+							:disabled="submitting || !current_submission.documents.length"
+							@click="do_submit"
+						>
+							{{ __("Submit") }}
+						</button>
+						<button
+							v-if="current_submission.docstatus === 1 && current_submission.submission_status === 'Submitted' && !has_steps"
+							type="button"
+							class="btn btn-sm btn-default"
+							@click="do_mark_under_review"
+						>
+							{{ __("Mark Under Review") }}
+						</button>
+						<button
+							v-if="current_submission.docstatus === 1 && ['Submitted', 'Under Review'].includes(current_submission.submission_status) && !has_steps"
+							type="button"
+							class="btn btn-sm btn-default"
+							@click="open_record_response_dialog(null)"
+						>
+							{{ __("Record Response") }}
+						</button>
+						<button
+							v-if="current_submission.submission_status === 'Responded' && !RESPONSE_IS_FINAL_OK.includes(current_submission.response)"
+							type="button"
+							class="btn btn-sm btn-primary"
+							@click="open_resubmit_dialog"
+						>
+							{{ __("Resubmit") }}
+						</button>
+					</div>
+				</div>
 
-					<section class="activity-detail__section">
-						<div class="activity-detail__head-row">
-							<div class="activity-detail__section-title">{{ __("Team") }}</div>
-							<button v-if="canWrite" type="button" class="btn btn-xs btn-default" @click="open_add_assignment_dialog">
-								{{ __("Add Person") }}
+				<div class="submittal-page__body">
+					<div class="submittal-main">
+						<div class="submittal-timeline">
+							<div v-for="event in timeline_events" :key="event.key" class="submittal-timeline__row">
+								<div class="submittal-timeline__rail">
+									<span class="submittal-timeline__dot" :class="`submittal-timeline__dot--${event_tone(event)}`">
+										{{ event_icon(event) }}
+									</span>
+									<span class="submittal-timeline__line" />
+								</div>
+
+								<div class="submittal-timeline__content">
+									<template v-if="event.type === 'started'">
+										<p class="submittal-timeline__headline">
+											<strong>{{ event.submission.revision_label }}</strong> {{ __("started") }}
+											<span v-if="event.submission.owner" class="submittal-timeline__by">— {{ event.submission.owner }}</span>
+											<span class="submittal-timeline__when">{{ format_datetime(event.timestamp) }}</span>
+										</p>
+										<ul v-if="(event.submission.documents || []).length" class="submittal-timeline__docs">
+											<li v-for="row in event.submission.documents" :key="row.document_revision">
+												{{ row.document_title || row.document }} ({{ __("Rev") }} {{ row.revision }})
+											</li>
+										</ul>
+									</template>
+
+									<template v-else-if="event.type === 'submitted'">
+										<p class="submittal-timeline__headline">
+											{{ __("Submitted for review") }}
+											<span v-if="event.submission.submitted_by" class="submittal-timeline__by">— {{ event.submission.submitted_by }}</span>
+											<span class="submittal-timeline__when">{{ format_datetime(event.timestamp) }}</span>
+										</p>
+									</template>
+
+									<template v-else-if="event.type === 'step_responded'">
+										<p class="submittal-timeline__headline">
+											<strong>{{ event.step.reviewer_label || event.step.reviewer_role }}</strong>
+											{{ __("responded") }}
+											<span class="indicator-pill" :class="event_tone(event)">{{ event.step.response }}</span>
+											<span class="submittal-timeline__when">{{ format_datetime(event.timestamp) }}</span>
+										</p>
+										<p v-if="event.step.response_remarks" class="submittal-timeline__remarks">{{ event.step.response_remarks }}</p>
+										<a
+											v-if="event.step.response_attachment"
+											:href="event.step.response_attachment"
+											target="_blank"
+											rel="noopener"
+											class="hub-link submittal-timeline__attachment"
+										>
+											{{ __("View attachment") }}
+										</a>
+									</template>
+
+									<template v-else-if="event.type === 'responded'">
+										<p class="submittal-timeline__headline">
+											{{ __("Response recorded") }}
+											<span class="indicator-pill" :class="event_tone(event)">{{ event.submission.response }}</span>
+											<span v-if="event.submission.responded_by" class="submittal-timeline__by">— {{ event.submission.responded_by }}</span>
+											<span class="submittal-timeline__when">{{ format_datetime(event.timestamp) }}</span>
+										</p>
+										<p v-if="event.submission.response_remarks" class="submittal-timeline__remarks">{{ event.submission.response_remarks }}</p>
+									</template>
+
+									<template v-else-if="event.type === 'comment'">
+										<p class="submittal-timeline__headline">
+											<strong>{{ event.comment.owner }}</strong> {{ __("commented") }}
+											<span class="submittal-timeline__when">{{ format_datetime(event.timestamp) }}</span>
+										</p>
+										<p class="submittal-timeline__remarks submittal-timeline__remarks--comment">{{ event.comment.content }}</p>
+									</template>
+								</div>
+							</div>
+						</div>
+
+						<div class="submittal-composer">
+							<textarea
+								v-model="new_comment"
+								class="form-control"
+								rows="2"
+								:placeholder="__('Add a comment…')"
+							></textarea>
+							<button
+								type="button"
+								class="btn btn-sm btn-primary"
+								:disabled="posting_comment || !new_comment.trim()"
+								@click="do_post_comment"
+							>
+								{{ __("Post") }}
 							</button>
 						</div>
-						<p class="submittal-section-hint">
-							{{ __("For visibility and notifications only — not the same as the Reviewers below, who must actually respond for this submission to move forward.") }}
-						</p>
-						<EmptyState v-if="!(data.assignments || []).length" :title="__('No one assigned yet')" />
-						<ul v-else class="activity-detail__list">
-							<li v-for="row in data.assignments" :key="row.name">
-								<div>
-									<span class="activity-detail__link">{{ row.person_name || row.organization_name || __("Unnamed") }}</span>
-									<span v-if="row.person_name && row.organization_name" class="activity-detail__dep-type">
-										— {{ row.organization_name }}
+					</div>
+
+					<div class="submittal-sidebar">
+						<div class="submittal-sidebar__card">
+							<div class="activity-detail__head-row">
+								<div class="activity-detail__section-title">{{ __("Documents") }}</div>
+								<button
+									v-if="canWrite && current_submission.docstatus === 0"
+									type="button"
+									class="btn btn-xs btn-default"
+									@click="open_add_document_dialog"
+								>
+									{{ __("Add") }}
+								</button>
+							</div>
+							<div v-if="tracked_documents_display.length" class="submittal-tracked-docs">
+								<div v-for="doc in tracked_documents_display" :key="doc.name" class="submittal-tracked-docs__item">
+									<a href="#" class="hub-link" @click.prevent="frappe.set_route('Form', 'EGC Project Document', doc.name)">
+										{{ doc.document_number }} — {{ doc.title }}
+									</a>
+									<span class="submittal-tracked-docs__rev">
+										{{ __("Latest issued") }}: {{ doc.current_revision_label || "—" }}
 									</span>
-									<span v-if="row.is_primary" class="indicator-pill blue">{{ __("Primary") }}</span>
+									<span v-if="!doc.is_current_in_this_cycle && doc.current_revision" class="indicator-pill orange">
+										{{ __("Newer revision available") }}
+									</span>
 								</div>
-								<div class="activity-links__meta">
-									<span class="activity-detail__dep-type">{{ row.assignment_role }}</span>
-									<button v-if="canWrite" type="button" class="btn btn-xs btn-default" @click="confirm_remove_assignment(row)">
+							</div>
+							<EmptyState v-else :title="__('No documents attached yet')" />
+							<ul v-if="canWrite && current_submission.docstatus === 0 && current_submission.documents.length" class="activity-detail__list submittal-sidebar__sublist">
+								<li v-for="row in current_submission.documents" :key="row.name">
+									<span class="submittal-sidebar__sublist-label">{{ row.document_title || row.document }} (Rev {{ row.revision }})</span>
+									<button type="button" class="btn btn-xs btn-default" @click="confirm_remove_document(row)">
 										{{ __("Remove") }}
 									</button>
-								</div>
-							</li>
-						</ul>
-					</section>
-
-					<section v-if="!current_submission" class="activity-detail__section">
-						<EmptyState
-							:title="__('No submission cycle yet')"
-							:description="__('A Submittal is a formal review — start the first submission to attach the document revision(s) needing approval and name who reviews them.')"
-							:action-label="canWrite ? __('Start Submission') : ''"
-							@action="open_start_submission_dialog"
-						/>
-					</section>
-
-					<section v-if="current_submission" class="activity-detail__section">
-						<div class="activity-detail__head-row">
-							<div class="activity-detail__section-title">
-								{{ __("Review Cycle") }} — {{ current_submission.revision_label }}
-							</div>
+								</li>
+							</ul>
 						</div>
 
-						<div v-if="tracked_documents_display.length" class="submittal-tracked-docs">
-							<div v-for="doc in tracked_documents_display" :key="doc.name" class="submittal-tracked-docs__item">
-								<a href="#" class="hub-link" @click.prevent="frappe.set_route('Form', 'EGC Project Document', doc.name)">
-									{{ doc.document_number }} — {{ doc.title }}
-								</a>
-								<span class="submittal-tracked-docs__rev">
-									{{ __("Latest issued revision") }}: {{ doc.current_revision_label || "—" }}
-								</span>
-								<span v-if="!doc.is_current_in_this_cycle && doc.current_revision" class="indicator-pill orange">
-									{{ __("Newer revision available") }}
-								</span>
-							</div>
-						</div>
-
-						<div v-if="rejection_reason_text" class="submittal-rejection-reason">
-							<div class="submittal-rejection-reason__label">{{ current_submission.response }}:</div>
-							<p class="submittal-rejection-reason__text">{{ rejection_reason_text }}</p>
-						</div>
-
-						<div class="submittal-next-step">
-							<p v-if="next_step_text" class="submittal-next-step__text">{{ next_step_text }}</p>
-							<div v-if="canWrite" class="submittal-next-step__actions">
-								<button
-									v-if="current_submission.docstatus === 0"
-									type="button"
-									class="btn btn-xs btn-primary"
-									:disabled="submitting || !current_submission.documents.length"
-									@click="do_submit"
-								>
-									{{ __("Submit") }}
-								</button>
-								<button
-									v-if="current_submission.docstatus === 1 && current_submission.submission_status === 'Submitted' && !has_steps"
-									type="button"
-									class="btn btn-xs btn-default"
-									@click="do_mark_under_review"
-								>
-									{{ __("Mark Under Review") }}
-								</button>
-								<button
-									v-if="current_submission.docstatus === 1 && ['Submitted', 'Under Review'].includes(current_submission.submission_status) && !has_steps"
-									type="button"
-									class="btn btn-xs btn-default"
-									@click="open_record_response_dialog(null)"
-								>
-									{{ __("Record Response") }}
-								</button>
-								<button
-									v-if="current_submission.submission_status === 'Responded' && !RESPONSE_IS_FINAL_OK.includes(current_submission.response)"
-									type="button"
-									class="btn btn-xs btn-primary"
-									@click="open_resubmit_dialog"
-								>
-									{{ __("Resubmit") }}
-								</button>
-							</div>
-						</div>
-
-						<!-- Workflow timeline: only rendered when this cycle actually has review steps. -->
-						<div v-if="has_steps" class="submittal-workflow">
+						<div class="submittal-sidebar__card">
 							<div class="activity-detail__head-row">
-								<div class="activity-detail__dep-label">{{ __("Reviewers") }}</div>
+								<div class="activity-detail__section-title">{{ __("Reviewers") }}</div>
 								<button
 									v-if="canWrite && current_submission.docstatus === 0"
 									type="button"
 									class="btn btn-xs btn-default"
 									@click="open_add_reviewer_dialog"
 								>
-									{{ __("Add Reviewer") }}
+									{{ __("Add") }}
 								</button>
 							</div>
-							<div v-for="stage in stages" :key="stage.sequence" class="submittal-workflow__stage">
-								<div class="submittal-workflow__stage-label">{{ __("Stage {0}", [stage.sequence + 1]) }}</div>
-								<div
-									v-for="step in stage.steps"
-									:key="step.name"
-									class="submittal-workflow__step"
-									:class="`submittal-workflow__step--${step.status.toLowerCase().replace(' ', '-')}`"
-								>
-									<div class="submittal-workflow__step-row">
-										<span class="submittal-workflow__icon">{{ stage_icon(step) }}</span>
-										<span class="submittal-workflow__who">
+							<template v-if="has_steps">
+								<div v-for="stage in stages" :key="stage.sequence" class="submittal-sidebar__stage">
+									<div class="submittal-sidebar__stage-label">{{ __("Stage {0}", [stage.sequence]) }}</div>
+									<div v-for="step in stage.steps" :key="step.name" class="submittal-sidebar__reviewer">
+										<span class="submittal-sidebar__reviewer-name">
 											{{ step.reviewer_role }}<template v-if="step.reviewer_label">: {{ step.reviewer_label }}</template>
-											<span v-if="!step.is_required" class="submittal-workflow__optional">({{ __("optional") }})</span>
 										</span>
-										<span v-if="step.response" class="submittal-workflow__response">{{ step.response }}</span>
-										<a
-											v-if="step.response_attachment"
-											:href="step.response_attachment"
-											target="_blank"
-											rel="noopener"
-											class="hub-link"
-											:title="__('Response attachment')"
-										>
-											📎
-										</a>
+										<StatusPill :status="step.status" />
 										<button
 											v-if="can_respond_to(step)"
 											type="button"
@@ -1036,218 +1158,140 @@ function open_link_activity_dialog() {
 											&times;
 										</button>
 									</div>
-									<p v-if="step.response_remarks" class="submittal-workflow__remarks">{{ step.response_remarks }}</p>
 								</div>
-							</div>
-						</div>
-						<div v-else-if="canWrite && current_submission.docstatus === 0" class="submittal-workflow-empty">
-							<button type="button" class="btn btn-xs btn-default" @click="open_apply_template_dialog">
-								{{ __("Apply Workflow Template") }}
-							</button>
-							<button type="button" class="btn btn-xs btn-default" @click="open_add_reviewer_dialog">
-								{{ __("Add Reviewer") }}
-							</button>
-						</div>
-
-						<div class="activity-detail__head-row" style="margin-top: 14px">
-							<div class="activity-detail__dep-label">{{ __("Documents") }}</div>
-							<button
-								v-if="canWrite && current_submission.docstatus === 0"
-								type="button"
-								class="btn btn-xs btn-default"
-								@click="open_add_document_dialog"
-							>
-								{{ __("Add Document") }}
-							</button>
-						</div>
-						<EmptyState v-if="!current_submission.documents.length" :title="__('No documents attached yet')" />
-						<ul v-else class="activity-detail__list">
-							<li v-for="row in current_submission.documents" :key="row.name">
-								<a href="#" class="activity-detail__link" @click.prevent="frappe.set_route('Form', 'EGC Project Document', row.document)">
-									{{ row.document_title || row.document }} (Rev {{ row.revision }})
-								</a>
-								<button
-									v-if="canWrite && current_submission.docstatus === 0"
-									type="button"
-									class="btn btn-xs btn-default"
-									@click="confirm_remove_document(row)"
-								>
-									{{ __("Remove") }}
+							</template>
+							<div v-else-if="canWrite && current_submission.docstatus === 0" class="submittal-workflow-empty">
+								<button type="button" class="btn btn-xs btn-default" @click="open_apply_template_dialog">
+									{{ __("Apply Template") }}
 								</button>
-							</li>
-						</ul>
-
-						<div class="activity-detail__head-row" style="margin-top: 14px">
-							<div class="activity-detail__dep-label">{{ __("Review Dates") }}</div>
-							<button
-								v-if="canWrite"
-								type="button"
-								class="btn btn-xs btn-default"
-								@click="open_edit_dates_dialog"
-							>
-								{{ __("Edit Dates") }}
-							</button>
+							</div>
+							<EmptyState v-else :title="__('No formal review steps')" />
 						</div>
-						<dl class="activity-detail__meta">
-							<div>
-								<dt>{{ __("Date Submitted") }}</dt>
-								<dd>{{ format_date(current_submission.date_submitted) }}</dd>
-							</div>
-							<div>
-								<dt>{{ __("Submitted By") }}</dt>
-								<dd>{{ current_submission.submitted_by || "—" }}</dd>
-							</div>
-							<div>
-								<dt>{{ __("Response Due") }}</dt>
-								<dd>{{ format_date(current_submission.due_date) }}</dd>
-							</div>
-							<div>
-								<dt>{{ __("Required Submission Date") }}</dt>
-								<dd>{{ format_date(current_submission.required_submission_date) }}</dd>
-							</div>
-							<div>
-								<dt>{{ __("Required Approval Date") }}</dt>
-								<dd>{{ format_date(current_submission.required_approval_date) }}</dd>
-							</div>
-							<div>
-								<dt>{{ __("Required On-Site Date") }}</dt>
-								<dd>{{ format_date(current_submission.required_on_site_date) }}</dd>
-							</div>
-							<div>
-								<dt>{{ __("Lead Time (Days)") }}</dt>
-								<dd>{{ current_submission.lead_time_days || "—" }}</dd>
-							</div>
-						</dl>
-					</section>
 
-					<section v-if="history_submissions.length" class="activity-detail__section">
-						<div class="activity-detail__section-title">{{ __("Earlier Review Cycles") }}</div>
-						<ul class="activity-detail__list">
-							<li v-for="row in history_submissions" :key="row.name">
-								<span>{{ row.revision_label }} — {{ format_date(row.date_submitted) }}</span>
-								<StatusPill :status="row.response || row.submission_status" />
-							</li>
-						</ul>
-					</section>
-
-					<section class="activity-detail__section">
-						<div class="activity-detail__head-row">
-							<div class="activity-detail__section-title">{{ __("Related Activities") }}</div>
-							<button v-if="canWrite" type="button" class="btn btn-xs btn-default" @click="open_link_activity_dialog">
-								{{ __("Link Activity") }}
-							</button>
-						</div>
-						<EmptyState v-if="!(data.related_activities || []).length" :title="__('No linked activities yet')" />
-						<ul v-else class="activity-detail__list">
-							<li v-for="row in data.related_activities" :key="row.name">
-								<a href="#" class="activity-detail__link" @click.prevent="open_activity(row.activity)">
-									{{ row.activity_code }}: {{ row.activity_name }}
-								</a>
-								<StatusPill :status="row.status" />
-							</li>
-						</ul>
-					</section>
-
-					<section class="activity-detail__section">
-						<div class="activity-detail__section-title">{{ __("Comments") }}</div>
-						<EmptyState v-if="!comments.length" :title="__('No comments yet')" />
-						<ul v-else class="submittal-comments__list">
-							<li v-for="row in comments" :key="row.name" class="submittal-comments__item">
-								<div class="submittal-comments__meta">
-									<span class="submittal-comments__author">{{ row.owner }}</span>
-									<span class="submittal-comments__date">{{ format_datetime(row.creation) }}</span>
+						<div class="submittal-sidebar__card">
+							<div class="activity-detail__section-title">{{ __("Details") }}</div>
+							<dl class="activity-detail__meta submittal-sidebar__meta">
+								<div>
+									<dt>{{ __("Responsible Party") }}</dt>
+									<dd>{{ data.submittal.responsible_party || "—" }}</dd>
 								</div>
-								<div class="submittal-comments__content">{{ row.content }}</div>
-							</li>
-						</ul>
-						<div class="submittal-comments__composer">
-							<textarea
-								v-model="new_comment"
-								class="form-control"
-								rows="2"
-								:placeholder="__('Add a comment…')"
-							></textarea>
-							<button
-								type="button"
-								class="btn btn-xs btn-primary"
-								:disabled="posting_comment || !new_comment.trim()"
-								@click="do_post_comment"
-							>
-								{{ __("Post") }}
-							</button>
+								<div>
+									<dt>{{ __("Submittal Manager") }}</dt>
+									<dd>{{ data.submittal.submittal_manager || "—" }}</dd>
+								</div>
+								<div>
+									<dt>{{ __("Due Date") }}</dt>
+									<dd>{{ format_date(data.submittal.current_due_date) }}</dd>
+								</div>
+							</dl>
+							<div class="activity-detail__head-row" style="margin-top: 14px">
+								<div class="activity-detail__dep-label">{{ __("Review Dates") }}</div>
+								<button v-if="canWrite" type="button" class="btn btn-xs btn-default" @click="open_edit_dates_dialog">
+									{{ __("Edit") }}
+								</button>
+							</div>
+							<dl class="activity-detail__meta submittal-sidebar__meta">
+								<div>
+									<dt>{{ __("Response Due") }}</dt>
+									<dd>{{ format_date(current_submission.due_date) }}</dd>
+								</div>
+								<div>
+									<dt>{{ __("Required Submission") }}</dt>
+									<dd>{{ format_date(current_submission.required_submission_date) }}</dd>
+								</div>
+								<div>
+									<dt>{{ __("Required Approval") }}</dt>
+									<dd>{{ format_date(current_submission.required_approval_date) }}</dd>
+								</div>
+								<div>
+									<dt>{{ __("Required On-Site") }}</dt>
+									<dd>{{ format_date(current_submission.required_on_site_date) }}</dd>
+								</div>
+								<div>
+									<dt>{{ __("Lead Time") }}</dt>
+									<dd>{{ current_submission.lead_time_days ? __("{0}d", [current_submission.lead_time_days]) : "—" }}</dd>
+								</div>
+							</dl>
 						</div>
-					</section>
-				</template>
-			</div>
-		</div>
+
+						<div class="submittal-sidebar__card">
+							<div class="activity-detail__head-row">
+								<div class="activity-detail__section-title">{{ __("Team") }}</div>
+								<button v-if="canWrite" type="button" class="btn btn-xs btn-default" @click="open_add_assignment_dialog">
+									{{ __("Add") }}
+								</button>
+							</div>
+							<p class="submittal-section-hint">
+								{{ __("Visibility and notifications only — not the reviewers above, who must actually respond.") }}
+							</p>
+							<EmptyState v-if="!(data.assignments || []).length" :title="__('No one assigned yet')" />
+							<ul v-else class="activity-detail__list">
+								<li v-for="row in data.assignments" :key="row.name">
+									<div>
+										<span class="activity-detail__link">{{ row.person_name || row.organization_name || __("Unnamed") }}</span>
+										<span v-if="row.is_primary" class="indicator-pill blue">{{ __("Primary") }}</span>
+									</div>
+									<div class="activity-links__meta">
+										<span class="activity-detail__dep-type">{{ row.assignment_role }}</span>
+										<button v-if="canWrite" type="button" class="btn btn-xs btn-default" @click="confirm_remove_assignment(row)">
+											{{ __("Remove") }}
+										</button>
+									</div>
+								</li>
+							</ul>
+						</div>
+
+						<div class="submittal-sidebar__card">
+							<div class="activity-detail__head-row">
+								<div class="activity-detail__section-title">{{ __("Related Activities") }}</div>
+								<button v-if="canWrite" type="button" class="btn btn-xs btn-default" @click="open_link_activity_dialog">
+									{{ __("Link") }}
+								</button>
+							</div>
+							<EmptyState v-if="!(data.related_activities || []).length" :title="__('No linked activities yet')" />
+							<ul v-else class="activity-detail__list">
+								<li v-for="row in data.related_activities" :key="row.name">
+									<a href="#" class="activity-detail__link" @click.prevent="open_activity(row.activity)">
+										{{ row.activity_code }}: {{ row.activity_name }}
+									</a>
+									<StatusPill :status="row.status" />
+								</li>
+							</ul>
+						</div>
+					</div>
+				</div>
+			</template>
+		</template>
 	</div>
 </template>
 
 <style scoped>
-/* Shared detail-drawer shell — deliberately duplicated from ActivityDetail.vue/
-   DocumentDetail.vue rather than extracted into a shared file: Vue's `<style scoped>` only
-   applies within the component that declares it, and every detail drawer in this Hub already
-   keeps its own copy of this shell (`doc-detail__*` in DocumentDetail.vue, `activity-detail__*`
-   here and in ActivityDetail.vue) rather than a cross-component stylesheet, so this follows the
-   established convention instead of introducing a new one. */
-.activity-detail__backdrop {
-	position: fixed;
-	inset: 0;
-	background: rgba(0, 0, 0, 0.35);
-	z-index: 500;
-	display: flex;
-	justify-content: flex-end;
-}
-
-.activity-detail__panel {
-	width: min(600px, 100vw);
-	max-width: 100vw;
-	height: 100vh;
-	background: var(--fg-color);
-	border-left: 1px solid var(--border-color);
-	box-shadow: var(--shadow-lg, -4px 0 24px rgba(0, 0, 0, 0.2));
+.submittal-page {
 	display: flex;
 	flex-direction: column;
-	overflow: hidden;
-	transition: width 0.15s ease;
+	gap: 18px;
 }
 
-.activity-detail__panel--expanded {
-	width: min(900px, 100vw);
+.submittal-page__topbar {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+}
+
+.submittal-page__back {
+	font-weight: 500;
+}
+
+.submittal-page__topbar-actions {
+	display: flex;
+	align-items: center;
+	gap: 14px;
 }
 
 .hub-link--muted {
 	color: var(--text-muted);
 	font-size: var(--text-xs);
-}
-
-.activity-detail__header {
-	display: flex;
-	align-items: flex-start;
-	justify-content: space-between;
-	gap: 10px;
-	padding: 16px 18px;
-	border-bottom: 1px solid var(--border-color);
-	flex: 0 0 auto;
-}
-
-.activity-detail__code {
-	font-size: var(--text-md);
-	font-weight: 600;
-	color: var(--text-color);
-}
-
-.activity-detail__name {
-	font-size: var(--text-sm);
-	color: var(--text-muted);
-	margin-top: 2px;
-}
-
-.activity-detail__header-actions {
-	display: flex;
-	align-items: center;
-	gap: 12px;
-	flex: 0 0 auto;
 }
 
 .hub-link--danger {
@@ -1260,28 +1304,306 @@ function open_link_activity_dialog() {
 	cursor: help;
 }
 
-.activity-detail__close {
-	appearance: none;
-	border: none;
-	background: none;
-	font-size: 22px;
-	line-height: 1;
-	color: var(--text-muted);
-	cursor: pointer;
-	padding: 2px 4px;
+.submittal-page__identity {
+	border-bottom: 1px solid var(--border-color);
+	padding-bottom: 16px;
 }
 
-.activity-detail__close:hover {
+.submittal-page__code {
+	font-size: var(--text-sm);
+	font-weight: 600;
+	color: var(--text-muted);
+}
+
+.submittal-page__title {
+	font-size: var(--text-2xl, 22px);
+	font-weight: 600;
+	color: var(--text-color);
+	margin: 2px 0 10px;
+}
+
+.submittal-page__status-row {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 8px 12px;
+}
+
+.submittal-page__meta-inline {
+	font-size: var(--text-sm);
+	color: var(--text-muted);
+}
+
+.submittal-page__empty-cycle {
+	padding: 24px 0;
+}
+
+.submittal-banner {
+	display: flex;
+	align-items: flex-start;
+	justify-content: space-between;
+	flex-wrap: wrap;
+	gap: 10px 16px;
+	border: 1px solid var(--border-color);
+	border-left: 4px solid var(--border-color);
+	border-radius: var(--border-radius);
+	padding: 14px 16px;
+	background: var(--subtle-fg, var(--control-bg));
+}
+
+.submittal-banner--green {
+	border-left-color: var(--green-500, #2e7d32);
+}
+
+.submittal-banner--red {
+	border-left-color: var(--red-500, #d1483e);
+}
+
+.submittal-banner--orange {
+	border-left-color: var(--orange-500, #d98c26);
+}
+
+.submittal-banner--blue {
+	border-left-color: var(--blue-500, #2f6fed);
+}
+
+.submittal-banner__main {
+	flex: 1 1 320px;
+}
+
+.submittal-banner__text {
+	margin: 0;
+	font-size: var(--text-sm);
 	color: var(--text-color);
 }
 
-.activity-detail__body {
-	flex: 1 1 auto;
-	overflow-y: auto;
-	padding: 18px;
+.submittal-banner__reason {
+	margin-top: 8px;
+	font-size: var(--text-sm);
+	color: var(--text-color);
+}
+
+.submittal-banner__reason-label {
+	font-weight: 600;
+	margin-right: 4px;
+}
+
+.submittal-banner__actions {
+	display: flex;
+	gap: 8px;
+	flex: 0 0 auto;
+}
+
+.submittal-page__body {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) 300px;
+	gap: 28px;
+	align-items: start;
+}
+
+@media (max-width: 900px) {
+	.submittal-page__body {
+		grid-template-columns: 1fr;
+	}
+}
+
+.submittal-main {
+	min-width: 0;
+}
+
+.submittal-timeline {
 	display: flex;
 	flex-direction: column;
-	gap: 22px;
+}
+
+.submittal-timeline__row {
+	display: flex;
+	gap: 12px;
+}
+
+.submittal-timeline__rail {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	flex: 0 0 auto;
+}
+
+.submittal-timeline__dot {
+	width: 24px;
+	height: 24px;
+	flex: 0 0 auto;
+	border-radius: 50%;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	font-size: 12px;
+	font-weight: 700;
+	background: var(--control-bg);
+	color: var(--text-muted);
+	border: 1px solid var(--border-color);
+}
+
+.submittal-timeline__dot--green {
+	color: var(--green-500, #2e7d32);
+	border-color: var(--green-200, var(--green-500, #2e7d32));
+}
+
+.submittal-timeline__dot--red {
+	color: var(--red-500, #d1483e);
+	border-color: var(--red-200, var(--red-500, #d1483e));
+}
+
+.submittal-timeline__dot--orange {
+	color: var(--orange-500, #d98c26);
+	border-color: var(--orange-200, var(--orange-500, #d98c26));
+}
+
+.submittal-timeline__dot--blue {
+	color: var(--blue-500, #2f6fed);
+	border-color: var(--blue-200, var(--blue-500, #2f6fed));
+}
+
+.submittal-timeline__line {
+	flex: 1 1 auto;
+	width: 1px;
+	background: var(--border-color);
+	min-height: 12px;
+}
+
+.submittal-timeline__row:last-child .submittal-timeline__line {
+	display: none;
+}
+
+.submittal-timeline__content {
+	flex: 1 1 auto;
+	min-width: 0;
+	padding-bottom: 20px;
+}
+
+.submittal-timeline__headline {
+	margin: 3px 0 0;
+	font-size: var(--text-sm);
+	color: var(--text-color);
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 6px;
+}
+
+.submittal-timeline__by {
+	color: var(--text-muted);
+	font-weight: 400;
+}
+
+.submittal-timeline__when {
+	color: var(--text-muted);
+	font-size: var(--text-xs);
+	margin-left: auto;
+}
+
+.submittal-timeline__docs {
+	list-style: none;
+	margin: 6px 0 0;
+	padding: 0;
+	font-size: var(--text-xs);
+	color: var(--text-muted);
+}
+
+.submittal-timeline__remarks {
+	margin: 6px 0 0;
+	font-size: var(--text-sm);
+	color: var(--text-color);
+	white-space: pre-wrap;
+	background: var(--subtle-fg, var(--control-bg));
+	border: 1px solid var(--border-color);
+	border-radius: var(--border-radius);
+	padding: 8px 10px;
+}
+
+.submittal-timeline__remarks--comment {
+	background: var(--fg-color);
+}
+
+.submittal-timeline__attachment {
+	display: inline-block;
+	margin-top: 6px;
+	font-size: var(--text-xs);
+}
+
+.submittal-composer {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	align-items: flex-end;
+	margin-left: 36px;
+}
+
+.submittal-composer textarea {
+	width: 100%;
+	resize: vertical;
+}
+
+.submittal-sidebar {
+	display: flex;
+	flex-direction: column;
+	gap: 16px;
+}
+
+.submittal-sidebar__card {
+	border: 1px solid var(--border-color);
+	border-radius: var(--border-radius);
+	padding: 14px;
+}
+
+.submittal-sidebar__sublist {
+	margin-top: 10px;
+}
+
+.submittal-sidebar__sublist-label {
+	font-size: var(--text-xs);
+	color: var(--text-muted);
+}
+
+.submittal-sidebar__stage {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	margin-bottom: 10px;
+}
+
+.submittal-sidebar__stage:last-child {
+	margin-bottom: 0;
+}
+
+.submittal-sidebar__stage-label {
+	font-size: var(--text-xs);
+	font-weight: 600;
+	color: var(--text-muted);
+	text-transform: uppercase;
+	letter-spacing: 0.02em;
+}
+
+.submittal-sidebar__reviewer {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 6px;
+	font-size: var(--text-sm);
+}
+
+.submittal-sidebar__reviewer-name {
+	flex: 1 1 auto;
+	color: var(--text-color);
+}
+
+.submittal-sidebar__meta {
+	grid-template-columns: 1fr;
+	gap: 8px 0;
+}
+
+.submittal-workflow-empty {
+	display: flex;
+	gap: 8px;
 }
 
 .activity-detail__section-title {
@@ -1302,16 +1624,8 @@ function open_link_activity_dialog() {
 	margin-bottom: 0;
 }
 
-.activity-detail__status-row {
-	display: flex;
-	align-items: center;
-	gap: 8px;
-	margin-bottom: 12px;
-}
-
 .activity-detail__meta {
 	display: grid;
-	grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
 	gap: 10px 16px;
 	margin: 0;
 }
@@ -1374,11 +1688,6 @@ function open_link_activity_dialog() {
 	flex: 0 0 auto;
 }
 
-.activity-detail__section {
-	/* No rule needed beyond the body's own flex gap — kept as a named hook so future styling
-	   (e.g. a divider) has a single place to land. */
-}
-
 .submittal-section-hint {
 	font-size: var(--text-xs);
 	color: var(--text-muted);
@@ -1388,191 +1697,18 @@ function open_link_activity_dialog() {
 .submittal-tracked-docs {
 	display: flex;
 	flex-direction: column;
-	gap: 4px;
-	margin-bottom: 10px;
+	gap: 6px;
 }
 
 .submittal-tracked-docs__item {
-	display: flex;
-	align-items: center;
-	flex-wrap: wrap;
-	gap: 6px 10px;
-	font-size: var(--text-sm);
-}
-
-.submittal-tracked-docs__rev {
-	color: var(--text-muted);
-	font-size: var(--text-xs);
-}
-
-.submittal-rejection-reason {
-	border: 1px solid var(--red-200, var(--border-color));
-	border-left: 3px solid var(--red-500, #d1483e);
-	border-radius: var(--border-radius);
-	padding: 8px 12px;
-	margin-bottom: 10px;
-}
-
-.submittal-rejection-reason__label {
-	font-size: var(--text-xs);
-	font-weight: 600;
-	color: var(--red-500, #d1483e);
-	text-transform: uppercase;
-	letter-spacing: 0.02em;
-	margin-bottom: 2px;
-}
-
-.submittal-rejection-reason__text {
-	margin: 0;
-	font-size: var(--text-sm);
-	color: var(--text-color);
-	white-space: pre-wrap;
-}
-
-.submittal-next-step {
-	display: flex;
-	align-items: center;
-	justify-content: space-between;
-	flex-wrap: wrap;
-	gap: 8px 12px;
-	background: var(--subtle-fg, var(--control-bg));
-	border: 1px solid var(--border-color);
-	border-radius: var(--border-radius);
-	padding: 10px 12px;
-	margin-bottom: 12px;
-}
-
-.submittal-next-step__text {
-	margin: 0;
-	font-size: var(--text-sm);
-	color: var(--text-color);
-}
-
-.submittal-next-step__actions {
-	display: flex;
-	gap: 8px;
-	flex: 0 0 auto;
-}
-
-.submittal-workflow-empty {
-	display: flex;
-	gap: 8px;
-	margin: 4px 0 14px;
-}
-
-.submittal-workflow {
-	display: flex;
-	flex-direction: column;
-	gap: 10px;
-	margin: 12px 0;
-}
-
-.submittal-workflow__stage-label {
-	font-size: var(--text-xs);
-	font-weight: 600;
-	color: var(--text-muted);
-	text-transform: uppercase;
-	letter-spacing: 0.02em;
-}
-
-.submittal-workflow__stage {
-	display: flex;
-	flex-direction: column;
-	gap: 4px;
-	padding: 8px 10px;
-	border: 1px solid var(--border-color);
-	border-radius: var(--border-radius);
-}
-
-.submittal-workflow__step {
 	display: flex;
 	flex-direction: column;
 	gap: 2px;
 	font-size: var(--text-sm);
 }
 
-.submittal-workflow__step-row {
-	display: flex;
-	align-items: center;
-	gap: 8px;
-}
-
-.submittal-workflow__remarks {
-	margin: 0 0 0 24px;
+.submittal-tracked-docs__rev {
 	color: var(--text-muted);
 	font-size: var(--text-xs);
-	white-space: pre-wrap;
-}
-
-.submittal-workflow__icon {
-	width: 16px;
-	text-align: center;
-	color: var(--text-muted);
-}
-
-.submittal-workflow__step--responded .submittal-workflow__icon {
-	color: var(--green-500, var(--text-color));
-}
-
-.submittal-workflow__step--in-review .submittal-workflow__icon {
-	color: var(--blue-500, var(--text-color));
-	font-weight: 700;
-}
-
-.submittal-workflow__who {
-	flex: 1;
-	color: var(--text-color);
-}
-
-.submittal-workflow__optional {
-	color: var(--text-muted);
-	font-size: var(--text-xs);
-}
-
-.submittal-workflow__response {
-	font-size: var(--text-xs);
-	color: var(--text-muted);
-}
-
-.submittal-comments__list {
-	list-style: none;
-	margin: 0 0 12px;
-	padding: 0;
-	display: flex;
-	flex-direction: column;
-	gap: 8px;
-}
-
-.submittal-comments__item {
-	border: 1px solid var(--border-color);
-	border-radius: var(--border-radius);
-	padding: 8px 12px;
-}
-
-.submittal-comments__meta {
-	display: flex;
-	justify-content: space-between;
-	gap: 10px;
-	font-size: var(--text-xs);
-	color: var(--text-muted);
-	margin-bottom: 4px;
-}
-
-.submittal-comments__content {
-	font-size: var(--text-sm);
-	color: var(--text-color);
-	white-space: pre-wrap;
-}
-
-.submittal-comments__composer {
-	display: flex;
-	flex-direction: column;
-	gap: 8px;
-	align-items: flex-end;
-}
-
-.submittal-comments__composer textarea {
-	width: 100%;
-	resize: vertical;
 }
 </style>

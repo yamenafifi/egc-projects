@@ -274,6 +274,11 @@ _SUBMISSION_FIELDS = (
 	"response_remarks",
 	"ball_in_court_label",
 	"docstatus",
+	# Real datetimes (unlike the Date-only fields above) so the Hub's timeline can order events
+	# that fall on the same day and attribute who started the cycle.
+	"creation",
+	"modified",
+	"owner",
 )
 
 _STEP_FIELDS = (
@@ -289,6 +294,8 @@ _STEP_FIELDS = (
 	"responded_by",
 	"response_remarks",
 	"response_attachment",
+	"creation",
+	"modified",
 )
 
 

@@ -18,7 +18,6 @@ import LoadingState from "./LoadingState.vue";
 import ErrorState from "./ErrorState.vue";
 import EmptyState from "./EmptyState.vue";
 import StatusPill from "./StatusPill.vue";
-import ActivityLinkedRecords from "./ActivityLinkedRecords.vue";
 
 const props = defineProps({
 	activity: { type: String, required: true },
@@ -162,6 +161,59 @@ function confirm_remove_submittal(row) {
 			});
 	});
 }
+
+// -- documents table (row.* fields come from relationships._TARGET_STATUS_FIELDS["EGC Project
+// Document"] — the same fields DocumentsTab.vue's own register shows) ---------------------------
+
+function open_document(row) {
+	frappe.set_route("Form", "EGC Project Document", row.link_name);
+}
+
+function open_add_document_dialog() {
+	const dialog = new frappe.ui.Dialog({
+		title: __("Link Document"),
+		fields: [
+			{
+				fieldname: "link_name",
+				fieldtype: "Link",
+				label: __("Document"),
+				options: "EGC Project Document",
+				reqd: 1,
+				get_query: () => ({ filters: { project: props.project } }),
+			},
+			{
+				fieldname: "link_purpose",
+				fieldtype: "Select",
+				label: __("Purpose"),
+				options: ["Reference", "Requirement"],
+				default: "Reference",
+			},
+			{ fieldname: "remarks", fieldtype: "Small Text", label: __("Remarks") },
+		],
+		primary_action_label: __("Add"),
+		primary_action(values) {
+			link_activity_record(props.activity, "EGC Project Document", values.link_name, values.link_purpose, values.remarks)
+				.then(() => {
+					dialog.hide();
+					reload();
+				})
+				.catch((e) => {
+					frappe.msgprint({ title: __("Could Not Add Link"), message: e.message, indicator: "red" });
+				});
+		},
+	});
+	dialog.show();
+}
+
+function confirm_remove_document(row) {
+	frappe.confirm(__("Remove this link?"), () => {
+		unlink_activity_record(row.name)
+			.then(reload)
+			.catch((e) => {
+				frappe.msgprint({ title: __("Could Not Remove Link"), message: e.message, indicator: "red" });
+			});
+	});
+}
 </script>
 
 <template>
@@ -254,18 +306,62 @@ function confirm_remove_submittal(row) {
 					</div>
 				</div>
 
-				<ActivityLinkedRecords
-					v-else-if="active_tool === 'documents'"
-					:activity="activity"
-					:project="project"
-					link-doctype="EGC Project Document"
-					:title="__('Drawings & Documents')"
-					:empty-message="__('No linked documents yet')"
-					:rows="document_links"
-					:can-write="canWrite"
-					:allow-add="!data.activity.is_group"
-					@changed="reload"
-				/>
+				<div v-else-if="active_tool === 'documents'" class="activity-expand__submittals">
+					<div class="activity-expand__table-head">
+						<div class="activity-detail__section-title">{{ __("Drawings & Documents") }}</div>
+						<button
+							v-if="canWrite && !data.activity.is_group"
+							type="button"
+							class="btn btn-xs btn-default"
+							@click="open_add_document_dialog"
+						>
+							{{ __("Link Existing") }}
+						</button>
+					</div>
+					<EmptyState
+						v-if="!document_links.length"
+						:title="data.activity.is_group ? __('Not applicable to a Group Activity') : __('No linked documents yet')"
+					/>
+					<div v-else class="hub-table-wrap">
+						<table class="hub-table">
+							<thead>
+								<tr>
+									<th>{{ __("Document No") }}</th>
+									<th>{{ __("Title") }}</th>
+									<th>{{ __("Discipline") }}</th>
+									<th>{{ __("Current Revision") }}</th>
+									<th>{{ __("Status") }}</th>
+									<th>{{ __("Purpose") }}</th>
+									<th v-if="canWrite"></th>
+								</tr>
+							</thead>
+							<tbody>
+								<tr
+									v-for="row in document_links"
+									:key="row.name"
+									class="hub-table__row--clickable"
+									@click="open_document(row)"
+								>
+									<td>{{ row.document_number || "—" }}</td>
+									<td class="hub-table__truncate" :title="row.link_title">{{ row.link_title || "—" }}</td>
+									<td>{{ row.discipline || "—" }}</td>
+									<td>{{ row.current_revision_label || "—" }}</td>
+									<td><StatusPill :status="row.approval_status" /></td>
+									<td>{{ row.link_purpose || "—" }}</td>
+									<td v-if="canWrite">
+										<button
+											type="button"
+											class="btn btn-xs btn-default"
+											@click.stop="confirm_remove_document(row)"
+										>
+											{{ __("Remove") }}
+										</button>
+									</td>
+								</tr>
+							</tbody>
+						</table>
+					</div>
+				</div>
 
 				<div v-else class="activity-expand__deps">
 					<div class="activity-expand__dep-group">
