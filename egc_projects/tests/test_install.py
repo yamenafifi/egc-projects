@@ -82,7 +82,7 @@ class TestHideUnusedProjectFields(IntegrationTestCase):
 		install.hide_unused_project_fields()  # must not raise or duplicate
 		self.assertEqual(
 			frappe.db.count(
-				"Property Setter", {"doc_type": "Project", "field_name": "sales_order", "property": "hidden"}
+				"Property Setter", {"doc_type": "Project", "field_name": "priority", "property": "hidden"}
 			),
 			1,
 		)
@@ -91,6 +91,27 @@ class TestHideUnusedProjectFields(IntegrationTestCase):
 		install.hide_unused_project_fields()
 		self.assertEqual(self._hidden_property_setter_value("users"), "1")
 		self.assertEqual(self._hidden_property_setter_value("custom_egc_supervisors"), "1")
+
+	def test_sales_order_department_cost_center_stay_visible(self):
+		# Corrected 2026-08-30 — these were wrongly hidden on "nothing in this app's own code
+		# reads them," which isn't the same as "nobody uses them" (sales_order in particular is
+		# a plain native field a PM links directly from the Project form).
+		install.hide_unused_project_fields()
+		for fieldname in install._PREVIOUSLY_HIDDEN_IN_ERROR:
+			self.assertIsNone(self._hidden_property_setter_value(fieldname), f"{fieldname} should not be hidden")
+
+	def test_unhides_a_field_a_stale_earlier_run_had_hidden(self):
+		# Simulates a site that ran an OLDER version of this function, before the fix — the
+		# Property Setter it wrote must be cleaned up by a fresh run, not just skipped from here
+		# on for new installs.
+		from frappe.custom.doctype.property_setter.property_setter import make_property_setter
+
+		make_property_setter("Project", "sales_order", "hidden", 1, "Check")
+		self.assertEqual(self._hidden_property_setter_value("sales_order"), "1")
+
+		install.hide_unused_project_fields()
+
+		self.assertIsNone(self._hidden_property_setter_value("sales_order"))
 
 
 class TestTrimPercentCompleteMethodOptions(IntegrationTestCase):

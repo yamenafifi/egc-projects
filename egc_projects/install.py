@@ -220,13 +220,16 @@ def trim_percent_complete_method_options() -> None:
 	)
 
 
-#: Core `Project` fields with zero references anywhere in this app (confirmed by search, not
-#: assumed) — all either timesheet-specific ("(via Timesheet)" fields), a legacy scheduled-email
-#: progress-collection feature (`monitor_progress_tab`'s own cluster), or generic ERPNext
-#: concepts (Project Type/Priority/Template/Sales Order/Department/Cost Center) this app never
-#: wired up. Hidden via Property Setter, never deleted — reversible, and hiding (unlike removing
-#: a field from `field_order`) can't break `project_custom_fields.py`'s `custom_egc_details_bridge`
-#: anchor at `actual_end_date`.
+#: Core `Project` fields hidden because nothing in THIS APP'S OWN CODE reads them — that check
+#: is not the same as "nobody uses this field," and conflating the two was a real mistake:
+#: `sales_order` was hidden on that basis even though it's a plain native ERPNext field a PM can
+#: link directly from the Project form regardless of whether egc_projects itself ever queries it.
+#: Corrected 2026-08-30 — `sales_order` stays visible. The remaining fields here are still just
+#: the ones confirmed genuinely unused (timesheet-specific "(via Timesheet)" fields, the legacy
+#: scheduled-email progress-collection cluster, and Project Type/Priority/Template), but treat
+#: that confirmation with the same caution from now on, not as settled. Hidden via Property
+#: Setter, never deleted — reversible, and hiding (unlike removing a field from `field_order`)
+#: can't break `project_custom_fields.py`'s `custom_egc_details_bridge` anchor at `actual_end_date`.
 _HIDDEN_PROJECT_FIELDS = (
 	"actual_start_date",
 	"actual_end_date",
@@ -234,9 +237,6 @@ _HIDDEN_PROJECT_FIELDS = (
 	"is_active",
 	"project_template",
 	"priority",
-	"sales_order",
-	"department",
-	"cost_center",
 	"monitor_progress_tab",
 	"collect_progress",
 	"holiday_list",
@@ -263,8 +263,30 @@ _HIDDEN_PROJECT_FIELDS = (
 )
 
 
+#: Fields a previous run of `hide_unused_project_fields()` hid that turned out to be a mistake —
+#: `sales_order`/`department`/`cost_center` were hidden on "nothing in this app's own code reads
+#: them," which is not the same thing as "nobody uses them" (a PM can link a Sales Order to a
+#: Project directly from the native form regardless of whether egc_projects itself ever touches
+#: that field). Removing a name from `_HIDDEN_PROJECT_FIELDS` above stops it from being hidden on
+#: a FRESH install, but doesn't undo the Property Setter an earlier run already wrote on THIS
+#: site — `_unhide_previously_hidden_project_fields()` deletes those specific rows so the fix
+#: actually takes effect here, not just for a site installing from scratch after this change.
+_PREVIOUSLY_HIDDEN_IN_ERROR = ("sales_order", "department", "cost_center")
+
+
+def _unhide_previously_hidden_project_fields() -> None:
+	for fieldname in _PREVIOUSLY_HIDDEN_IN_ERROR:
+		name = frappe.db.get_value(
+			"Property Setter", {"doc_type": "Project", "field_name": fieldname, "property": "hidden"}
+		)
+		if name:
+			frappe.delete_doc("Property Setter", name, ignore_permissions=True, force=True)
+
+
 def hide_unused_project_fields() -> None:
 	from frappe.custom.doctype.property_setter.property_setter import make_property_setter
+
+	_unhide_previously_hidden_project_fields()
 
 	for fieldname in _HIDDEN_PROJECT_FIELDS:
 		current = frappe.db.get_value(
