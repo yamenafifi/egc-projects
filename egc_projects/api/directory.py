@@ -58,11 +58,25 @@ def get_directory(project: str) -> list[dict]:
 		if role_names
 		else {}
 	)
+	# `row.organization` is a Customer Link value — Customer uses `naming_series:`, so unlike the
+	# old EGC Organization (`field:organization_name`, where the Link value itself WAS the
+	# display name), this is never presentable on its own. Fetch `customer_name` alongside it for
+	# display; the raw Link value stays `row.organization` for the Change Organization dialog etc.
+	org_names = {row.organization for row in rows if row.organization}
+	customer_names = (
+		{
+			o.name: o.customer_name
+			for o in frappe.get_all("Customer", filters={"name": ("in", list(org_names))}, fields=["name", "customer_name"])
+		}
+		if org_names
+		else {}
+	)
 
 	for row in rows:
 		row["is_egc_internal"] = bool(internal_by_role.get(row.role))
 		row["has_portal_access"] = _has_portal_access(row.user, project)
 		row["portal_roles"] = [r for r in frappe.get_roles(row.user) if r in c.EGC_ROLES] if row.user else []
+		row["organization_name"] = customer_names.get(row.organization)
 
 	return rows
 

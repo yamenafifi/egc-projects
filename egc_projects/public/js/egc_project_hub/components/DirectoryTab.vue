@@ -48,7 +48,7 @@ const filtered = computed(() => {
 		if (scope_filter.value === "internal" && !row.is_egc_internal) return false;
 		if (scope_filter.value === "external" && row.is_egc_internal) return false;
 		if (term) {
-			const haystack = `${row.party_name} ${row.organization || ""} ${row.role}`.toLowerCase();
+			const haystack = `${row.party_name} ${row.organization_name || ""} ${row.role}`.toLowerCase();
 			if (!haystack.includes(term)) return false;
 		}
 		return true;
@@ -235,7 +235,7 @@ function confirm_revoke_access(row) {
 								{{ row.party_name }}
 								<span v-if="row.is_primary" class="indicator-pill blue">{{ __("Primary") }}</span>
 							</td>
-							<td>{{ row.organization || "—" }}</td>
+							<td>{{ row.organization_name || "—" }}</td>
 							<td>
 								{{ row.role }}
 								<span class="hub-directory__scope-tag" :class="{ 'hub-directory__scope-tag--internal': row.is_egc_internal }">

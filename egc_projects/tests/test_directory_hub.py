@@ -103,6 +103,23 @@ class TestDirectoryHub(IntegrationTestCase):
 		self.assertFalse(rows[0]["has_portal_access"])
 		self.assertEqual(rows[0]["portal_roles"], [])
 
+	def test_get_directory_resolves_organization_display_name(self):
+		# `row.organization` is a Customer Link value (a naming-series code, e.g. "CUST-2026-
+		# 00001") — unlike the old EGC Organization, it's never presentable on its own. Regression
+		# coverage for the Directory tab briefly showing that raw code instead of a name.
+		customer_name = "EGC-DH-Org-Display-Name"
+		customer = frappe.get_doc({"doctype": "Customer", "customer_name": customer_name}).insert(
+			ignore_permissions=True
+		)
+		frappe.set_user(self.manager_user)
+		project_profile.add_stakeholder(
+			self.project, {"role": self.role_external, "party_name": "Org Display Target", "organization": customer.name}
+		)
+
+		rows = directory.get_directory(self.project)
+		self.assertEqual(rows[0]["organization"], customer.name)
+		self.assertEqual(rows[0]["organization_name"], customer_name)
+
 	# -- grant_portal_access -----------------------------------------------------------------------
 
 	def test_grant_portal_access_creates_user_and_scopes_project(self):
