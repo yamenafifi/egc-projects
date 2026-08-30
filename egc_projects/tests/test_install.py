@@ -62,3 +62,88 @@ class TestInstallFieldOrderCleanup(IntegrationTestCase):
 		self.assertFalse(
 			frappe.db.exists("Property Setter", {"doc_type": "Project", "property": "field_order"})
 		)
+
+
+class TestHideUnusedProjectFields(IntegrationTestCase):
+	def _hidden_property_setter_value(self, fieldname):
+		return frappe.db.get_value(
+			"Property Setter", {"doc_type": "Project", "field_name": fieldname, "property": "hidden"}, "value"
+		)
+
+	def test_hides_every_field_in_the_list(self):
+		install.hide_unused_project_fields()
+		for fieldname in install._HIDDEN_PROJECT_FIELDS:
+			self.assertEqual(
+				self._hidden_property_setter_value(fieldname), "1", f"{fieldname} was not hidden"
+			)
+
+	def test_is_idempotent(self):
+		install.hide_unused_project_fields()
+		install.hide_unused_project_fields()  # must not raise or duplicate
+		self.assertEqual(
+			frappe.db.count(
+				"Property Setter", {"doc_type": "Project", "field_name": "sales_order", "property": "hidden"}
+			),
+			1,
+		)
+
+	def test_hides_native_users_table_and_egc_hr_supervisors_table(self):
+		install.hide_unused_project_fields()
+		self.assertEqual(self._hidden_property_setter_value("users"), "1")
+		self.assertEqual(self._hidden_property_setter_value("custom_egc_supervisors"), "1")
+
+
+class TestTrimPercentCompleteMethodOptions(IntegrationTestCase):
+	def test_trims_to_manual_and_activity_completion_only(self):
+		install.create_activity_completion_method_option()  # the 5-option widened list first
+		install.trim_percent_complete_method_options()
+
+		value = frappe.db.get_value(
+			"Property Setter",
+			{"doc_type": "Project", "field_name": "percent_complete_method", "property": "options"},
+			"value",
+		)
+		self.assertEqual(value, "Manual\nActivity Completion")
+
+	def test_field_stays_visible(self):
+		install.trim_percent_complete_method_options()
+		self.assertIsNone(
+			frappe.db.get_value(
+				"Property Setter",
+				{"doc_type": "Project", "field_name": "percent_complete_method", "property": "hidden"},
+			)
+		)
+
+	def test_resets_stale_task_completion_values_to_activity_completion(self):
+		from egc_projects.egc_projects.project_progress import PERCENT_COMPLETE_METHOD
+
+		company = frappe.db.get_value("Company", {}, "name") or frappe.get_all("Company", limit=1, pluck="name")[0]
+		project = frappe.get_doc(
+			{"doctype": "Project", "project_name": f"Trim-Test-{frappe.generate_hash(length=6)}", "company": company}
+		).insert(ignore_permissions=True)
+		frappe.db.set_value("Project", project.name, "percent_complete_method", "Task Completion")
+
+		install.trim_percent_complete_method_options()
+
+		# "Task Completion" -> PERCENT_COMPLETE_METHOD, not "Manual" — _should_sync() already
+		# treated "Task Completion" as its own auto-sync sentinel, so this preserves that
+		# project's existing sync behavior instead of silently disabling it.
+		self.assertEqual(
+			frappe.db.get_value("Project", project.name, "percent_complete_method"), PERCENT_COMPLETE_METHOD
+		)
+		# Must actually be savable now, not just correct in the database.
+		frappe.get_doc("Project", project.name).save(ignore_permissions=True)
+
+	def test_resets_stale_task_progress_and_weight_values_to_manual(self):
+		company = frappe.db.get_value("Company", {}, "name") or frappe.get_all("Company", limit=1, pluck="name")[0]
+		project = frappe.get_doc(
+			{"doctype": "Project", "project_name": f"Trim-Test-{frappe.generate_hash(length=6)}", "company": company}
+		).insert(ignore_permissions=True)
+		frappe.db.set_value("Project", project.name, "percent_complete_method", "Task Weight")
+
+		install.trim_percent_complete_method_options()
+
+		# _should_sync() never had a case for "Task Progress"/"Task Weight" (no sync happened),
+		# same as "Manual" — this is also a preserving rename, not a behavior change.
+		self.assertEqual(frappe.db.get_value("Project", project.name, "percent_complete_method"), "Manual")
+		frappe.get_doc("Project", project.name).save(ignore_permissions=True)

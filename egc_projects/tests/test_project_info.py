@@ -75,6 +75,20 @@ class TestProjectInfo(IntegrationTestCase):
 		doc.save(ignore_permissions=True)
 		return doc
 
+	def _make_address(self, address_line1="123 Main St", city="Dubai"):
+		doc = frappe.get_doc(
+			{
+				"doctype": "Address",
+				"address_title": f"{self.project}-{frappe.generate_hash(length=6)}",
+				"address_type": "Office",
+				"address_line1": address_line1,
+				"city": city,
+				"country": "United Arab Emirates",
+			}
+		)
+		doc.insert(ignore_permissions=True)
+		return doc.name
+
 	# -- 1. get_project_info reads straight off Project's own fields -------------------------
 
 	def test_get_project_info_defaults_empty_on_a_fresh_project(self):
@@ -337,6 +351,70 @@ class TestProjectInfo(IntegrationTestCase):
 
 		result = hub.get_project_info(self.project)
 		self.assertEqual(result["equipment_items"], [])
+
+	# -- 10. Project Address — a real linked Address record, not flat fields --------------------
+
+	def test_get_project_info_address_none_when_unset(self):
+		frappe.set_user(self.manager_user)
+		result = hub.get_project_info(self.project)
+		self.assertIsNone(result["project_address"])
+		self.assertIsNone(result["project_address_display"])
+
+	def test_get_project_info_includes_formatted_address_when_set(self):
+		address = self._make_address()
+		self._set_project_fields(custom_project_address=address)
+
+		frappe.set_user(self.manager_user)
+		result = hub.get_project_info(self.project)
+		self.assertEqual(result["project_address"], address)
+		self.assertIn("123 Main St", result["project_address_display"])
+
+	def test_ensure_address_linked_to_project_creates_dynamic_link(self):
+		address = self._make_address()
+		frappe.set_user(self.manager_user)
+		project_profile.ensure_address_linked_to_project(address, self.project)
+
+		self.assertTrue(
+			frappe.db.exists(
+				"Dynamic Link",
+				{"parent": address, "parenttype": "Address", "link_doctype": "Project", "link_name": self.project},
+			)
+		)
+
+	def test_ensure_address_linked_to_project_is_idempotent(self):
+		address = self._make_address()
+		frappe.set_user(self.manager_user)
+		project_profile.ensure_address_linked_to_project(address, self.project)
+		project_profile.ensure_address_linked_to_project(address, self.project)
+
+		count = frappe.db.count(
+			"Dynamic Link",
+			{"parent": address, "parenttype": "Address", "link_doctype": "Project", "link_name": self.project},
+		)
+		self.assertEqual(count, 1)
+
+	def test_get_addresses_for_project_filters_to_linked_only(self):
+		linked = self._make_address(address_line1="Linked St")
+		unlinked = self._make_address(address_line1="Unlinked St")
+		project_profile.ensure_address_linked_to_project(linked, self.project)
+
+		frappe.set_user(self.manager_user)
+		results = project_profile.get_addresses_for_project("Address", "", "name", 0, 20, {"project": self.project})
+		names = {row[0] for row in results}
+		self.assertIn(linked, names)
+		self.assertNotIn(unlinked, names)
+
+	def test_save_project_profile_auto_links_address(self):
+		address = self._make_address()
+		frappe.set_user(self.manager_user)
+		project_profile.save_project_profile(self.project, {"project_address": address})
+
+		self.assertTrue(
+			frappe.db.exists(
+				"Dynamic Link",
+				{"parent": address, "parenttype": "Address", "link_doctype": "Project", "link_name": self.project},
+			)
+		)
 
 
 def _get_or_create_stakeholder_role(role_name, is_egc_internal=0):

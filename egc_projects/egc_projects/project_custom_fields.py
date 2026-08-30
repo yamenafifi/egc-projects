@@ -53,6 +53,18 @@ _RETIRED_FIELDS = (
 	# Work Scope (Text Editor) — dropped per explicit user feedback: scope is defined in
 	# Activities and WBS, not a freeform rich-text field duplicating that.
 	"custom_egc_work_scope",
+	# The old flat address fields — superseded by `custom_project_address`, a plain Link to
+	# core's own `Address` doctype (see below), so a project's address is one real address
+	# record instead of five unstructured strings with no relationship to anything else in
+	# ERPNext. Dropped outright, not migrated — dev-environment data only at the time this
+	# changed.
+	"custom_egc_address_section",
+	"custom_egc_country",
+	"custom_egc_region",
+	"custom_egc_city",
+	"custom_egc_address_col",
+	"custom_egc_address",
+	"custom_egc_time_zone",
 )
 
 CUSTOM_FIELDS = {
@@ -201,58 +213,32 @@ CUSTOM_FIELDS = {
 			"insert_after": "custom_egc_stakeholders_section",
 		},
 		# -- More Info tab: Address ------------------------------------------------------------
+		# A single Link to core's own `Address` doctype rather than a bespoke set of
+		# country/region/city/address/time-zone fields — one real address record (shared with
+		# every other ERPNext doctype that has one), not five unstructured strings that only
+		# ever existed here. `get_query`/auto-linking live in `project.js` +
+		# `project_profile.get_addresses_for_project`/`ensure_address_linked_to_project` — GPS
+		# coordinates and geofencing stay in the Project Location section above (egc_hr), not
+		# duplicated here.
 		{
-			"fieldname": "custom_egc_address_section",
+			"fieldname": "custom_project_address_section",
 			"label": "Address",
 			"fieldtype": "Section Break",
 			"insert_after": "custom_egc_stakeholders",
-			"description": (
-				"Postal/administrative address — GPS coordinates and geofencing live in the "
-				"Project Location section above (egc_hr), not duplicated here."
-			),
 		},
 		{
-			"fieldname": "custom_egc_country",
-			"label": "Country",
+			"fieldname": "custom_project_address",
+			"label": "Project Address",
 			"fieldtype": "Link",
-			"options": "Country",
-			"insert_after": "custom_egc_address_section",
-		},
-		{
-			"fieldname": "custom_egc_region",
-			"label": "Region",
-			"fieldtype": "Data",
-			"insert_after": "custom_egc_country",
-		},
-		{
-			"fieldname": "custom_egc_city",
-			"label": "City",
-			"fieldtype": "Data",
-			"insert_after": "custom_egc_region",
-		},
-		{
-			"fieldname": "custom_egc_address_col",
-			"fieldtype": "Column Break",
-			"insert_after": "custom_egc_city",
-		},
-		{
-			"fieldname": "custom_egc_address",
-			"label": "Address",
-			"fieldtype": "Small Text",
-			"insert_after": "custom_egc_address_col",
-		},
-		{
-			"fieldname": "custom_egc_time_zone",
-			"label": "Time Zone",
-			"fieldtype": "Data",
-			"insert_after": "custom_egc_address",
+			"options": "Address",
+			"insert_after": "custom_project_address_section",
 		},
 		# -- More Info tab: Site Contact --------------------------------------------------------
 		{
 			"fieldname": "custom_egc_site_contact_section",
 			"label": "Site Contact",
 			"fieldtype": "Section Break",
-			"insert_after": "custom_egc_time_zone",
+			"insert_after": "custom_project_address",
 		},
 		{
 			"fieldname": "custom_egc_site_contact_name",

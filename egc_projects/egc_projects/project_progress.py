@@ -31,15 +31,23 @@ _UNTOUCHED_STATUSES = ("Cancelled", "On hold")
 
 
 def _should_sync(project: str, percent_complete_method: str | None) -> bool:
+	# Never override a project genuinely using core Task, regardless of percent_complete_method
+	# — if it has any Task rows, core's own update_percent_complete() (which ran just before
+	# this hook, same validate()) already computed a meaningful value from them this same save.
+	# Hoisted above the per-method branches (not just under "Task Completion") so this holds
+	# even for a project explicitly set to `PERCENT_COMPLETE_METHOD`/"Activity Completion" —
+	# real Task data should always win over Activity-derived progress, not just under the one
+	# method name that happens to default to checking for it.
+	if frappe.db.exists("Task", {"project": project}):
+		return False
 	if percent_complete_method == PERCENT_COMPLETE_METHOD:
 		return True
 	if percent_complete_method == "Task Completion":
-		# Safe default: never override a project genuinely using core Task — if it has any
-		# Task rows, core's own update_percent_complete() (which ran just before this hook,
-		# same validate()) already computed a meaningful value from them this same save.
-		has_tasks = frappe.db.exists("Task", {"project": project})
-		has_activities = frappe.db.exists("EGC Activity", {"project": project})
-		return not has_tasks and bool(has_activities)
+		# Legacy default value, still meaningful for any project not yet migrated to the
+		# trimmed option list (install.py's trim_percent_complete_method_options rewrites these
+		# going forward, but this stays as a defensive fallback) — same "nobody's explicitly
+		# opted in" sentinel PERCENT_COMPLETE_METHOD's own docstring above describes.
+		return bool(frappe.db.exists("EGC Activity", {"project": project}))
 	return False
 
 

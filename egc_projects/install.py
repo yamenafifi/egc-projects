@@ -100,6 +100,8 @@ def setup() -> None:
 	create_equipment_manufacturers()
 	create_project_custom_fields()
 	create_activity_completion_method_option()
+	trim_percent_complete_method_options()
+	hide_unused_project_fields()
 	frappe.db.commit()
 
 
@@ -146,6 +148,129 @@ def create_activity_completion_method_option() -> None:
 	if current == options:
 		return
 	make_property_setter("Project", "percent_complete_method", "options", options, "Text")
+
+
+def trim_percent_complete_method_options() -> None:
+	"""Narrows `Project.percent_complete_method`'s options down to the two EGC actually uses —
+	`Manual` and `Activity Completion` (the option `create_activity_completion_method_option`
+	above adds). Core's own `Task Completion`/`Task Progress`/`Task Weight` are meaningless here
+	(EGC doesn't use Tasks) and stayed only because that function widens the list rather than
+	replacing it. The field itself stays visible (not hidden) — `project_progress.py`'s
+	auto-sync logic reads it, so it's a real choice a PM makes, not decoration. Unlike the dropped
+	flat address fields, a project already holding one of the three removed values IS rewritten
+	below (not left as a harmless stale value) — a Select field is validated against its own
+	`options` on every save, so leaving it unchanged would make that project unsavable."""
+	from egc_projects.egc_projects.project_progress import PERCENT_COMPLETE_METHOD
+
+	from frappe.custom.doctype.property_setter.property_setter import make_property_setter
+
+	# Core's own default ("Task Completion") is one of the three options about to be removed, and
+	# Property Setter's own validate() checks the field's CURRENT default against a new `options`
+	# value at save time — so the default has to change first, or saving the trimmed `options`
+	# Property Setter itself fails immediately.
+	#
+	# The new default must be `PERCENT_COMPLETE_METHOD` ("Activity Completion"), NOT "Manual" —
+	# `project_progress._should_sync()` treats "Task Completion" (core's original default) as its
+	# own "nobody has explicitly decided anything yet, safe to auto-sync from EGC Activity"
+	# sentinel (see that module's own docstring/comment); "Manual" is a genuine, deliberate
+	# opt-out. Defaulting new projects to "Manual" would silently turn OFF the auto-sync every
+	# existing project already gets today — confirmed by this exact regression breaking 4 of
+	# `test_project_progress.py`'s own tests when first tried. "Activity Completion" is both a
+	# valid trimmed-options value and preserves the sync-by-default behavior that already exists
+	# and is already tested; it's a rename of the same role "Task Completion" played, not a
+	# behavior change.
+	current_default = frappe.db.get_value(
+		"Property Setter",
+		{"doc_type": "Project", "field_name": "percent_complete_method", "property": "default"},
+		"value",
+	)
+	if current_default != PERCENT_COMPLETE_METHOD:
+		make_property_setter("Project", "percent_complete_method", "default", PERCENT_COMPLETE_METHOD, "Text")
+
+	options = f"Manual\n{PERCENT_COMPLETE_METHOD}"
+	current_options = frappe.db.get_value(
+		"Property Setter",
+		{"doc_type": "Project", "field_name": "percent_complete_method", "property": "options"},
+		"value",
+	)
+	if current_options != options:
+		make_property_setter("Project", "percent_complete_method", "options", options, "Text")
+
+	# A Select field's value is validated against its own `options` on every save, not just at
+	# creation — so a project already holding one of the three removed values (from before this
+	# ran) would fail to save at all from this point on, not just "keep a stale value" as
+	# harmlessly as e.g. the dropped address fields do. Reset those rows rather than leave
+	# existing projects unable to save until someone notices why — choosing the replacement that
+	# preserves each one's CURRENT behavior instead of silently changing it:
+	#   - "Task Completion" -> `PERCENT_COMPLETE_METHOD`: `_should_sync()` already treats these
+	#     as equivalent (its own "auto-sync from Activities" sentinel), so this is a rename, not
+	#     a behavior change.
+	#   - "Task Progress"/"Task Weight" -> "Manual": `_should_sync()` returns False for both
+	#     today (no case for them at all), same as it does for "Manual" — also a rename, not a
+	#     behavior change.
+	frappe.db.sql(
+		"update `tabProject` set percent_complete_method = %(method)s where percent_complete_method = 'Task Completion'",
+		{"method": PERCENT_COMPLETE_METHOD},
+	)
+	frappe.db.sql(
+		"update `tabProject` set percent_complete_method = 'Manual'"
+		" where percent_complete_method in ('Task Progress', 'Task Weight')"
+	)
+
+
+#: Core `Project` fields with zero references anywhere in this app (confirmed by search, not
+#: assumed) — all either timesheet-specific ("(via Timesheet)" fields), a legacy scheduled-email
+#: progress-collection feature (`monitor_progress_tab`'s own cluster), or generic ERPNext
+#: concepts (Project Type/Priority/Template/Sales Order/Department/Cost Center) this app never
+#: wired up. Hidden via Property Setter, never deleted — reversible, and hiding (unlike removing
+#: a field from `field_order`) can't break `project_custom_fields.py`'s `custom_egc_details_bridge`
+#: anchor at `actual_end_date`.
+_HIDDEN_PROJECT_FIELDS = (
+	"actual_start_date",
+	"actual_end_date",
+	"actual_time",
+	"is_active",
+	"project_template",
+	"priority",
+	"sales_order",
+	"department",
+	"cost_center",
+	"monitor_progress_tab",
+	"collect_progress",
+	"holiday_list",
+	"frequency",
+	"from_time",
+	"to_time",
+	"first_email",
+	"second_email",
+	"daily_time_to_send",
+	"day_to_send",
+	"weekly_time_to_send",
+	"subject",
+	"message",
+	# Native "Users" (Project User child table) — website-portal access mechanism this app
+	# doesn't use (Directory-based access replaces it). Per explicit instruction: hidden, not
+	# deleted — removed manually later.
+	"users_section",
+	"users",
+	# egc_hr's own Supervisors table (attendance-approval authority, a distinct concern from the
+	# Directory) — same instruction, same treatment. Hidden from here regardless of which app's
+	# fixture created the field; a Property Setter only needs doc_type/field_name to target it.
+	"custom_egc_supervisors_section",
+	"custom_egc_supervisors",
+)
+
+
+def hide_unused_project_fields() -> None:
+	from frappe.custom.doctype.property_setter.property_setter import make_property_setter
+
+	for fieldname in _HIDDEN_PROJECT_FIELDS:
+		current = frappe.db.get_value(
+			"Property Setter", {"doc_type": "Project", "field_name": fieldname, "property": "hidden"}, "value"
+		)
+		if current == "1":
+			continue
+		make_property_setter("Project", fieldname, "hidden", 1, "Check")
 
 
 def create_roles() -> None:

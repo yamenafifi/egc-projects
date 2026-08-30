@@ -39,11 +39,7 @@ PROFILE_FIELD_MAP = {
 	"contract_type": "custom_egc_contract_type",
 	"project_description": "custom_egc_project_description",
 	"project_image": "custom_egc_project_image",
-	"country": "custom_egc_country",
-	"region": "custom_egc_region",
-	"city": "custom_egc_city",
-	"address": "custom_egc_address",
-	"time_zone": "custom_egc_time_zone",
+	"project_address": "custom_project_address",
 	"site_contact_name": "custom_egc_site_contact_name",
 	"site_contact_phone": "custom_egc_site_contact_phone",
 	"site_contact_email": "custom_egc_site_contact_email",
@@ -88,6 +84,14 @@ def save_project_profile(project: str, values: dict | str) -> None:
 		if external in values:
 			doc.set(internal, values[external])
 	doc.save()
+
+	# Covers both picking an existing (already-linked) Address and creating a brand new one via
+	# this dialog's own Link-field quick-entry, which has no way to know about Project on its
+	# own — see ensure_address_linked_to_project's own docstring. The native Project form's
+	# equivalent (project.js) calls the same function from its own change handler, since a
+	# native-form save never goes through this endpoint.
+	if values.get("project_address"):
+		ensure_address_linked_to_project(values["project_address"], project)
 
 
 @frappe.whitelist()
@@ -146,6 +150,53 @@ def remove_equipment_item(project: str, row_name: str) -> None:
 	doc = frappe.get_doc("Project", project)
 	doc.custom_egc_equipment_items = [row for row in doc.custom_egc_equipment_items if row.name != row_name]
 	doc.save()
+
+
+@frappe.whitelist()
+@frappe.validate_and_sanitize_search_inputs
+def get_addresses_for_project(doctype, txt, searchfield, start, page_len, filters):
+	"""Link-field query for `Project.custom_project_address` — `Address` has no direct FK to
+	`Project` (core's own `Dynamic Link` child-table pattern, `Address.links`, is how any
+	doctype gets address support), so this joins through it rather than filtering a plain
+	field. Only offers Addresses already linked to THIS project; `ensure_address_linked_to_project`
+	below is what creates that link in the first place, whether for a pre-existing Address or
+	one just created via this field's own quick-entry."""
+	project = (filters or {}).get("project")
+	if not project:
+		return []
+	return frappe.db.sql(
+		"""
+		select a.name, a.address_title
+		from `tabAddress` a
+		inner join `tabDynamic Link` dl on dl.parent = a.name and dl.parenttype = 'Address'
+		where dl.link_doctype = 'Project' and dl.link_name = %(project)s
+			and a.name like %(txt)s
+		order by a.name
+		limit %(page_len)s offset %(start)s
+		""",
+		{"project": project, "txt": f"%{txt}%", "start": start, "page_len": page_len},
+	)
+
+
+@frappe.whitelist()
+def ensure_address_linked_to_project(address: str, project: str) -> None:
+	"""Idempotently links `address` back to `project` via a `Dynamic Link` row, so it satisfies
+	`get_addresses_for_project`'s own filter on future searches. Called from `project.js` on
+	`custom_project_address` change — covers both "picked an existing Address" (already linked,
+	no-op) and "created a brand new one via the field's own quick-entry" (not linked yet) the
+	same way, without needing to intercept the quick-entry dialog itself."""
+	if not address or not project:
+		return
+	_require_profile_edit_access(project)
+	already_linked = frappe.db.exists(
+		"Dynamic Link",
+		{"parent": address, "parenttype": "Address", "link_doctype": "Project", "link_name": project},
+	)
+	if already_linked:
+		return
+	doc = frappe.get_doc("Address", address)
+	doc.append("links", {"link_doctype": "Project", "link_name": project})
+	doc.save(ignore_permissions=True)
 
 
 def resolve_role_user(project: str, role_name: str) -> str | None:

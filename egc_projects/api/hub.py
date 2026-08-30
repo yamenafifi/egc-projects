@@ -17,6 +17,7 @@ from __future__ import annotations
 import erpnext
 import frappe
 from frappe import _
+from frappe.contacts.doctype.address.address import render_address
 from frappe.query_builder.functions import Coalesce, NullIf, Sum
 from frappe.utils import add_days, flt, getdate, today
 
@@ -1022,6 +1023,18 @@ def get_project_info(project: str) -> dict:
 	raw = frappe.db.get_value("Project", project, list(project_profile.PROFILE_FIELD_MAP.values()), as_dict=True)
 	data = {external: raw[internal] for external, internal in project_profile.PROFILE_FIELD_MAP.items()}
 	data["project"] = project
+	# `project_address` is only ever the Address doctype's own record name (an autoname hash) —
+	# format it into a real display string here so the Hub never has to reimplement address
+	# formatting, matching the "one address model, shared with the rest of ERPNext" point of
+	# switching to a real Address record in the first place.
+	# `render_address(..., check_permissions=False)`, not `get_address_display` — access here is
+	# already gated by `require_project_permission` above; a Hub user who can read this Project
+	# shouldn't ALSO need one of core Address's own business-specific roles (Sales User,
+	# Purchase User, ...) just to see its own linked address, the same way none of this
+	# function's other fetched display fields re-check permission on their source doctype.
+	data["project_address_display"] = (
+		render_address(data["project_address"], check_permissions=False) if data.get("project_address") else None
+	)
 	data["stakeholders"] = project_profile.get_stakeholders(project)
 	data["equipment_items"] = frappe.get_all(
 		"EGC Project Equipment Item",

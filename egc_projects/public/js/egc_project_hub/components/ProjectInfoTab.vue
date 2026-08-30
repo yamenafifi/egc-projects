@@ -46,11 +46,7 @@ const has_any_data = computed(() => {
 		"contract_type",
 		"project_description",
 		"project_image",
-		"country",
-		"region",
-		"city",
-		"address",
-		"time_zone",
+		"project_address",
 		"site_contact_name",
 		"site_contact_phone",
 		"site_contact_email",
@@ -66,8 +62,27 @@ const has_any_data = computed(() => {
 	);
 });
 
+// `project_address_display` is `render_address`'s own HTML-formatted string (built for print
+// templates, `<br>`-joined) — converting to plain newlines lets the existing `white-space:
+// pre-wrap` text style render it correctly without reaching for `v-html` over server-rendered
+// HTML this component doesn't otherwise need to trust.
+const project_address_lines = computed(() => {
+	const display = data.value?.info?.project_address_display;
+	if (!display) return "";
+	return display
+		.replace(/<br\s*\/?>/gi, "\n")
+		.split("\n")
+		.map((line) => line.trim())
+		.filter(Boolean)
+		.join("\n");
+});
+
 function open_native_form() {
 	frappe.set_route("Form", "Project", props.project);
+}
+
+function open_address_form() {
+	frappe.set_route("Form", "Address", data.value.info.project_address);
 }
 
 function format_date(value) {
@@ -137,12 +152,22 @@ function open_edit_details_dialog() {
 				options: { doctype: "Project", docname: props.project, fieldname: "custom_egc_project_image" },
 			},
 			{ fieldtype: "Section Break", label: __("Address") },
-			{ fieldname: "country", fieldtype: "Link", label: __("Country"), options: "Country", default: info.country },
-			{ fieldname: "region", fieldtype: "Data", label: __("Region"), default: info.region },
-			{ fieldname: "city", fieldtype: "Data", label: __("City"), default: info.city },
-			{ fieldtype: "Column Break" },
-			{ fieldname: "address", fieldtype: "Small Text", label: __("Address"), default: info.address },
-			{ fieldname: "time_zone", fieldtype: "Data", label: __("Time Zone"), default: info.time_zone },
+			{
+				fieldname: "project_address",
+				fieldtype: "Link",
+				label: __("Project Address"),
+				options: "Address",
+				default: info.project_address,
+				get_query: () => ({
+					query: "egc_projects.egc_projects.project_profile.get_addresses_for_project",
+					filters: { project: props.project },
+				}),
+				// Same "born already linked" fix as project.js — without it, "Create a new
+				// Address" here would save an Address the query above can never find again.
+				get_route_options_for_new_doc: () => ({
+					links: [{ link_doctype: "Project", link_name: props.project }],
+				}),
+			},
 			{ fieldtype: "Section Break", label: __("Site Contact") },
 			{
 				fieldname: "site_contact_name",
@@ -367,28 +392,11 @@ function confirm_remove_equipment(row) {
 
 				<section class="hub-card hub-project-info__section">
 					<div class="hub-card__title">{{ __("Address") }}</div>
-					<dl class="hub-info-grid">
-						<div>
-							<dt>{{ __("Country") }}</dt>
-							<dd>{{ data.info.country || "—" }}</dd>
-						</div>
-						<div>
-							<dt>{{ __("Region") }}</dt>
-							<dd>{{ data.info.region || "—" }}</dd>
-						</div>
-						<div>
-							<dt>{{ __("City") }}</dt>
-							<dd>{{ data.info.city || "—" }}</dd>
-						</div>
-						<div>
-							<dt>{{ __("Address") }}</dt>
-							<dd>{{ data.info.address || "—" }}</dd>
-						</div>
-						<div>
-							<dt>{{ __("Time Zone") }}</dt>
-							<dd>{{ data.info.time_zone || "—" }}</dd>
-						</div>
-					</dl>
+					<EmptyState v-if="!data.info.project_address" :title="__('No address set yet')" />
+					<template v-else>
+						<p class="hub-project-info__text">{{ project_address_lines }}</p>
+						<a href="#" class="hub-link" @click.prevent="open_address_form">{{ __("Open Address record") }}</a>
+					</template>
 				</section>
 
 				<section class="hub-card hub-project-info__section">
@@ -481,6 +489,18 @@ function confirm_remove_equipment(row) {
 </template>
 
 <style scoped>
+.hub-link {
+	color: var(--text-color);
+	cursor: pointer;
+	text-decoration: none;
+	border-bottom: 1px dashed var(--border-color);
+}
+
+.hub-link:hover {
+	color: var(--text-color);
+	border-bottom-color: var(--text-color);
+}
+
 .hub-project-info__toolbar {
 	display: flex;
 	align-items: center;
