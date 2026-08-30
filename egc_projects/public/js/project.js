@@ -7,37 +7,14 @@ frappe.ui.form.on("Project", {
 	refresh(frm) {
 		if (frm.is_new()) return;
 
+		// The one way into the Hub from here — WBS/Activities/Drawing Register/Submittal Log
+		// used to also get their own shortcuts in a second "EGC Projects" dropdown, redundant
+		// now that the Hub itself has a tab for every one of them (and a Directory tab besides);
+		// removed rather than left as a second, easy-to-miss path to the same places.
 		frm.add_custom_button(
-			__("Open in EGC Projects"),
+			__("Open in Project Manager"),
 			() => frappe.set_route("egc-project-hub", frm.doc.name),
 			null
-		);
-
-		frm.add_custom_button(
-			__("WBS"),
-			() => frappe.set_route("Tree", "EGC WBS Node", { project: frm.doc.name }),
-			__("EGC Projects")
-		);
-		frm.add_custom_button(
-			__("Activities"),
-			() => frappe.set_route("Tree", "EGC Activity", { project: frm.doc.name }),
-			__("EGC Projects")
-		);
-		frm.add_custom_button(
-			__("Drawing Register"),
-			() =>
-				frappe.set_route("query-report", "EGC Drawing Register", {
-					project: frm.doc.name,
-				}),
-			__("EGC Projects")
-		);
-		frm.add_custom_button(
-			__("Submittal Log"),
-			() =>
-				frappe.set_route("query-report", "EGC Submittal Log", {
-					project: frm.doc.name,
-				}),
-			__("EGC Projects")
 		);
 
 		// `Address` has no direct FK to `Project` (core's own Dynamic Link pattern — see
