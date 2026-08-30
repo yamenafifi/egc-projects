@@ -118,7 +118,15 @@ def grant_portal_access(project: str, row_name: str, role: str, email: str | Non
 	user_doc = frappe.get_doc("User", user)
 	user_doc.append_roles(role)
 	user_doc.save(ignore_permissions=True)
+
+	is_first_grant = not _has_portal_access(user, project)
 	add_user_permission("Project", project, user, ignore_permissions=True)
+
+	if is_first_grant:
+		from egc_projects.egc_projects import notifications
+
+		notifications.send_directory_welcome_email(user, project)
+
 	return {"user": user}
 
 

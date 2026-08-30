@@ -54,9 +54,18 @@ class TestDirectoryHub(IntegrationTestCase):
 	def setUpClass(cls):
 		super().setUpClass()
 		frappe.set_user("Administrator")
+		# grant_portal_access sends a welcome email on first grant (notifications.py) — muted so
+		# these tests never attempt a real send through the site's actual no-reply@egc-me.com
+		# account.
+		frappe.flags.mute_emails = True
 		cls.manager_user = _get_or_create_user("egc-dh-manager@example.com", ["Projects User", c.ROLE_PROJECT_MANAGER])
 		cls.role_internal = _get_or_create_role("EGC-DH-Internal Role", is_egc_internal=1)
 		cls.role_external = _get_or_create_role("EGC-DH-External Role", is_egc_internal=0)
+
+	@classmethod
+	def tearDownClass(cls):
+		frappe.flags.mute_emails = False
+		super().tearDownClass()
 
 	def setUp(self):
 		self.project = _make_project(_make_company())
@@ -165,6 +174,30 @@ class TestDirectoryHub(IntegrationTestCase):
 
 		with self.assertRaises(frappe.PermissionError):
 			directory.grant_portal_access(self.project, other_row, c.ROLE_EXTERNAL_VIEWER, email="egc-dh-y@example.com")
+
+	def test_grant_portal_access_sends_one_welcome_email_on_first_grant(self):
+		row_name = self._add_stakeholder(self.role_external, "Welcome Email Target")
+		frappe.set_user(self.manager_user)
+
+		before = frappe.db.count("Email Queue")
+		directory.grant_portal_access(
+			self.project, row_name, c.ROLE_EXTERNAL_VIEWER, email="egc-dh-welcome@example.com"
+		)
+		self.assertEqual(frappe.db.count("Email Queue"), before + 1)
+
+	def test_grant_portal_access_does_not_resend_while_access_is_still_active(self):
+		# Granting a SECOND role to someone who already has active access (no revoke in between)
+		# is not a fresh onboarding — is_first_grant is keyed on current User Permission
+		# existence, so this must not queue a second welcome email.
+		row_name = self._add_stakeholder(self.role_external, "No Duplicate Welcome Target")
+		frappe.set_user(self.manager_user)
+		directory.grant_portal_access(
+			self.project, row_name, c.ROLE_EXTERNAL_VIEWER, email="egc-dh-noresend@example.com"
+		)
+
+		before = frappe.db.count("Email Queue")
+		directory.grant_portal_access(self.project, row_name, c.ROLE_PROJECT_VIEWER, email="egc-dh-noresend@example.com")
+		self.assertEqual(frappe.db.count("Email Queue"), before)
 
 	# -- revoke_portal_access ----------------------------------------------------------------------
 

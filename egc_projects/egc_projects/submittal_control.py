@@ -508,6 +508,10 @@ def _assign_step(step: str, reviewer_user: str, submission: str) -> None:
 		ignore_permissions=True,
 	)
 
+	from egc_projects.egc_projects import notifications
+
+	notifications.send_ball_in_court_email(reviewer_user, submission)
+
 
 def _close_step_assignment(step: str, reviewer_user: str | None) -> None:
 	if not reviewer_user:

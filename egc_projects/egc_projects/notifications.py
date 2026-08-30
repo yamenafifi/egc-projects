@@ -6,13 +6,23 @@ entry and surfaces the item in that user's assignment list for free, so it is no
 here. This module covers the remaining events the brief asks for: submission received, response
 recorded, revise & resubmit, new revision submitted, upcoming due date, overdue — all via the
 documented core helper `enqueue_create_notification`, never a parallel notification store.
+
+**Email** (`send_ball_in_court_email`/`send_directory_welcome_email` below) is a separate,
+additive channel on top of all of the above — the in-app Notification Log stays exactly as it
+was, this just also reaches an inbox for the two events most worth a real email: a reviewer
+just got a step assigned to them, and someone was just given Hub access for the first time.
+Deliberately simple for this first pass — plain text, no `Email Template` doctype, one shared
+`no-reply@egc-me.com` sender rather than the site's general default outgoing account (so this
+keeps working correctly even if that default is ever repointed at a different mailbox).
 """
 
 from __future__ import annotations
 
 import frappe
 from frappe.desk.doctype.notification_log.notification_log import enqueue_create_notification
-from frappe.utils import add_days, getdate, today
+from frappe.utils import add_days, get_url, getdate, today
+
+NOTIFY_SENDER = "no-reply@egc-me.com"
 
 
 def _notify(users: list[str], doctype: str, name: str, subject: str, dedupe_on: list[str] | None = None) -> None:
@@ -116,3 +126,42 @@ def send_due_date_reminders() -> None:
 			subject,
 			dedupe_on=["document_type", "document_name", "subject"],
 		)
+
+
+def _send_email(user: str, subject: str, message: str) -> None:
+	if not user or user == "Administrator":
+		return
+	email = frappe.db.get_value("User", user, "email") or user
+	frappe.sendmail(recipients=[email], sender=NOTIFY_SENDER, subject=subject, message=message, now=True)
+
+
+def send_ball_in_court_email(reviewer_user: str, submission: str) -> None:
+	"""Emails the reviewer a step just got assigned to — called from `_assign_step`
+	(submittal_control.py), the exact same moment that already creates the in-app assignment."""
+	revision = frappe.db.get_value(
+		"EGC Submittal Revision", submission, ["revision_label", "project"], as_dict=True
+	)
+	if not revision:
+		return
+	url = f"{get_url()}/app/egc-project-hub/{revision.project}/submittals"
+	_send_email(
+		reviewer_user,
+		frappe._("Review requested: {0}").format(revision.revision_label or submission),
+		frappe._('You\'ve been asked to review {0}.<br><br><a href="{1}">Open in Project Manager</a>').format(
+			revision.revision_label or submission, url
+		),
+	)
+
+
+def send_directory_welcome_email(user: str, project: str) -> None:
+	"""Sent once, from `grant_portal_access` (api/directory.py), the moment a Directory entry is
+	first given Portal Access — not on every later change to their access."""
+	project_name = frappe.db.get_value("Project", project, "project_name")
+	url = f"{get_url()}/app/egc-project-hub/{project}"
+	_send_email(
+		user,
+		frappe._("You've been added to {0}").format(project_name or project),
+		frappe._('You now have access to {0} in EGC Project Manager.<br><br><a href="{1}">Open the project</a>').format(
+			project_name or project, url
+		),
+	)
