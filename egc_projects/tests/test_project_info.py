@@ -69,9 +69,9 @@ class TestProjectInfo(IntegrationTestCase):
 		doc.save(ignore_permissions=True)
 		return doc
 
-	def _add_stakeholder(self, role, user=None, party_name=None):
+	def _add_stakeholder(self, role, person=None, party_name=None):
 		doc = frappe.get_doc("Project", self.project)
-		doc.append("custom_egc_stakeholders", {"role": role, "party_name": party_name, "user": user})
+		doc.append("custom_egc_stakeholders", {"role": role, "party_name": party_name, "person": person})
 		doc.save(ignore_permissions=True)
 		return doc
 
@@ -162,8 +162,8 @@ class TestProjectInfo(IntegrationTestCase):
 	# -- 3. resolve_role_user ------------------------------------------------------------------
 
 	def test_resolve_role_user_returns_seeded_user_and_none_otherwise(self):
-		self._add_stakeholder(self.role_pm, user=self.manager_user, party_name="Jane PM")
-		# A pure external party: a role with no `user` — must resolve to None, not raise, per
+		self._add_stakeholder(self.role_pm, person=self.manager_user)
+		# A pure external party: a role with no `person` — must resolve to None, not raise, per
 		# ARCHITECTURE_V2.md §2.
 		self._add_stakeholder(self.role_client, party_name="Acme Client")
 
@@ -186,7 +186,7 @@ class TestProjectInfo(IntegrationTestCase):
 		self.assertTrue(context["permissions"]["edit_profile"])
 
 		self._set_project_fields(custom_egc_sector="Healthcare")
-		self._add_stakeholder(self.role_pm, user=self.manager_user, party_name="Jane PM")
+		self._add_stakeholder(self.role_pm, person=self.manager_user)
 		self._add_stakeholder(self.role_other, party_name="Someone Else")
 
 		context = hub.get_project_context(self.project)
@@ -201,8 +201,7 @@ class TestProjectInfo(IntegrationTestCase):
 		self.assertNotIn(self.role_other, key_roles)
 
 		pm_row = next(row for row in context["profile"]["key_stakeholders"] if row["role"] == self.role_pm)
-		self.assertEqual(pm_row["user"], self.manager_user)
-		self.assertTrue(pm_row["user_full_name"])
+		self.assertEqual(pm_row["person"], self.manager_user)
 
 	# -- 5. edit_profile is exactly "can this user write to Project" ---------------------------
 
@@ -231,7 +230,7 @@ class TestProjectInfo(IntegrationTestCase):
 				ignore_permissions=True
 			).name
 
-		self._add_stakeholder(self.role_pm, user=self.manager_user, party_name="Jane PM")
+		self._add_stakeholder(self.role_pm, person=self.manager_user)
 		doc = frappe.get_doc("Project", self.project)
 		doc.custom_egc_stakeholders[-1].is_primary = 1
 		doc.append(
@@ -245,8 +244,10 @@ class TestProjectInfo(IntegrationTestCase):
 		self.assertEqual(len(reloaded["stakeholders"]), 2)
 
 		by_role = {row["role"]: row for row in reloaded["stakeholders"]}
-		self.assertEqual(by_role[self.role_pm]["party_name"], "Jane PM")
-		self.assertEqual(by_role[self.role_pm]["user"], self.manager_user)
+		# `party_name` always mirrors the linked User's own `full_name` now — see
+		# `fetch_from_person`, no independent value survives once `person` is set.
+		self.assertEqual(by_role[self.role_pm]["party_name"], frappe.db.get_value("User", self.manager_user, "full_name"))
+		self.assertEqual(by_role[self.role_pm]["person"], self.manager_user)
 		self.assertTrue(by_role[self.role_pm]["is_primary"])
 		self.assertEqual(by_role[self.role_client]["party_name"], "Acme Client")
 		self.assertEqual(by_role[self.role_client]["organization"], org)
@@ -258,6 +259,26 @@ class TestProjectInfo(IntegrationTestCase):
 		direct = project_profile.get_stakeholders(self.project)
 		self.assertEqual(len(direct), 2)
 		self.assertEqual({row.role for row in direct}, {self.role_pm, self.role_client})
+
+	def test_stakeholder_remirrors_on_a_plain_native_form_save(self):
+		# Regression: Frappe never dispatches a child table row's own `validate()` automatically
+		# on parent save (`Document._save()`/`update_children()` only call `d.db_update()` per
+		# row) — `EGCProjectStakeholder.fetch_from_person()` silently never fired for a raw
+		# `doc.append(...); doc.save()` edit until `project_custom_fields.validate_project`
+		# started explicitly calling it per row, the same workaround already used there for the
+		# WBS Node check. Confirms the fix, not just that `project_profile.add_stakeholder`'s own
+		# separate API-layer pre-fill happens to mask the gap.
+		self._add_stakeholder(self.role_pm, person=self.manager_user)
+
+		# Direct DB write, not `.save()` — `User.full_name` is itself derived from
+		# first/middle/last on save (see `set_full_name()`), which isn't what's under test here.
+		frappe.db.set_value("User", self.manager_user, "full_name", "Renamed Manager")
+		doc = frappe.get_doc("Project", self.project)
+		doc.save(ignore_permissions=True)  # nothing else changed — must still re-fetch
+
+		row = doc.custom_egc_stakeholders[-1]
+		self.assertEqual(row.party_name, "Renamed Manager")
+		self.assertEqual(row.email, self.manager_user)
 
 	# -- 7. save_project_profile (Level 0 §8: routine edits now go through the Hub) -------------
 
@@ -301,13 +322,16 @@ class TestProjectInfo(IntegrationTestCase):
 			).name
 		person = frappe.get_doc(
 			{
-				"doctype": "Contact",
+				"doctype": "User",
+				"email": "dp@example.com",
 				"first_name": "Directory Person",
-				"links": [{"link_doctype": "Customer", "link_name": org}],
-				"email_ids": [{"email_id": "dp@example.com", "is_primary": 1}],
+				"send_welcome_email": 0,
 			}
 		)
 		person.insert(ignore_permissions=True)
+		customer = frappe.get_doc("Customer", org)
+		customer.append("portal_users", {"user": person.name})
+		customer.save(ignore_permissions=True)
 
 		frappe.set_user(self.manager_user)
 		project_profile.add_stakeholder(self.project, {"role": self.role_pm, "person": person.name})

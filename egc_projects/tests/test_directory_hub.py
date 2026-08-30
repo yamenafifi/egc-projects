@@ -73,9 +73,11 @@ class TestDirectoryHub(IntegrationTestCase):
 	def tearDown(self):
 		frappe.set_user("Administrator")
 
-	def _add_stakeholder(self, role, party_name, user=None):
+	def _add_stakeholder(self, role, party_name, person=None):
 		frappe.set_user(self.manager_user)
-		row_name = project_profile.add_stakeholder(self.project, {"role": role, "party_name": party_name, "user": user})
+		row_name = project_profile.add_stakeholder(
+			self.project, {"role": role, "party_name": party_name, "person": person}
+		)
 		frappe.set_user("Administrator")
 		return row_name
 
@@ -137,7 +139,7 @@ class TestDirectoryHub(IntegrationTestCase):
 			frappe.db.exists("User Permission", {"user": user, "allow": "Project", "for_value": self.project})
 		)
 		# Mirrored back onto the stakeholder row.
-		self.assertEqual(frappe.db.get_value("EGC Project Stakeholder", row_name, "user"), user)
+		self.assertEqual(frappe.db.get_value("EGC Project Stakeholder", row_name, "person"), user)
 
 		rows = directory.get_directory(self.project)
 		self.assertTrue(rows[0]["has_portal_access"])
@@ -153,29 +155,34 @@ class TestDirectoryHub(IntegrationTestCase):
 		)
 		self.assertEqual(result["user"], existing)
 
-	def test_grant_portal_access_mirrors_user_onto_linked_person(self):
+	def test_grant_portal_access_reuses_the_row_s_own_person_when_already_a_user(self):
+		# `person` links directly to a User now — a stakeholder row that already has one set
+		# (added via the normal "pick from the Directory" path, not a fresh email) must have
+		# THAT user granted access, never a new one created alongside it.
 		org_name = "EGC-DH-Test-Org"
 		org = frappe.db.get_value("Customer", {"customer_name": org_name})
 		if not org:
 			org = frappe.get_doc({"doctype": "Customer", "customer_name": org_name}).insert(ignore_permissions=True).name
 		person = frappe.get_doc(
 			{
-				"doctype": "Contact",
+				"doctype": "User",
+				"email": "egc-dh-personlinked@example.com",
 				"first_name": "Directory Linked Person",
-				"links": [{"link_doctype": "Customer", "link_name": org}],
+				"send_welcome_email": 0,
 			}
 		)
 		person.insert(ignore_permissions=True)
+		customer = frappe.get_doc("Customer", org)
+		customer.append("portal_users", {"user": person.name})
+		customer.save(ignore_permissions=True)
 
 		frappe.set_user(self.manager_user)
 		row_name = project_profile.add_stakeholder(self.project, {"role": self.role_external, "person": person.name})
 		frappe.set_user(self.manager_user)
 
-		result = directory.grant_portal_access(
-			self.project, row_name, c.ROLE_EXTERNAL_VIEWER, email="egc-dh-personlinked@example.com"
-		)
+		result = directory.grant_portal_access(self.project, row_name, c.ROLE_EXTERNAL_VIEWER)
 
-		self.assertEqual(frappe.db.get_value("Contact", person.name, "user"), result["user"])
+		self.assertEqual(result["user"], person.name)
 
 	def test_grant_portal_access_without_email_and_no_existing_user_raises(self):
 		row_name = self._add_stakeholder(self.role_external, "No Email Given")

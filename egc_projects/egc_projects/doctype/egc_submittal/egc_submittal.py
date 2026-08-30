@@ -59,7 +59,7 @@ class EGCSubmittal(Document):
 				"Customer", self.responsible_organization, "customer_name"
 			)
 		if self.received_from_person:
-			self.received_from = frappe.db.get_value("Contact", self.received_from_person, "full_name")
+			self.received_from = frappe.db.get_value("User", self.received_from_person, "full_name")
 
 
 @frappe.whitelist()

@@ -56,10 +56,15 @@ def _make_organization(customer_name=None):
 
 
 def _make_person(full_name=None):
-	# See test_directory.py's own `_make_person` docstring — passing the display name straight as
-	# `first_name` reproduces the same `full_name` on Contact for these single-string test names.
+	# A "person" IS a User — see test_directory.py's own `_make_person` docstring for why
+	# `first_name` alone reproduces `full_name` exactly for these single-string test names.
 	doc = frappe.get_doc(
-		{"doctype": "Contact", "first_name": full_name or f"EGC-DirInt-Person-{frappe.generate_hash(length=6)}"}
+		{
+			"doctype": "User",
+			"email": f"egc-dirint-test-{frappe.generate_hash(length=10)}@example.com",
+			"first_name": full_name or f"EGC-DirInt-Person-{frappe.generate_hash(length=6)}",
+			"send_welcome_email": 0,
+		}
 	)
 	doc.insert(ignore_permissions=True)
 	return doc.name

@@ -100,13 +100,6 @@ def get_drawing_document_types() -> list[str]:
 # --- get_project_context --------------------------------------------------------------------
 
 
-def _user_full_names(names: set[str]) -> dict[str, str]:
-	if not names:
-		return {}
-	rows = frappe.get_all("User", filters={"name": ("in", list(names))}, fields=["name", "full_name"])
-	return {row.name: row.full_name for row in rows}
-
-
 def _project_profile_summary(project: str) -> dict:
 	"""The header-relevant slice of Project Information (ARCHITECTURE_V2.md §1/§4).
 
@@ -135,7 +128,6 @@ def _project_profile_summary(project: str) -> dict:
 	stakeholders = project_profile.get_stakeholders(project)
 	key_roles = set(project_profile.KEY_STAKEHOLDER_ROLES)
 	key_rows = [s for s in stakeholders if s.role in key_roles]
-	full_names = _user_full_names({s.user for s in key_rows if s.user})
 
 	row["key_stakeholders"] = [
 		{
@@ -143,8 +135,8 @@ def _project_profile_summary(project: str) -> dict:
 			"role_label": s.role,
 			"party_name": s.party_name,
 			"organization": s.organization,
-			"user": s.user,
-			"user_full_name": full_names.get(s.user) if s.user else None,
+			# `person` links directly to a User now — no separate identity record to resolve.
+			"person": s.person,
 		}
 		for s in key_rows
 	]
@@ -504,21 +496,30 @@ def _activity_assignees(activity_names: list[str]) -> dict[str, list[dict]]:
 	rows = frappe.get_all(
 		"EGC Assignment",
 		filters={"parent_doctype": "EGC Activity", "parent_name": ("in", activity_names)},
-		fields=["parent_name", "assignment_role", "is_primary", "person_label", "organization"],
+		fields=["parent_name", "assignment_role", "is_primary", "person_label", "organization_type", "organization"],
 		order_by="is_primary desc, creation asc",
 	)
 	if not rows:
 		return {}
-	org_names = {row.organization for row in rows if row.organization}
-	org_labels = (
+	customer_names = {row.organization for row in rows if row.organization and row.organization_type == "Customer"}
+	supplier_names = {row.organization for row in rows if row.organization and row.organization_type == "Supplier"}
+	org_labels = {
+		o.name: o.customer_name
+		for o in (
+			frappe.get_all("Customer", filters={"name": ("in", list(customer_names))}, fields=["name", "customer_name"])
+			if customer_names
+			else []
+		)
+	}
+	org_labels.update(
 		{
-			o.name: o.customer_name
-			for o in frappe.get_all(
-				"Customer", filters={"name": ("in", list(org_names))}, fields=["name", "customer_name"]
+			o.name: o.supplier_name
+			for o in (
+				frappe.get_all("Supplier", filters={"name": ("in", list(supplier_names))}, fields=["name", "supplier_name"])
+				if supplier_names
+				else []
 			)
 		}
-		if org_names
-		else {}
 	)
 	grouped: dict[str, list[dict]] = {}
 	for row in rows:

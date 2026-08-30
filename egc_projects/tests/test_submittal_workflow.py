@@ -113,7 +113,7 @@ class TestSubmittalWorkflow(IntegrationTestCase):
 
 	def _set_stakeholder(self, project, role, user, party_name):
 		doc = frappe.get_doc("Project", project)
-		doc.append("custom_egc_stakeholders", {"role": role, "party_name": party_name, "user": user})
+		doc.append("custom_egc_stakeholders", {"role": role, "party_name": party_name, "person": user})
 		doc.save(ignore_permissions=True)
 
 	def _make_document(self, document_number="DOC-001"):
@@ -693,9 +693,16 @@ class TestSubmittalWorkflow(IntegrationTestCase):
 	# -- ball-in-court falls to whoever owns resubmitting after a Rejected/Revise & Resubmit ----
 
 	def _make_person(self, full_name):
-		# See test_directory.py's own `_make_person` docstring — `first_name` alone reproduces
-		# `full_name` exactly for these single-string test names.
-		return frappe.get_doc({"doctype": "Contact", "first_name": full_name}).insert(ignore_permissions=True)
+		# A "person" IS a User — see test_directory.py's own `_make_person` docstring for why
+		# `first_name` alone reproduces `full_name` exactly for these single-string test names.
+		return frappe.get_doc(
+			{
+				"doctype": "User",
+				"email": f"egc-sw-test-{frappe.generate_hash(length=10)}@example.com",
+				"first_name": full_name,
+				"send_welcome_email": 0,
+			}
+		).insert(ignore_permissions=True)
 
 	def test_ball_in_court_falls_to_submittal_responsible_after_rejection(self):
 		doc = self._make_document("DOC-BIC-1")

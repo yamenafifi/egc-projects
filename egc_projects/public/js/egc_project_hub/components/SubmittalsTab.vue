@@ -90,7 +90,7 @@ function open_create_dialog() {
 				fieldname: "received_from_person",
 				fieldtype: "Link",
 				label: __("Received From (Person)"),
-				options: "Contact",
+				options: "User",
 				description: __("Pick a Project Directory entry, or leave blank and type a one-off party below."),
 			},
 			{ fieldname: "received_from", fieldtype: "Data", label: __("Received From") },

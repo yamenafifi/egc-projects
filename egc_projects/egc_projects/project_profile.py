@@ -45,7 +45,16 @@ PROFILE_FIELD_MAP = {
 	"dlp_end_date": "custom_egc_dlp_end_date",
 }
 
-STAKEHOLDER_ROW_FIELDS = ("role", "person", "party_name", "organization", "user", "email", "phone", "is_primary")
+STAKEHOLDER_ROW_FIELDS = (
+	"role",
+	"person",
+	"party_name",
+	"organization_type",
+	"organization",
+	"email",
+	"phone",
+	"is_primary",
+)
 EQUIPMENT_ROW_FIELDS = (
 	"facility",
 	"department",
@@ -102,17 +111,23 @@ def add_stakeholder(project: str, values: dict | str) -> str:
 	# BEFORE it runs the `validate` doc_event that would have filled it in. Resolving it here
 	# means a person-only row (the normal path) never trips that ordering. A blank string counts
 	# as "not provided" here, not just an absent key — a dialog submits every field it declared,
-	# empty ones included.
+	# empty ones included. `person` links directly to a User (their login is their identity here).
 	if row_values.get("person"):
-		contact = frappe.db.get_value("Contact", row_values["person"], ["full_name", "user"], as_dict=True)
-		if contact:
-			row_values["party_name"] = row_values.get("party_name") or contact.full_name
-			row_values["organization"] = row_values.get("organization") or directory.get_linked_customer(
-				row_values["person"]
+		user = frappe.db.get_value("User", row_values["person"], "full_name")
+		if user:
+			row_values["party_name"] = row_values.get("party_name") or user
+			org = directory.resolve_organization(row_values["person"])
+			if org and not row_values.get("organization"):
+				row_values["organization_type"], row_values["organization"] = org
+			row_values["email"] = row_values.get("email") or frappe.db.get_value(
+				"User", row_values["person"], "email"
 			)
-			row_values["user"] = row_values.get("user") or contact.user
-			row_values["email"] = row_values.get("email") or directory.get_primary_email(row_values["person"])
-			row_values["phone"] = row_values.get("phone") or directory.get_primary_phone(row_values["person"])
+			row_values["phone"] = row_values.get("phone") or frappe.db.get_value(
+				"User", row_values["person"], "phone"
+			)
+	# `organization_type` (when `organization` is set directly, no `person`) defaults in the
+	# child row's own `default_organization_type()` — that runs on every save regardless of entry
+	# path (this endpoint, the native form, ...), so it isn't duplicated here.
 
 	doc = frappe.get_doc("Project", project)
 	row = doc.append("custom_egc_stakeholders", row_values)
@@ -196,7 +211,7 @@ def ensure_address_linked_to_project(address: str, project: str) -> None:
 
 
 def resolve_role_user(project: str, role_name: str) -> str | None:
-	"""The `user` of the project's stakeholder row for `role_name`, or None.
+	"""The `person` (a User, directly) of the project's stakeholder row for `role_name`, or None.
 
 	None covers two distinct cases uniformly, by design: the role isn't represented among this
 	project's stakeholders, or it is but the stakeholder is a pure external party with no Frappe
@@ -209,11 +224,11 @@ def resolve_role_user(project: str, role_name: str) -> str | None:
 	rows = frappe.get_all(
 		"EGC Project Stakeholder",
 		filters={"parent": project, "parenttype": "Project", "role": role_name},
-		fields=["user"],
+		fields=["person"],
 		order_by="is_primary desc, idx asc",
 		limit=1,
 	)
-	return rows[0].user or None if rows else None
+	return rows[0].person or None if rows else None
 
 
 def get_stakeholders(project: str) -> list[dict]:

@@ -2,9 +2,10 @@
 # For license information, please see license.txt
 
 """Tests for the Project Directory / multi-assignment foundation (Level 0 §3-6 of the
-project-controls expansion): core `Customer`, core `Contact`, and the generic `EGC Assignment`
-engine (assignments.py) that replaced EGC Activity's single `responsible_user`/
-`responsible_supplier` fields.
+project-controls expansion): a "person" IS a core `User` directly (their login is their
+identity — no separate Contact/Person record), organization resolved via ERPNext's own native
+Portal User mechanism on `Customer`, and the generic `EGC Assignment` engine (assignments.py)
+that replaced EGC Activity's single `responsible_user`/`responsible_supplier` fields.
 """
 
 import frappe
@@ -64,20 +65,26 @@ def _make_organization(customer_name=None):
 	return doc.name
 
 
-def _make_person(full_name=None, organization=None, user=None):
-	# `Contact.full_name` is derived from `first_name`/`middle_name`/`last_name` (never typed
-	# directly) — passing the whole display name as `first_name` reproduces it exactly for these
-	# single-string test names (Contact.autoname's own `_get_full_name()` just returns
-	# `first_name` unchanged when middle/last are blank).
+def _make_person(full_name=None, organization=None):
+	# A "person" in the Directory IS a User — `User.full_name` is derived from `first_name`/
+	# `middle_name`/`last_name` (never typed directly), so passing the whole display name as
+	# `first_name` reproduces it exactly for these single-string test names. `organization`, when
+	# given, is a Customer name — linked via that Customer's own `portal_users` child table, the
+	# native ERPNext mechanism `directory.resolve_organization` reads.
+	email = f"egc-dir-test-{frappe.generate_hash(length=10)}@example.com"
 	doc = frappe.get_doc(
 		{
-			"doctype": "Contact",
+			"doctype": "User",
+			"email": email,
 			"first_name": full_name or f"Test Person {frappe.generate_hash(length=6)}",
-			"user": user,
-			"links": [{"link_doctype": "Customer", "link_name": organization}] if organization else [],
+			"send_welcome_email": 0,
 		}
 	)
 	doc.insert(ignore_permissions=True)
+	if organization:
+		customer = frappe.get_doc("Customer", organization)
+		customer.append("portal_users", {"user": doc.name})
+		customer.save(ignore_permissions=True)
 	return doc.name
 
 

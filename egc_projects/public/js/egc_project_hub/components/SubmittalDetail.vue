@@ -657,7 +657,7 @@ function open_add_assignment_dialog() {
 				fieldname: "person",
 				fieldtype: "Link",
 				label: __("Person"),
-				options: "Contact",
+				options: "User",
 				description: __("Leave blank to assign a whole Organization with no specific individual named."),
 			},
 			{

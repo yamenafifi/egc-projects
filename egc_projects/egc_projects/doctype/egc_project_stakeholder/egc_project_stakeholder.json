@@ -8,8 +8,8 @@
   "role",
   "person",
   "party_name",
+  "organization_type",
   "organization",
-  "user",
   "email",
   "phone",
   "is_primary"
@@ -28,8 +28,8 @@
    "fieldtype": "Link",
    "in_list_view": 1,
    "label": "Person",
-   "options": "Contact",
-   "description": "The normal path — links this stakeholder row to a Contact. Party Name/Organization/User/Email/Phone below are filled from it automatically; only fill them directly for a one-off party that genuinely isn't in the Directory yet."
+   "options": "User",
+   "description": "The normal path — links this stakeholder row directly to a User (this IS their login, no separate identity record). Party Name/Organization/Email/Phone below are filled from it automatically — Organization by whether this User is a Portal User of a Customer or Supplier (see EGC Stakeholder Role). Only fill the fields directly for a one-off party that genuinely has no User yet."
   },
   {
    "fieldname": "party_name",
@@ -39,18 +39,20 @@
    "reqd": 1
   },
   {
-   "fieldname": "organization",
-   "fieldtype": "Link",
-   "in_list_view": 1,
-   "label": "Organization",
-   "options": "Customer"
+   "default": "Customer",
+   "fieldname": "organization_type",
+   "fieldtype": "Select",
+   "label": "Organization Type",
+   "options": "\nCustomer\nSupplier",
+   "hidden": 1,
+   "description": "Dynamic Link validates `organization` against this BEFORE the row's own validate() runs (same ordering as `party_name`'s reqd check) — a field-level default, not a controller default, is the only thing early enough. `fetch_from_person()` overwrites it once `person` resolves to an actual Customer/Supplier/neither."
   },
   {
-   "fieldname": "user",
-   "fieldtype": "Link",
+   "fieldname": "organization",
+   "fieldtype": "Dynamic Link",
    "in_list_view": 1,
-   "label": "User",
-   "options": "User"
+   "label": "Organization",
+   "options": "organization_type"
   },
   {
    "fieldname": "email",

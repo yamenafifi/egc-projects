@@ -117,18 +117,6 @@ class TestHubAPI(IntegrationTestCase):
 		doc.insert(ignore_permissions=True)
 		return doc
 
-	def _make_person(self, user=None, full_name=None):
-		existing = frappe.db.get_value("Contact", {"user": user}, "name") if user else None
-		if existing:
-			return existing
-		# See test_directory.py's own `_make_person` docstring — `first_name` alone reproduces
-		# `full_name` exactly for these single-string test names.
-		doc = frappe.get_doc(
-			{"doctype": "Contact", "first_name": full_name or user or "Test Person", "user": user}
-		)
-		doc.insert(ignore_permissions=True)
-		return doc.name
-
 	def _make_assignment(self, parent_doctype, parent_name, person, assignment_role="Responsible"):
 		doc = frappe.get_doc(
 			{
@@ -577,9 +565,9 @@ class TestHubAPI(IntegrationTestCase):
 		not_overdue_activity = self._make_activity(
 			"OPEN-ACT-002", c.ACTIVITY_IN_PROGRESS, planned_end_date=add_days(today(), 10)
 		)
-		person = self._make_person(self.manager_user)
-		self._make_assignment("EGC Activity", overdue_activity.name, person)
-		self._make_assignment("EGC Activity", not_overdue_activity.name, person)
+		# `person` links directly to a User now — no separate identity record to create first.
+		self._make_assignment("EGC Activity", overdue_activity.name, self.manager_user)
+		self._make_assignment("EGC Activity", not_overdue_activity.name, self.manager_user)
 
 		frappe.set_user(self.manager_user)
 		items = hub.get_my_open_items(self.project)

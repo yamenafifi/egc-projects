@@ -181,7 +181,7 @@
    "fieldname": "received_from_person",
    "fieldtype": "Link",
    "label": "Received From (Person)",
-   "options": "Contact",
+   "options": "User",
    "description": "The normal path — picks a Project Directory entry and keeps Received From mirroring it. Leave blank and fill Received From directly only for a one-off party that genuinely isn't in the Directory yet."
   },
   {

@@ -121,7 +121,7 @@ function open_create_dialog() {
 				fieldname: "originator_person",
 				fieldtype: "Link",
 				label: __("Originator (Person)"),
-				options: "Contact",
+				options: "User",
 				description: __("Pick a Project Directory entry, or leave blank and type a one-off party below."),
 			},
 			{ fieldname: "originator", fieldtype: "Data", label: __("Originator") },

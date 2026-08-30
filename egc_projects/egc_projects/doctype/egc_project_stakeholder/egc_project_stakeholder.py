@@ -18,7 +18,8 @@ class EGCProjectStakeholder(Document):
 
 		email: DF.Data | None
 		is_primary: DF.Check
-		organization: DF.Link | None
+		organization: DF.DynamicLink | None
+		organization_type: DF.Literal["", "Customer", "Supplier"]
 		parent: DF.Data
 		parentfield: DF.Data
 		parenttype: DF.Data
@@ -26,7 +27,6 @@ class EGCProjectStakeholder(Document):
 		person: DF.Link | None
 		phone: DF.Data | None
 		role: DF.Link
-		user: DF.Link | None
 	# end: auto-generated types
 
 	def validate(self):
@@ -36,14 +36,15 @@ class EGCProjectStakeholder(Document):
 		"""The normal path (§30 of the Level 0 directory expansion): once `person` is set, this
 		row's own display fields always mirror the Directory record rather than drifting into an
 		independent copy — the free-text fields stay directly editable ONLY for a genuine one-off
-		party that isn't in the Directory (`person` left blank)."""
+		party that isn't in the Directory (`person` left blank). `person` links directly to a
+		User (their login is their identity here — no separate Contact/Person record)."""
 		if not self.person:
 			return
-		contact = frappe.db.get_value("Contact", self.person, ["full_name", "user"], as_dict=True)
-		if not contact:
+		user = frappe.db.get_value("User", self.person, ["full_name", "email", "phone", "mobile_no"], as_dict=True)
+		if not user:
 			return
-		self.party_name = contact.full_name
-		self.organization = directory.get_linked_customer(self.person)
-		self.user = contact.user
-		self.email = directory.get_primary_email(self.person)
-		self.phone = directory.get_primary_phone(self.person)
+		self.party_name = user.full_name
+		self.email = user.email
+		self.phone = user.phone or user.mobile_no
+		org = directory.resolve_organization(self.person)
+		self.organization_type, self.organization = org if org else (None, None)

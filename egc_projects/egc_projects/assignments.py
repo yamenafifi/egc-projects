@@ -46,7 +46,7 @@ def is_allowed(parent_doctype: str) -> bool:
 def _person_label(person: str | None) -> str | None:
 	if not person:
 		return None
-	return frappe.db.get_value("Contact", person, "full_name")
+	return frappe.db.get_value("User", person, "full_name")
 
 
 @frappe.whitelist()
@@ -66,6 +66,7 @@ def get_assignments_for(parent_doctype: str, parent_name: str) -> list[dict]:
 			"is_primary",
 			"person",
 			"person_label",
+			"organization_type",
 			"organization",
 			"remarks",
 			"creation",
@@ -77,28 +78,35 @@ def get_assignments_for(parent_doctype: str, parent_name: str) -> list[dict]:
 		return []
 
 	person_names = {row.person for row in rows if row.person}
-	org_names = {row.organization for row in rows if row.organization}
 	people = (
 		{
 			p.name: p
 			for p in frappe.get_all(
-				"Contact",
-				filters={"name": ("in", list(person_names))},
-				fields=["name", "full_name", "designation as title", "user"],
+				"User", filters={"name": ("in", list(person_names))}, fields=["name", "full_name"]
 			)
 		}
 		if person_names
 		else {}
 	)
-	orgs = (
+	customer_names = {row.organization for row in rows if row.organization and row.organization_type == "Customer"}
+	supplier_names = {row.organization for row in rows if row.organization and row.organization_type == "Supplier"}
+	orgs = {
+		o.name: o.customer_name
+		for o in (
+			frappe.get_all("Customer", filters={"name": ("in", list(customer_names))}, fields=["name", "customer_name"])
+			if customer_names
+			else []
+		)
+	}
+	orgs.update(
 		{
-			o.name: o.customer_name
-			for o in frappe.get_all(
-				"Customer", filters={"name": ("in", list(org_names))}, fields=["name", "customer_name"]
+			o.name: o.supplier_name
+			for o in (
+				frappe.get_all("Supplier", filters={"name": ("in", list(supplier_names))}, fields=["name", "supplier_name"])
+				if supplier_names
+				else []
 			)
 		}
-		if org_names
-		else {}
 	)
 
 	result = []
@@ -111,8 +119,6 @@ def get_assignments_for(parent_doctype: str, parent_name: str) -> list[dict]:
 				"is_primary": row.is_primary,
 				"person": row.person,
 				"person_name": person.full_name if person else row.person_label,
-				"person_title": person.title if person else None,
-				"person_user": person.user if person else None,
 				"organization": row.organization,
 				"organization_name": orgs.get(row.organization),
 				"remarks": row.remarks,
@@ -152,6 +158,11 @@ def add_assignment(
 			"parent_name": parent_name,
 			"assignment_role": assignment_role,
 			"person": person,
+			# `organization_type` field-defaults to "Customer" (see its own JSON description —
+			# Dynamic Link validates before this row's own validate() can set anything) — matches
+			# the Customer-only picker the Hub's own dialogs use for a directly-picked organization
+			# (ActivityFullPage.vue/SubmittalDetail.vue). `fetch_organization_from_person`
+			# overwrites it once Person resolves to an actual Customer/Supplier.
 			"organization": organization,
 			"remarks": remarks,
 			"is_primary": is_primary,

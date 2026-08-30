@@ -58,37 +58,44 @@ def get_directory(project: str) -> list[dict]:
 		if role_names
 		else {}
 	)
-	# `row.organization` is a Customer Link value — Customer uses `naming_series:`, so unlike the
-	# old EGC Organization (`field:organization_name`, where the Link value itself WAS the
-	# display name), this is never presentable on its own. Fetch `customer_name` alongside it for
-	# display; the raw Link value stays `row.organization` for the Change Organization dialog etc.
-	org_names = {row.organization for row in rows if row.organization}
-	customer_names = (
-		{
-			o.name: o.customer_name
-			for o in frappe.get_all("Customer", filters={"name": ("in", list(org_names))}, fields=["name", "customer_name"])
-		}
-		if org_names
-		else {}
-	)
+	# `row.organization` is a Dynamic Link (Customer or Supplier, per `row.organization_type`) —
+	# neither doctype's Link value is presentable on its own (naming_series-based), so fetch each
+	# one's display name (customer_name/supplier_name) for the table; the raw Link value stays
+	# `row.organization` for the Change Organization dialog etc.
+	customer_names = _display_names("Customer", "customer_name", rows)
+	supplier_names = _display_names("Supplier", "supplier_name", rows)
 
 	for row in rows:
 		row["is_egc_internal"] = bool(internal_by_role.get(row.role))
-		row["has_portal_access"] = _has_portal_access(row.user, project)
-		row["portal_roles"] = [r for r in frappe.get_roles(row.user) if r in c.EGC_ROLES] if row.user else []
-		row["organization_name"] = customer_names.get(row.organization)
+		# `person` links directly to a User now — no separate identity record to resolve through.
+		row["has_portal_access"] = _has_portal_access(row.person, project)
+		row["portal_roles"] = [r for r in frappe.get_roles(row.person) if r in c.EGC_ROLES] if row.person else []
+		if row.organization_type == "Supplier":
+			row["organization_name"] = supplier_names.get(row.organization)
+		else:
+			row["organization_name"] = customer_names.get(row.organization)
 
 	return rows
+
+
+def _display_names(doctype: str, name_field: str, rows: list[dict]) -> dict[str, str]:
+	names = {row.organization for row in rows if row.organization and row.organization_type == doctype}
+	if not names:
+		return {}
+	return {
+		r.name: r.get(name_field)
+		for r in frappe.get_all(doctype, filters={"name": ("in", list(names))}, fields=["name", name_field])
+	}
 
 
 @frappe.whitelist()
 def grant_portal_access(project: str, row_name: str, role: str, email: str | None = None) -> dict:
 	"""Grants Hub access to the person behind Directory row `row_name` — creating their `User`
-	first if they don't have one yet (via `email`, reusing an existing `User` of that address
-	if one exists), then assigning `role` and scoping them to `project` with a `User Permission`
-	(the same mechanism `test_external_viewer.py` already proves out; nothing new here). A newly
-	created `User` is mirrored back onto the stakeholder row — and its Contact, if linked — the
-	same "normal path" `EGC Project Stakeholder` already documents."""
+	first if they don't have one yet (via `email`, reusing an existing `User` of that address if
+	one exists), then assigning `role` and scoping them to `project` with a `User Permission`
+	(the same mechanism `test_external_viewer.py` already proves out; nothing new here). `person`
+	links directly to a User (no separate identity record), so a newly created User only needs to
+	be mirrored onto this one row's `person` field."""
 	validators.require_project_permission(project, "write")
 	if role not in dict(GRANTABLE_ROLES):
 		frappe.throw(_("{0} is not a grantable role.").format(role), exc=frappe.ValidationError)
@@ -97,7 +104,7 @@ def grant_portal_access(project: str, row_name: str, role: str, email: str | Non
 	if stakeholder.parenttype != "Project" or stakeholder.parent != project:
 		frappe.throw(_("That Directory entry does not belong to this project."), exc=frappe.PermissionError)
 
-	user = stakeholder.user
+	user = stakeholder.person
 	if not user:
 		if not email:
 			frappe.throw(_("An email is required to create a login for this person."), exc=frappe.ValidationError)
@@ -118,12 +125,7 @@ def grant_portal_access(project: str, row_name: str, role: str, email: str | Non
 		# child rows persist through their PARENT's own save, not independently), so this goes
 		# through `frappe.db.set_value` instead, the same direct-write approach the rest of this
 		# app already uses for narrowly-scoped writes it has separately authorized above.
-		frappe.db.set_value("EGC Project Stakeholder", row_name, "user", user)
-		if stakeholder.person:
-			contact = frappe.get_doc("Contact", stakeholder.person)
-			if not contact.user:
-				contact.user = user
-				contact.save(ignore_permissions=True)
+		frappe.db.set_value("EGC Project Stakeholder", row_name, "person", user)
 
 	# Not `User.add_roles()` — it calls a plain `self.save()` with no bypass, and a Project
 	# Manager granting scoped Hub access has no reason to also independently need write

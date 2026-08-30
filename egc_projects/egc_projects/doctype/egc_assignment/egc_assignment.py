@@ -32,7 +32,8 @@ class EGCAssignment(Document):
 
 		assignment_role: DF.Literal["Responsible", "Assignee", "Supervisor", "Consultant", "Reviewer", "Contractor", "Watcher"]
 		is_primary: DF.Check
-		organization: DF.Link | None
+		organization: DF.DynamicLink | None
+		organization_type: DF.Literal["", "Customer", "Supplier"]
 		parent_doctype: DF.Link
 		parent_name: DF.DynamicLink
 		person: DF.Link | None
@@ -78,10 +79,12 @@ class EGCAssignment(Document):
 
 	def fetch_organization_from_person(self):
 		if self.person and not self.organization:
-			self.organization = directory.get_linked_customer(self.person)
+			org = directory.resolve_organization(self.person)
+			if org:
+				self.organization_type, self.organization = org
 
 	def set_person_label(self):
-		self.person_label = frappe.db.get_value("Contact", self.person, "full_name") if self.person else None
+		self.person_label = frappe.db.get_value("User", self.person, "full_name") if self.person else None
 
 	def validate_duplicate(self):
 		if not self.person:

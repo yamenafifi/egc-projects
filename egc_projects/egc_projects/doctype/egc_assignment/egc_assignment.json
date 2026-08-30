@@ -16,6 +16,7 @@
   "person",
   "person_label",
   "column_break_2",
+  "organization_type",
   "organization",
   "remarks"
  ],
@@ -76,8 +77,8 @@
    "in_list_view": 1,
    "in_standard_filter": 1,
    "label": "Person",
-   "options": "Contact",
-   "description": "At least one of Person or Organization is required — a whole organization can own an assignment with no specific individual named yet."
+   "options": "User",
+   "description": "At least one of Person or Organization is required — a whole organization can own an assignment with no specific individual named yet. Links directly to a User (their login is their identity here)."
   },
   {
    "fieldname": "person_label",
@@ -91,13 +92,22 @@
    "fieldtype": "Column Break"
   },
   {
+   "default": "Customer",
+   "fieldname": "organization_type",
+   "fieldtype": "Select",
+   "label": "Organization Type",
+   "options": "\nCustomer\nSupplier",
+   "hidden": 1,
+   "description": "Dynamic Link validates `organization` against this BEFORE the row's own validate() runs — a field-level default, not a controller default, is the only thing early enough. fetch_organization_from_person() overwrites it once Person resolves to an actual Customer/Supplier."
+  },
+  {
    "fieldname": "organization",
-   "fieldtype": "Link",
+   "fieldtype": "Dynamic Link",
    "in_list_view": 1,
    "in_standard_filter": 1,
    "label": "Organization",
-   "options": "Customer",
-   "description": "Defaults from Person's own organization when Person is set; can be overridden."
+   "options": "organization_type",
+   "description": "Defaults from Person's own organization (whether they're a Portal User of a Customer or Supplier) when Person is set; can be overridden."
   },
   {
    "fieldname": "remarks",

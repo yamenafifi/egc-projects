@@ -163,7 +163,7 @@ def _first_responsible_label(parent_doctype: str, parent_name: str) -> str | Non
 	rows = frappe.get_all(
 		"EGC Assignment",
 		filters={"parent_doctype": parent_doctype, "parent_name": parent_name, "assignment_role": "Responsible"},
-		fields=["person_label", "organization"],
+		fields=["person_label", "organization_type", "organization"],
 		order_by="is_primary desc, creation asc",
 		limit=1,
 	)
@@ -172,7 +172,8 @@ def _first_responsible_label(parent_doctype: str, parent_name: str) -> str | Non
 	if rows[0].person_label:
 		return rows[0].person_label
 	if rows[0].organization:
-		return frappe.db.get_value("Customer", rows[0].organization, "customer_name")
+		name_field = "supplier_name" if rows[0].organization_type == "Supplier" else "customer_name"
+		return frappe.db.get_value(rows[0].organization_type or "Customer", rows[0].organization, name_field)
 	return None
 
 

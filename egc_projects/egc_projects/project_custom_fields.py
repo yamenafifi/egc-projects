@@ -285,3 +285,12 @@ def validate_project(doc, method=None) -> None:
 		# ARCHITECTURE_V2.md §1 ("no new validation pattern invented").
 		row.project = doc.name
 		validators.validate_same_project(row, "wbs_node", "EGC WBS Node", _("WBS Node"))
+
+	# Frappe never dispatches a child table row's own `validate()` automatically on parent save
+	# (confirmed directly against `Document._save()`/`update_children()` — they call `d.db_update()`
+	# per row, never `run_method("validate")`) — every other child-row validation in this app
+	# already works around this the same way (see the WBS Node check just above); `EGC Project
+	# Stakeholder.fetch_from_person()` needs the identical explicit call, or a native-form edit
+	# to `person`/`organization` on this table would silently never re-mirror.
+	for row in doc.get("custom_egc_stakeholders") or []:
+		row.fetch_from_person()

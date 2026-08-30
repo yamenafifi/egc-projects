@@ -60,10 +60,10 @@ function report_error(title, e) {
 }
 
 function open_record(row) {
-	if (row.person) frappe.set_route("Form", "Contact", row.person);
+	if (row.person) frappe.set_route("Form", "User", row.person);
 }
 
-// -- add to directory (same "pick a Contact or type a one-off party" pattern already used
+// -- add to directory (same "pick a User or type a one-off party" pattern already used
 // by SubmittalsTab.vue/ProjectInfoTab.vue's own Add Stakeholder dialogs) -----------------------
 
 function open_add_dialog() {
@@ -75,7 +75,7 @@ function open_add_dialog() {
 				fieldname: "person",
 				fieldtype: "Link",
 				label: __("Person"),
-				options: "Contact",
+				options: "User",
 				description: __("Pick a Project Directory entry to auto-fill the fields below, or leave blank for a one-off party."),
 			},
 			{ fieldname: "party_name", fieldtype: "Data", label: __("Party Name") },
