@@ -168,7 +168,7 @@
    "fieldname": "responsible_organization",
    "fieldtype": "Link",
    "label": "Responsible Organization",
-   "options": "EGC Organization",
+   "options": "Customer",
    "description": "The normal path (Level 1 §30) — picks a Project Directory entry and keeps Responsible Party mirroring it. Leave blank and fill Responsible Party directly only for a one-off party that genuinely isn't in the Directory yet."
   },
   {
@@ -181,7 +181,7 @@
    "fieldname": "received_from_person",
    "fieldtype": "Link",
    "label": "Received From (Person)",
-   "options": "EGC Person",
+   "options": "Contact",
    "description": "The normal path — picks a Project Directory entry and keeps Received From mirroring it. Leave blank and fill Received From directly only for a one-off party that genuinely isn't in the Directory yet."
   },
   {

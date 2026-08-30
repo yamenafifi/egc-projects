@@ -43,19 +43,23 @@ def _make_project():
 	return doc.name
 
 
-def _make_organization(name=None):
-	name = name or f"EGC-DirInt-Org-{frappe.generate_hash(length=6)}"
-	if frappe.db.exists("EGC Organization", name):
-		return name
-	frappe.get_doc(
-		{"doctype": "EGC Organization", "organization_name": name, "organization_type": "Subcontractor"}
-	).insert(ignore_permissions=True)
-	return name
+def _make_organization(customer_name=None):
+	customer_name = customer_name or f"EGC-DirInt-Org-{frappe.generate_hash(length=6)}"
+	existing = frappe.db.get_value("Customer", {"customer_name": customer_name})
+	if existing:
+		return existing
+	doc = frappe.get_doc(
+		{"doctype": "Customer", "customer_name": customer_name, "custom_organization_type": "Subcontractor"}
+	)
+	doc.insert(ignore_permissions=True)
+	return doc.name
 
 
 def _make_person(full_name=None):
+	# See test_directory.py's own `_make_person` docstring — passing the display name straight as
+	# `first_name` reproduces the same `full_name` on Contact for these single-string test names.
 	doc = frappe.get_doc(
-		{"doctype": "EGC Person", "full_name": full_name or f"EGC-DirInt-Person-{frappe.generate_hash(length=6)}"}
+		{"doctype": "Contact", "first_name": full_name or f"EGC-DirInt-Person-{frappe.generate_hash(length=6)}"}
 	)
 	doc.insert(ignore_permissions=True)
 	return doc.name
@@ -94,9 +98,10 @@ class TestSubmittalDirectoryIntegration(IntegrationTestCase):
 		return doc
 
 	def test_responsible_organization_fills_responsible_party(self):
-		org = _make_organization("EGC-DirInt-ABC-MEP")
+		customer_name = "EGC-DirInt-ABC-MEP"
+		org = _make_organization(customer_name)
 		doc = self._make_submittal(responsible_organization=org)
-		self.assertEqual(doc.responsible_party, org)
+		self.assertEqual(doc.responsible_party, customer_name)
 
 	def test_free_text_responsible_party_allowed_without_organization(self):
 		doc = self._make_submittal(responsible_party="A one-off subcontractor not in the Directory")
@@ -104,11 +109,12 @@ class TestSubmittalDirectoryIntegration(IntegrationTestCase):
 		self.assertEqual(doc.responsible_party, "A one-off subcontractor not in the Directory")
 
 	def test_responsible_party_always_mirrors_organization_once_linked(self):
-		org = _make_organization("EGC-DirInt-XYZ-Consult")
+		customer_name = "EGC-DirInt-XYZ-Consult"
+		org = _make_organization(customer_name)
 		doc = self._make_submittal(responsible_organization=org, responsible_party="Stale Free-Text Name")
 		# The Directory reference wins — same discipline as EGCProjectStakeholder.fetch_from_person,
 		# not a "fill only if blank" default.
-		self.assertEqual(doc.responsible_party, org)
+		self.assertEqual(doc.responsible_party, customer_name)
 
 	def test_received_from_person_fills_received_from(self):
 		person_name = "Ahmed Hassan Test Consultant"
@@ -119,9 +125,9 @@ class TestSubmittalDirectoryIntegration(IntegrationTestCase):
 	def test_edit_reflects_updated_organization_name(self):
 		org = _make_organization("EGC-DirInt-Rename-Co")
 		doc = self._make_submittal(submittal_number="SUB-DI-003", responsible_organization=org)
-		self.assertEqual(doc.responsible_party, org)
+		self.assertEqual(doc.responsible_party, "EGC-DirInt-Rename-Co")
 
-		frappe.db.set_value("EGC Organization", org, "organization_name", "EGC-DirInt-Renamed-Co")
+		frappe.db.set_value("Customer", org, "customer_name", "EGC-DirInt-Renamed-Co")
 		doc.save(ignore_permissions=True)  # validate() re-fetches on every save, changed or not
 		self.assertEqual(doc.responsible_party, "EGC-DirInt-Renamed-Co")
 

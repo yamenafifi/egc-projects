@@ -72,10 +72,10 @@ def _submittal_review_items(user: str, project: str | None) -> list[dict]:
 
 def _overdue_activity_items(user: str, project: str | None) -> list[dict]:
 	# Multi-person assignment (assignments.py): "responsible for" is no longer a single field on
-	# Activity — it's every EGC Assignment row pointing at an EGC Person whose own `user` is this
+	# Activity — it's every EGC Assignment row pointing at a Contact whose own `user` is this
 	# session's user, regardless of assignment_role (Responsible/Assignee/Supervisor/... all mean
 	# "this is on my plate" for the purposes of My Open Items).
-	person_names = frappe.get_all("EGC Person", filters={"user": user}, pluck="name")
+	person_names = frappe.get_all("Contact", filters={"user": user}, pluck="name")
 	if not person_names:
 		return []
 	activity_names = frappe.get_all(

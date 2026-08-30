@@ -39,7 +39,6 @@ const has_any_data = computed(() => {
 	const info = data.value?.info;
 	if (!info) return false;
 	const scalar_fields = [
-		"project_code",
 		"project_stage",
 		"sector",
 		"delivery_method",
@@ -47,9 +46,6 @@ const has_any_data = computed(() => {
 		"project_description",
 		"project_image",
 		"project_address",
-		"site_contact_name",
-		"site_contact_phone",
-		"site_contact_email",
 		"contract_date",
 		"forecast_completion_date",
 		"warranty_start_date",
@@ -106,7 +102,6 @@ function open_edit_details_dialog() {
 		size: "large",
 		fields: [
 			{ fieldtype: "Section Break", label: __("Classification") },
-			{ fieldname: "project_code", fieldtype: "Data", label: __("Project Code"), default: info.project_code },
 			{
 				fieldname: "project_stage",
 				fieldtype: "Select",
@@ -168,26 +163,6 @@ function open_edit_details_dialog() {
 					links: [{ link_doctype: "Project", link_name: props.project }],
 				}),
 			},
-			{ fieldtype: "Section Break", label: __("Site Contact") },
-			{
-				fieldname: "site_contact_name",
-				fieldtype: "Data",
-				label: __("Site Contact Name"),
-				default: info.site_contact_name,
-			},
-			{ fieldtype: "Column Break" },
-			{
-				fieldname: "site_contact_phone",
-				fieldtype: "Data",
-				label: __("Site Contact Phone"),
-				default: info.site_contact_phone,
-			},
-			{
-				fieldname: "site_contact_email",
-				fieldtype: "Data",
-				label: __("Site Contact Email"),
-				default: info.site_contact_email,
-			},
 			{ fieldtype: "Section Break", label: __("Contract Dates") },
 			{ fieldname: "contract_date", fieldtype: "Date", label: __("Contract Date"), default: info.contract_date },
 			{
@@ -229,11 +204,11 @@ function open_add_stakeholder_dialog() {
 				fieldname: "person",
 				fieldtype: "Link",
 				label: __("Person"),
-				options: "EGC Person",
+				options: "Contact",
 				description: __("Pick a Project Directory entry to auto-fill the fields below, or leave blank for a one-off party."),
 			},
 			{ fieldname: "party_name", fieldtype: "Data", label: __("Party Name") },
-			{ fieldname: "organization", fieldtype: "Link", label: __("Organization"), options: "EGC Organization" },
+			{ fieldname: "organization", fieldtype: "Link", label: __("Organization"), options: "Customer" },
 			{ fieldname: "user", fieldtype: "Link", label: __("User"), options: "User" },
 			{ fieldname: "email", fieldtype: "Data", label: __("Email") },
 			{ fieldname: "phone", fieldtype: "Data", label: __("Phone") },
@@ -339,10 +314,6 @@ function confirm_remove_equipment(row) {
 					</div>
 					<dl class="hub-info-grid">
 						<div>
-							<dt>{{ __("Project Code") }}</dt>
-							<dd>{{ data.info.project_code || "—" }}</dd>
-						</div>
-						<div>
 							<dt>{{ __("Project Stage") }}</dt>
 							<dd>{{ data.info.project_stage || "—" }}</dd>
 						</div>
@@ -397,24 +368,6 @@ function confirm_remove_equipment(row) {
 						<p class="hub-project-info__text">{{ project_address_lines }}</p>
 						<a href="#" class="hub-link" @click.prevent="open_address_form">{{ __("Open Address record") }}</a>
 					</template>
-				</section>
-
-				<section class="hub-card hub-project-info__section">
-					<div class="hub-card__title">{{ __("Site Contact") }}</div>
-					<dl class="hub-info-grid">
-						<div>
-							<dt>{{ __("Name") }}</dt>
-							<dd>{{ data.info.site_contact_name || "—" }}</dd>
-						</div>
-						<div>
-							<dt>{{ __("Phone") }}</dt>
-							<dd>{{ data.info.site_contact_phone || "—" }}</dd>
-						</div>
-						<div>
-							<dt>{{ __("Email") }}</dt>
-							<dd>{{ data.info.site_contact_email || "—" }}</dd>
-						</div>
-					</dl>
 				</section>
 
 				<section class="hub-card hub-project-info__section">

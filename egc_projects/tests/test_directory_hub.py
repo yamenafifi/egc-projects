@@ -137,10 +137,17 @@ class TestDirectoryHub(IntegrationTestCase):
 		self.assertEqual(result["user"], existing)
 
 	def test_grant_portal_access_mirrors_user_onto_linked_person(self):
-		org = "EGC-DH-Test-Org"
-		if not frappe.db.exists("EGC Organization", org):
-			frappe.get_doc({"doctype": "EGC Organization", "organization_name": org}).insert(ignore_permissions=True)
-		person = frappe.get_doc({"doctype": "EGC Person", "full_name": "Directory Linked Person", "organization": org})
+		org_name = "EGC-DH-Test-Org"
+		org = frappe.db.get_value("Customer", {"customer_name": org_name})
+		if not org:
+			org = frappe.get_doc({"doctype": "Customer", "customer_name": org_name}).insert(ignore_permissions=True).name
+		person = frappe.get_doc(
+			{
+				"doctype": "Contact",
+				"first_name": "Directory Linked Person",
+				"links": [{"link_doctype": "Customer", "link_name": org}],
+			}
+		)
 		person.insert(ignore_permissions=True)
 
 		frappe.set_user(self.manager_user)
@@ -151,7 +158,7 @@ class TestDirectoryHub(IntegrationTestCase):
 			self.project, row_name, c.ROLE_EXTERNAL_VIEWER, email="egc-dh-personlinked@example.com"
 		)
 
-		self.assertEqual(frappe.db.get_value("EGC Person", person.name, "user"), result["user"])
+		self.assertEqual(frappe.db.get_value("Contact", person.name, "user"), result["user"])
 
 	def test_grant_portal_access_without_email_and_no_existing_user_raises(self):
 		row_name = self._add_stakeholder(self.role_external, "No Email Given")

@@ -197,8 +197,8 @@ function open_add_assignment_dialog() {
 	const dialog = new frappe.ui.Dialog({
 		title: __("Add Person"),
 		fields: [
-			{ fieldname: "person", fieldtype: "Link", label: __("Person"), options: "EGC Person", description: __("Leave blank to assign a whole Organization with no specific individual named.") },
-			{ fieldname: "organization", fieldtype: "Link", label: __("Organization"), options: "EGC Organization", description: __("Defaults from the Person's own organization when one is picked above.") },
+			{ fieldname: "person", fieldtype: "Link", label: __("Person"), options: "Contact", description: __("Leave blank to assign a whole Organization with no specific individual named.") },
+			{ fieldname: "organization", fieldtype: "Link", label: __("Organization"), options: "Customer", description: __("Defaults from the Person's own organization when one is picked above.") },
 			{ fieldname: "assignment_role", fieldtype: "Select", label: __("Role on this Activity"), options: ASSIGNMENT_ROLES, default: "Responsible", reqd: 1 },
 			{ fieldname: "is_primary", fieldtype: "Check", label: __("Primary") },
 			{ fieldname: "remarks", fieldtype: "Small Text", label: __("Remarks") },

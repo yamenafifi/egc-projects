@@ -46,7 +46,7 @@ def is_allowed(parent_doctype: str) -> bool:
 def _person_label(person: str | None) -> str | None:
 	if not person:
 		return None
-	return frappe.db.get_value("EGC Person", person, "full_name")
+	return frappe.db.get_value("Contact", person, "full_name")
 
 
 @frappe.whitelist()
@@ -82,7 +82,9 @@ def get_assignments_for(parent_doctype: str, parent_name: str) -> list[dict]:
 		{
 			p.name: p
 			for p in frappe.get_all(
-				"EGC Person", filters={"name": ("in", list(person_names))}, fields=["name", "full_name", "title", "user"]
+				"Contact",
+				filters={"name": ("in", list(person_names))},
+				fields=["name", "full_name", "designation as title", "user"],
 			)
 		}
 		if person_names
@@ -90,9 +92,9 @@ def get_assignments_for(parent_doctype: str, parent_name: str) -> list[dict]:
 	)
 	orgs = (
 		{
-			o.name: o.organization_name
+			o.name: o.customer_name
 			for o in frappe.get_all(
-				"EGC Organization", filters={"name": ("in", list(org_names))}, fields=["name", "organization_name"]
+				"Customer", filters={"name": ("in", list(org_names))}, fields=["name", "customer_name"]
 			)
 		}
 		if org_names

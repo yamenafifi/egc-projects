@@ -56,10 +56,10 @@ class EGCSubmittal(Document):
 		one-off party not worth adding to the Directory)."""
 		if self.responsible_organization:
 			self.responsible_party = frappe.db.get_value(
-				"EGC Organization", self.responsible_organization, "organization_name"
+				"Customer", self.responsible_organization, "customer_name"
 			)
 		if self.received_from_person:
-			self.received_from = frappe.db.get_value("EGC Person", self.received_from_person, "full_name")
+			self.received_from = frappe.db.get_value("Contact", self.received_from_person, "full_name")
 
 
 @frappe.whitelist()

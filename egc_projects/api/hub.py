@@ -118,7 +118,6 @@ def _project_profile_summary(project: str) -> dict:
 		"Project",
 		project,
 		[
-			"custom_egc_project_code",
 			"custom_egc_project_stage",
 			"custom_egc_sector",
 			"custom_egc_project_image",
@@ -127,7 +126,6 @@ def _project_profile_summary(project: str) -> dict:
 		as_dict=True,
 	)
 	row = {
-		"project_code": raw.custom_egc_project_code,
 		"project_stage": raw.custom_egc_project_stage,
 		"sector": raw.custom_egc_sector,
 		"project_image": raw.custom_egc_project_image,
@@ -514,9 +512,9 @@ def _activity_assignees(activity_names: list[str]) -> dict[str, list[dict]]:
 	org_names = {row.organization for row in rows if row.organization}
 	org_labels = (
 		{
-			o.name: o.organization_name
+			o.name: o.customer_name
 			for o in frappe.get_all(
-				"EGC Organization", filters={"name": ("in", list(org_names))}, fields=["name", "organization_name"]
+				"Customer", filters={"name": ("in", list(org_names))}, fields=["name", "customer_name"]
 			)
 		}
 		if org_names

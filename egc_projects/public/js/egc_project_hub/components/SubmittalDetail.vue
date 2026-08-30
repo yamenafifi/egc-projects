@@ -657,14 +657,14 @@ function open_add_assignment_dialog() {
 				fieldname: "person",
 				fieldtype: "Link",
 				label: __("Person"),
-				options: "EGC Person",
+				options: "Contact",
 				description: __("Leave blank to assign a whole Organization with no specific individual named."),
 			},
 			{
 				fieldname: "organization",
 				fieldtype: "Link",
 				label: __("Organization"),
-				options: "EGC Organization",
+				options: "Customer",
 				description: __("Defaults from the Person's own organization when one is picked above."),
 			},
 			{

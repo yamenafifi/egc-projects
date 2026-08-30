@@ -124,7 +124,7 @@ function open_edit_dialog() {
 	dialog.show();
 }
 
-// -- People: multiple assignees, each an EGC Person (and/or an EGC Organization) with a role on
+// -- People: multiple assignees, each a Contact (and/or a Customer) with a role on
 // THIS Activity — replaces the old single responsible_user/responsible_supplier fields, which
 // could never represent "several people, possibly from different organizations" (assignments.py).
 
@@ -138,14 +138,14 @@ function open_add_assignment_dialog() {
 				fieldname: "person",
 				fieldtype: "Link",
 				label: __("Person"),
-				options: "EGC Person",
+				options: "Contact",
 				description: __("Leave blank to assign a whole Organization with no specific individual named."),
 			},
 			{
 				fieldname: "organization",
 				fieldtype: "Link",
 				label: __("Organization"),
-				options: "EGC Organization",
+				options: "Customer",
 				description: __("Defaults from the Person's own organization when one is picked above."),
 			},
 			{

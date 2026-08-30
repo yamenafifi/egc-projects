@@ -76,7 +76,7 @@
    "in_list_view": 1,
    "in_standard_filter": 1,
    "label": "Person",
-   "options": "EGC Person",
+   "options": "Contact",
    "description": "At least one of Person or Organization is required — a whole organization can own an assignment with no specific individual named yet."
   },
   {
@@ -96,7 +96,7 @@
    "in_list_view": 1,
    "in_standard_filter": 1,
    "label": "Organization",
-   "options": "EGC Organization",
+   "options": "Customer",
    "description": "Defaults from Person's own organization when Person is set; can be overridden."
   },
   {

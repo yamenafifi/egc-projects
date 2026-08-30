@@ -65,6 +65,19 @@ _RETIRED_FIELDS = (
 	"custom_egc_address_col",
 	"custom_egc_address",
 	"custom_egc_time_zone",
+	# Project Code — a separate, manually-typed field with no relationship to Project's own
+	# `PROJ-.####` naming series, dropped per explicit user feedback (2026-08-30): the series
+	# is the project's identity, a second manually-typed "code" alongside it only invites drift.
+	"custom_egc_project_code",
+	# Site Contact — three flat name/phone/email fields, dropped in favor of a normal Directory
+	# entry (a Stakeholder row with the new "Site Contact" role — see install.py's
+	# STAKEHOLDER_ROLES) per explicit user feedback: "the site contact should be a CRM linked
+	# thing," not a fourth parallel identity mechanism alongside the Directory.
+	"custom_egc_site_contact_section",
+	"custom_egc_site_contact_name",
+	"custom_egc_site_contact_col",
+	"custom_egc_site_contact_phone",
+	"custom_egc_site_contact_email",
 )
 
 CUSTOM_FIELDS = {
@@ -94,19 +107,13 @@ CUSTOM_FIELDS = {
 			"insert_after": "custom_egc_details_bridge",
 		},
 		{
-			"fieldname": "custom_egc_project_code",
-			"label": "Project Code",
-			"fieldtype": "Data",
-			"insert_after": "custom_egc_classification_section",
-		},
-		{
 			"fieldname": "custom_egc_project_stage",
 			"label": "Project Stage",
 			"fieldtype": "Select",
 			# Leading blank line: an untouched Select must stay unset, never silently default to
 			# the first option (frappe/model/create_new.py's `get_new_doc()` rule).
 			"options": "\nDesign\nProcurement\nConstruction\nCommissioning\nCloseout\nWarranty",
-			"insert_after": "custom_egc_project_code",
+			"insert_after": "custom_egc_classification_section",
 		},
 		{
 			"fieldname": "custom_egc_classification_col",
@@ -233,44 +240,12 @@ CUSTOM_FIELDS = {
 			"options": "Address",
 			"insert_after": "custom_project_address_section",
 		},
-		# -- More Info tab: Site Contact --------------------------------------------------------
-		{
-			"fieldname": "custom_egc_site_contact_section",
-			"label": "Site Contact",
-			"fieldtype": "Section Break",
-			"insert_after": "custom_project_address",
-		},
-		{
-			"fieldname": "custom_egc_site_contact_name",
-			"label": "Site Contact Name",
-			"fieldtype": "Data",
-			"insert_after": "custom_egc_site_contact_section",
-		},
-		{
-			"fieldname": "custom_egc_site_contact_col",
-			"fieldtype": "Column Break",
-			"insert_after": "custom_egc_site_contact_name",
-		},
-		{
-			"fieldname": "custom_egc_site_contact_phone",
-			"label": "Site Contact Phone",
-			"fieldtype": "Data",
-			"options": "Phone",
-			"insert_after": "custom_egc_site_contact_col",
-		},
-		{
-			"fieldname": "custom_egc_site_contact_email",
-			"label": "Site Contact Email",
-			"fieldtype": "Data",
-			"options": "Email",
-			"insert_after": "custom_egc_site_contact_phone",
-		},
 		# -- More Info tab: Healthcare / Equipment ----------------------------------------------
 		{
 			"fieldname": "custom_egc_equipment_section",
 			"label": "Healthcare / Equipment",
 			"fieldtype": "Section Break",
-			"insert_after": "custom_egc_site_contact_email",
+			"insert_after": "custom_project_address",
 			"collapsible": 1,
 		},
 		{

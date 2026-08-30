@@ -32,6 +32,10 @@ DOCUMENT_TYPES = (
 STAKEHOLDER_ROLES = (
 	("Client", 0),
 	("Client Representative", 0),
+	# Folds the old flat "Site Contact Name/Phone/Email" fields (dropped, project_custom_fields.py)
+	# into a normal Directory entry — a Stakeholder row with this role — instead of a fourth
+	# parallel identity mechanism.
+	("Site Contact", 0),
 	("Main Contractor", 0),
 	("Consultant", 0),
 	("Architect", 0),
@@ -101,6 +105,7 @@ def setup() -> None:
 	create_modalities()
 	create_equipment_manufacturers()
 	create_project_custom_fields()
+	create_customer_custom_fields()
 	create_activity_completion_method_option()
 	trim_percent_complete_method_options()
 	hide_unused_project_fields()
@@ -112,6 +117,12 @@ def create_project_custom_fields() -> None:
 
 	_remove_stale_project_field_order()
 	project_custom_fields.create()
+
+
+def create_customer_custom_fields() -> None:
+	from egc_projects.egc_projects import customer_custom_fields
+
+	customer_custom_fields.create()
 
 
 def _remove_stale_project_field_order() -> None:

@@ -4,6 +4,8 @@
 import frappe
 from frappe.model.document import Document
 
+from egc_projects.egc_projects import directory
+
 
 class EGCProjectStakeholder(Document):
 	# begin: auto-generated types
@@ -14,7 +16,6 @@ class EGCProjectStakeholder(Document):
 	if TYPE_CHECKING:
 		from frappe.types import DF
 
-		contact: DF.Link | None
 		email: DF.Data | None
 		is_primary: DF.Check
 		organization: DF.Link | None
@@ -38,13 +39,11 @@ class EGCProjectStakeholder(Document):
 		party that isn't in the Directory (`person` left blank)."""
 		if not self.person:
 			return
-		person = frappe.db.get_value(
-			"EGC Person", self.person, ["full_name", "organization", "user", "email", "phone"], as_dict=True
-		)
-		if not person:
+		contact = frappe.db.get_value("Contact", self.person, ["full_name", "user"], as_dict=True)
+		if not contact:
 			return
-		self.party_name = person.full_name
-		self.organization = person.organization
-		self.user = person.user
-		self.email = person.email
-		self.phone = person.phone
+		self.party_name = contact.full_name
+		self.organization = directory.get_linked_customer(self.person)
+		self.user = contact.user
+		self.email = directory.get_primary_email(self.person)
+		self.phone = directory.get_primary_phone(self.person)

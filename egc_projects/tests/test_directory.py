@@ -2,7 +2,7 @@
 # For license information, please see license.txt
 
 """Tests for the Project Directory / multi-assignment foundation (Level 0 §3-6 of the
-project-controls expansion): `EGC Organization`, `EGC Person`, and the generic `EGC Assignment`
+project-controls expansion): core `Customer`, core `Contact`, and the generic `EGC Assignment`
 engine (assignments.py) that replaced EGC Activity's single `responsible_user`/
 `responsible_supplier` fields.
 """
@@ -52,62 +52,33 @@ def _make_submittal(project, number):
 	return doc.name
 
 
-def _make_organization(name=None):
-	name = name or f"EGC-Dir-Org-{frappe.generate_hash(length=6)}"
-	if frappe.db.exists("EGC Organization", name):
-		return name
-	frappe.get_doc({"doctype": "EGC Organization", "organization_name": name, "organization_type": "Consultant"}).insert(
-		ignore_permissions=True
-	)
-	return name
-
-
-def _make_person(full_name=None, organization=None, user=None):
+def _make_organization(customer_name=None):
+	customer_name = customer_name or f"EGC-Dir-Org-{frappe.generate_hash(length=6)}"
+	existing = frappe.db.get_value("Customer", {"customer_name": customer_name})
+	if existing:
+		return existing
 	doc = frappe.get_doc(
-		{
-			"doctype": "EGC Person",
-			"full_name": full_name or f"Test Person {frappe.generate_hash(length=6)}",
-			"organization": organization,
-			"user": user,
-		}
+		{"doctype": "Customer", "customer_name": customer_name, "custom_organization_type": "Consultant"}
 	)
 	doc.insert(ignore_permissions=True)
 	return doc.name
 
 
-class TestEGCPerson(IntegrationTestCase):
-	def setUp(self):
-		frappe.set_user("Administrator")
-
-	def tearDown(self):
-		# Not relying on inter-test rollback for a uniquely-constrained field (one User -> one
-		# Person) — clean up explicitly so these tests are correct regardless of isolation mode.
-		for name in frappe.get_all("EGC Person", filters={"user": self._test_user}, pluck="name"):
-			frappe.delete_doc("EGC Person", name, ignore_permissions=True, force=True)
-
-	_test_user = "Administrator"
-
-	def test_email_fetched_from_user_when_blank(self):
-		person = frappe.get_doc({"doctype": "EGC Person", "full_name": "Admin Person", "user": "Administrator"})
-		person.insert(ignore_permissions=True)
-		self.assertEqual(person.email, frappe.db.get_value("User", "Administrator", "email"))
-
-	def test_explicit_email_not_overwritten(self):
-		person = frappe.get_doc(
-			{
-				"doctype": "EGC Person",
-				"full_name": "Custom Email Person",
-				"user": "Administrator",
-				"email": "custom@example.com",
-			}
-		)
-		person.insert(ignore_permissions=True)
-		self.assertEqual(person.email, "custom@example.com")
-
-	def test_one_user_maps_to_at_most_one_person(self):
-		_make_person(full_name="First Mapping", user="Administrator")
-		with self.assertRaises(frappe.ValidationError):
-			_make_person(full_name="Second Mapping", user="Administrator")
+def _make_person(full_name=None, organization=None, user=None):
+	# `Contact.full_name` is derived from `first_name`/`middle_name`/`last_name` (never typed
+	# directly) — passing the whole display name as `first_name` reproduces it exactly for these
+	# single-string test names (Contact.autoname's own `_get_full_name()` just returns
+	# `first_name` unchanged when middle/last are blank).
+	doc = frappe.get_doc(
+		{
+			"doctype": "Contact",
+			"first_name": full_name or f"Test Person {frappe.generate_hash(length=6)}",
+			"user": user,
+			"links": [{"link_doctype": "Customer", "link_name": organization}] if organization else [],
+		}
+	)
+	doc.insert(ignore_permissions=True)
+	return doc.name
 
 
 class TestEGCAssignment(IntegrationTestCase):

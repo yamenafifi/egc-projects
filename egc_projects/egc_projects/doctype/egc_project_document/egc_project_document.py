@@ -58,7 +58,7 @@ class EGCProjectDocument(Document):
 		discipline as `EGCProjectStakeholder.fetch_from_person` and `EGCSubmittal.fetch_from_
 		directory`. Stays directly editable only when no Directory reference is linked."""
 		if self.originator_person:
-			self.originator = frappe.db.get_value("EGC Person", self.originator_person, "full_name")
+			self.originator = frappe.db.get_value("Contact", self.originator_person, "full_name")
 
 
 @frappe.whitelist()

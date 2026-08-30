@@ -693,7 +693,9 @@ class TestSubmittalWorkflow(IntegrationTestCase):
 	# -- ball-in-court falls to whoever owns resubmitting after a Rejected/Revise & Resubmit ----
 
 	def _make_person(self, full_name):
-		return frappe.get_doc({"doctype": "EGC Person", "full_name": full_name}).insert(ignore_permissions=True)
+		# See test_directory.py's own `_make_person` docstring — `first_name` alone reproduces
+		# `full_name` exactly for these single-string test names.
+		return frappe.get_doc({"doctype": "Contact", "first_name": full_name}).insert(ignore_permissions=True)
 
 	def test_ball_in_court_falls_to_submittal_responsible_after_rejection(self):
 		doc = self._make_document("DOC-BIC-1")

@@ -172,7 +172,7 @@ def _first_responsible_label(parent_doctype: str, parent_name: str) -> str | Non
 	if rows[0].person_label:
 		return rows[0].person_label
 	if rows[0].organization:
-		return frappe.db.get_value("EGC Organization", rows[0].organization, "organization_name")
+		return frappe.db.get_value("Customer", rows[0].organization, "customer_name")
 	return None
 
 

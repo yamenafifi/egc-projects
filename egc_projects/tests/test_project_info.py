@@ -96,7 +96,6 @@ class TestProjectInfo(IntegrationTestCase):
 
 		result = hub.get_project_info(self.project)
 		self.assertEqual(result["project"], self.project)
-		self.assertIsNone(result["project_code"])
 		# Select fields default to "", not None — same "unset" representation the old Profile
 		# doctype used, since nothing about a Select field's storage changed.
 		self.assertEqual(result["sector"], "")
@@ -105,14 +104,12 @@ class TestProjectInfo(IntegrationTestCase):
 
 	def test_get_project_info_reflects_fields_set_on_the_native_form(self):
 		self._set_project_fields(
-			custom_egc_project_code="PC-001",
 			custom_egc_sector="Healthcare",
 			custom_egc_delivery_method="Design-Build",
 		)
 
 		frappe.set_user(self.manager_user)
 		result = hub.get_project_info(self.project)
-		self.assertEqual(result["project_code"], "PC-001")
 		self.assertEqual(result["sector"], "Healthcare")
 		self.assertEqual(result["delivery_method"], "Design-Build")
 
@@ -186,15 +183,13 @@ class TestProjectInfo(IntegrationTestCase):
 
 		context = hub.get_project_context(self.project)
 		self.assertIsNotNone(context["profile"])
-		self.assertIsNone(context["profile"]["project_code"])
 		self.assertTrue(context["permissions"]["edit_profile"])
 
-		self._set_project_fields(custom_egc_project_code="PC-CTX", custom_egc_sector="Healthcare")
+		self._set_project_fields(custom_egc_sector="Healthcare")
 		self._add_stakeholder(self.role_pm, user=self.manager_user, party_name="Jane PM")
 		self._add_stakeholder(self.role_other, party_name="Someone Else")
 
 		context = hub.get_project_context(self.project)
-		self.assertEqual(context["profile"]["project_code"], "PC-CTX")
 		self.assertEqual(context["profile"]["sector"], "Healthcare")
 
 		key_roles = {row["role"] for row in context["profile"]["key_stakeholders"]}
@@ -230,17 +225,18 @@ class TestProjectInfo(IntegrationTestCase):
 	# -- 6. Stakeholder child rows round-trip -----------------------------------------------------
 
 	def test_stakeholders_round_trip(self):
-		if not frappe.db.exists("EGC Organization", "Acme Inc"):
-			frappe.get_doc({"doctype": "EGC Organization", "organization_name": "Acme Inc"}).insert(
+		org = frappe.db.get_value("Customer", {"customer_name": "Acme Inc"})
+		if not org:
+			org = frappe.get_doc({"doctype": "Customer", "customer_name": "Acme Inc"}).insert(
 				ignore_permissions=True
-			)
+			).name
 
 		self._add_stakeholder(self.role_pm, user=self.manager_user, party_name="Jane PM")
 		doc = frappe.get_doc("Project", self.project)
 		doc.custom_egc_stakeholders[-1].is_primary = 1
 		doc.append(
 			"custom_egc_stakeholders",
-			{"role": self.role_client, "party_name": "Acme Client", "organization": "Acme Inc"},
+			{"role": self.role_client, "party_name": "Acme Client", "organization": org},
 		)
 		doc.save(ignore_permissions=True)
 
@@ -253,7 +249,7 @@ class TestProjectInfo(IntegrationTestCase):
 		self.assertEqual(by_role[self.role_pm]["user"], self.manager_user)
 		self.assertTrue(by_role[self.role_pm]["is_primary"])
 		self.assertEqual(by_role[self.role_client]["party_name"], "Acme Client")
-		self.assertEqual(by_role[self.role_client]["organization"], "Acme Inc")
+		self.assertEqual(by_role[self.role_client]["organization"], org)
 		self.assertFalse(by_role[self.role_client]["is_primary"])
 
 		# The module-level contract (`project_profile.get_stakeholders`) must agree exactly —
@@ -268,11 +264,10 @@ class TestProjectInfo(IntegrationTestCase):
 	def test_save_project_profile_writes_the_scalar_fields(self):
 		frappe.set_user(self.manager_user)
 		project_profile.save_project_profile(
-			self.project, {"project_code": "PC-HUB", "sector": "Healthcare", "delivery_method": "EPC"}
+			self.project, {"sector": "Healthcare", "delivery_method": "EPC"}
 		)
 
 		result = hub.get_project_info(self.project)
-		self.assertEqual(result["project_code"], "PC-HUB")
 		self.assertEqual(result["sector"], "Healthcare")
 		self.assertEqual(result["delivery_method"], "EPC")
 
@@ -280,7 +275,7 @@ class TestProjectInfo(IntegrationTestCase):
 		# Only PROFILE_FIELD_MAP's own external names are honoured — an unrelated key in the
 		# payload must not reach `doc.set()` at all, let alone touch a core Project field.
 		frappe.set_user(self.manager_user)
-		project_profile.save_project_profile(self.project, {"project_code": "PC-SAFE", "status": "Cancelled"})
+		project_profile.save_project_profile(self.project, {"sector": "Healthcare", "status": "Cancelled"})
 
 		self.assertEqual(frappe.db.get_value("Project", self.project, "status"), "Open")
 
@@ -298,11 +293,19 @@ class TestProjectInfo(IntegrationTestCase):
 		self.assertEqual(stakeholders[0]["party_name"], "Acme Client")
 
 	def test_add_stakeholder_via_person_fetches_display_fields(self):
-		org = "EGC-PI-Test-Org"
-		if not frappe.db.exists("EGC Organization", org):
-			frappe.get_doc({"doctype": "EGC Organization", "organization_name": org}).insert(ignore_permissions=True)
+		org_name = "EGC-PI-Test-Org"
+		org = frappe.db.get_value("Customer", {"customer_name": org_name})
+		if not org:
+			org = frappe.get_doc({"doctype": "Customer", "customer_name": org_name}).insert(
+				ignore_permissions=True
+			).name
 		person = frappe.get_doc(
-			{"doctype": "EGC Person", "full_name": "Directory Person", "organization": org, "email": "dp@example.com"}
+			{
+				"doctype": "Contact",
+				"first_name": "Directory Person",
+				"links": [{"link_doctype": "Customer", "link_name": org}],
+				"email_ids": [{"email_id": "dp@example.com", "is_primary": 1}],
+			}
 		)
 		person.insert(ignore_permissions=True)
 

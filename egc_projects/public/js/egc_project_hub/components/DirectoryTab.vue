@@ -60,10 +60,10 @@ function report_error(title, e) {
 }
 
 function open_record(row) {
-	if (row.person) frappe.set_route("Form", "EGC Person", row.person);
+	if (row.person) frappe.set_route("Form", "Contact", row.person);
 }
 
-// -- add to directory (same "pick an EGC Person or type a one-off party" pattern already used
+// -- add to directory (same "pick a Contact or type a one-off party" pattern already used
 // by SubmittalsTab.vue/ProjectInfoTab.vue's own Add Stakeholder dialogs) -----------------------
 
 function open_add_dialog() {
@@ -75,11 +75,11 @@ function open_add_dialog() {
 				fieldname: "person",
 				fieldtype: "Link",
 				label: __("Person"),
-				options: "EGC Person",
+				options: "Contact",
 				description: __("Pick a Project Directory entry to auto-fill the fields below, or leave blank for a one-off party."),
 			},
 			{ fieldname: "party_name", fieldtype: "Data", label: __("Party Name") },
-			{ fieldname: "organization", fieldtype: "Link", label: __("Organization"), options: "EGC Organization" },
+			{ fieldname: "organization", fieldtype: "Link", label: __("Organization"), options: "Customer" },
 			{ fieldname: "email", fieldtype: "Data", label: __("Email") },
 			{ fieldname: "phone", fieldtype: "Data", label: __("Phone") },
 			{ fieldname: "is_primary", fieldtype: "Check", label: __("Primary") },

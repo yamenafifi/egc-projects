@@ -118,11 +118,13 @@ class TestHubAPI(IntegrationTestCase):
 		return doc
 
 	def _make_person(self, user=None, full_name=None):
-		existing = frappe.db.get_value("EGC Person", {"user": user}, "name") if user else None
+		existing = frappe.db.get_value("Contact", {"user": user}, "name") if user else None
 		if existing:
 			return existing
+		# See test_directory.py's own `_make_person` docstring — `first_name` alone reproduces
+		# `full_name` exactly for these single-string test names.
 		doc = frappe.get_doc(
-			{"doctype": "EGC Person", "full_name": full_name or user or "Test Person", "user": user}
+			{"doctype": "Contact", "first_name": full_name or user or "Test Person", "user": user}
 		)
 		doc.insert(ignore_permissions=True)
 		return doc.name

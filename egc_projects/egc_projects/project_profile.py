@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import frappe
 
-from egc_projects.egc_projects import validators
+from egc_projects.egc_projects import directory, validators
 
 #: Roles surfaced in the Hub header's `profile.key_stakeholders` (ARCHITECTURE_V2.md §4).
 #: Names match the seed list documented in ARCHITECTURE_V2.md §2 — kept here, not in
@@ -32,7 +32,6 @@ KEY_STAKEHOLDER_ROLES = ("EGC Project Manager", "EGC Site Manager", "Client", "C
 #: that would need editing if a field were ever renamed on `Project` itself. Shared by
 #: `api/hub.py`'s `get_project_info` (read) and `save_project_profile` below (write).
 PROFILE_FIELD_MAP = {
-	"project_code": "custom_egc_project_code",
 	"project_stage": "custom_egc_project_stage",
 	"sector": "custom_egc_sector",
 	"delivery_method": "custom_egc_delivery_method",
@@ -40,16 +39,13 @@ PROFILE_FIELD_MAP = {
 	"project_description": "custom_egc_project_description",
 	"project_image": "custom_egc_project_image",
 	"project_address": "custom_project_address",
-	"site_contact_name": "custom_egc_site_contact_name",
-	"site_contact_phone": "custom_egc_site_contact_phone",
-	"site_contact_email": "custom_egc_site_contact_email",
 	"contract_date": "custom_egc_contract_date",
 	"forecast_completion_date": "custom_egc_forecast_completion_date",
 	"warranty_start_date": "custom_egc_warranty_start_date",
 	"dlp_end_date": "custom_egc_dlp_end_date",
 }
 
-STAKEHOLDER_ROW_FIELDS = ("role", "person", "party_name", "organization", "user", "contact", "email", "phone", "is_primary")
+STAKEHOLDER_ROW_FIELDS = ("role", "person", "party_name", "organization", "user", "email", "phone", "is_primary")
 EQUIPMENT_ROW_FIELDS = (
 	"facility",
 	"department",
@@ -108,15 +104,15 @@ def add_stakeholder(project: str, values: dict | str) -> str:
 	# as "not provided" here, not just an absent key — a dialog submits every field it declared,
 	# empty ones included.
 	if row_values.get("person"):
-		person = frappe.db.get_value(
-			"EGC Person", row_values["person"], ["full_name", "organization", "user", "email", "phone"], as_dict=True
-		)
-		if person:
-			row_values["party_name"] = row_values.get("party_name") or person.full_name
-			row_values["organization"] = row_values.get("organization") or person.organization
-			row_values["user"] = row_values.get("user") or person.user
-			row_values["email"] = row_values.get("email") or person.email
-			row_values["phone"] = row_values.get("phone") or person.phone
+		contact = frappe.db.get_value("Contact", row_values["person"], ["full_name", "user"], as_dict=True)
+		if contact:
+			row_values["party_name"] = row_values.get("party_name") or contact.full_name
+			row_values["organization"] = row_values.get("organization") or directory.get_linked_customer(
+				row_values["person"]
+			)
+			row_values["user"] = row_values.get("user") or contact.user
+			row_values["email"] = row_values.get("email") or directory.get_primary_email(row_values["person"])
+			row_values["phone"] = row_values.get("phone") or directory.get_primary_phone(row_values["person"])
 
 	doc = frappe.get_doc("Project", project)
 	row = doc.append("custom_egc_stakeholders", row_values)

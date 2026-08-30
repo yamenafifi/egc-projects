@@ -17,6 +17,7 @@ import frappe
 from frappe import _
 from frappe.model.document import Document
 
+from egc_projects.egc_projects import directory
 from egc_projects.egc_projects.assignments import ALLOWED_ASSIGNMENT_DOCTYPES, is_allowed
 
 
@@ -77,10 +78,10 @@ class EGCAssignment(Document):
 
 	def fetch_organization_from_person(self):
 		if self.person and not self.organization:
-			self.organization = frappe.db.get_value("EGC Person", self.person, "organization")
+			self.organization = directory.get_linked_customer(self.person)
 
 	def set_person_label(self):
-		self.person_label = frappe.db.get_value("EGC Person", self.person, "full_name") if self.person else None
+		self.person_label = frappe.db.get_value("Contact", self.person, "full_name") if self.person else None
 
 	def validate_duplicate(self):
 		if not self.person:

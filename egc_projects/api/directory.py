@@ -73,8 +73,8 @@ def grant_portal_access(project: str, row_name: str, role: str, email: str | Non
 	first if they don't have one yet (via `email`, reusing an existing `User` of that address
 	if one exists), then assigning `role` and scoping them to `project` with a `User Permission`
 	(the same mechanism `test_external_viewer.py` already proves out; nothing new here). A newly
-	created `User` is mirrored back onto the stakeholder row — and its `EGC Person`, if linked —
-	the same "normal path" `EGC Project Stakeholder` already documents."""
+	created `User` is mirrored back onto the stakeholder row — and its Contact, if linked — the
+	same "normal path" `EGC Project Stakeholder` already documents."""
 	validators.require_project_permission(project, "write")
 	if role not in dict(GRANTABLE_ROLES):
 		frappe.throw(_("{0} is not a grantable role.").format(role), exc=frappe.ValidationError)
@@ -106,10 +106,10 @@ def grant_portal_access(project: str, row_name: str, role: str, email: str | Non
 		# app already uses for narrowly-scoped writes it has separately authorized above.
 		frappe.db.set_value("EGC Project Stakeholder", row_name, "user", user)
 		if stakeholder.person:
-			person = frappe.get_doc("EGC Person", stakeholder.person)
-			if not person.user:
-				person.user = user
-				person.save(ignore_permissions=True)
+			contact = frappe.get_doc("Contact", stakeholder.person)
+			if not contact.user:
+				contact.user = user
+				contact.save(ignore_permissions=True)
 
 	# Not `User.add_roles()` — it calls a plain `self.save()` with no bypass, and a Project
 	# Manager granting scoped Hub access has no reason to also independently need write

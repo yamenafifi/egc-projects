@@ -10,7 +10,6 @@
   "party_name",
   "organization",
   "user",
-  "contact",
   "email",
   "phone",
   "is_primary"
@@ -29,8 +28,8 @@
    "fieldtype": "Link",
    "in_list_view": 1,
    "label": "Person",
-   "options": "EGC Person",
-   "description": "The normal path — links this stakeholder row to a reusable Project Directory entry. Party Name/Organization/User/Email/Phone below are filled from it automatically; only fill them directly for a one-off party that genuinely isn't in the Directory yet."
+   "options": "Contact",
+   "description": "The normal path — links this stakeholder row to a Contact. Party Name/Organization/User/Email/Phone below are filled from it automatically; only fill them directly for a one-off party that genuinely isn't in the Directory yet."
   },
   {
    "fieldname": "party_name",
@@ -44,7 +43,7 @@
    "fieldtype": "Link",
    "in_list_view": 1,
    "label": "Organization",
-   "options": "EGC Organization"
+   "options": "Customer"
   },
   {
    "fieldname": "user",
@@ -52,12 +51,6 @@
    "in_list_view": 1,
    "label": "User",
    "options": "User"
-  },
-  {
-   "fieldname": "contact",
-   "fieldtype": "Link",
-   "label": "Contact",
-   "options": "Contact"
   },
   {
    "fieldname": "email",
