@@ -14,8 +14,11 @@ document-control and work-breakdown semantics a specialty healthcare contractor 
   revision and its true approval state.
 - **Submittals** — a persistent submittal identity whose submission/review cycles are kept as
   history, so a *Revise & Resubmit* creates a new cycle instead of erasing the old one.
-- **Project Hub** — one project-centric workspace covering Overview, WBS, Activities,
-  Submittals, Drawings and Financials without losing project context.
+- **Directory** — every stakeholder on a project (internal EGC staff and external parties
+  alike), each one a real Frappe `User`, with role, organization, and Hub portal access managed
+  from one place.
+- **Project Hub** — one project-centric workspace covering Overview, Project Details, WBS,
+  Activities, Directory, Submittals, Drawings and Financials without losing project context.
 - **Financials** — read live from the ERPNext Project. EGC Projects keeps no second ledger.
 
 See `docs/ARCHITECTURE.md` for the design and `CLAUDE.md` for contributor guidance.

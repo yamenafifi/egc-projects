@@ -70,15 +70,45 @@ longitude/geofencing**, which is `egc_hr`'s Project Location section's job, not 
 itself an undetected duplicate of the pre-existing production fields, caught and dropped during
 this migration, not carried forward.)
 
-### Fields — `custom_egc_*` Custom Fields on `Project`, in a dedicated `Tab Break`
+> **2026-08-30 revision (superseding the rest of this section as originally written):** the
+> single dedicated "EGC Project Info" Tab Break described below was removed in a later,
+> user-directed pass ("Do not force routine Project setup through the raw ERPNext Project form"
+> — Level 0 §8) — routine editing moved to the Hub itself (`project_profile.py`'s
+> `save_project_profile`/`add_stakeholder`/etc., called from `ProjectInfoTab.vue`, which is
+> **editable**, not read-only as originally stated here). The fields still live on `Project` as
+> Custom Fields (`project_custom_fields.py`), just distributed across the **native Details and
+> More Info tabs** (via `insert_after` anchors, not one dedicated tab) so the native form still
+> works as a secondary path — see that file's own module docstring for the exact anchor
+> discipline (including the `custom_egc_details_bridge`/`custom_egc_more_info_bridge` workaround
+> for a `Meta.sort_fields()` quirk). Three further, more recent revisions on top of that:
+>
+> - **`custom_egc_project_code` was dropped entirely** (not hidden — deleted from
+>   `CUSTOM_FIELDS`, moved to `_RETIRED_FIELDS`). It was a second, manually-typed identity
+>   field with no relationship to `Project`'s own `PROJ-.####` naming series, which stays the
+>   sole identity and is untouched.
+> - **The flat `custom_egc_country`/`_region`/`_city`/`_address`/`_time_zone` fields were
+>   dropped**, replaced by a single `custom_project_address` (Link → core `Address`), linked via
+>   the standard `Dynamic Link` mechanism (`project_profile.ensure_address_linked_to_project`) —
+>   one real Address record shared with the rest of ERPNext, not five unstructured strings.
+>   `egc_hr`'s own GPS/geofence Project Location fields are untouched and still distinct from
+>   this postal address.
+> - **The three flat Site Contact fields were dropped**, folded into the Directory instead (a
+>   Stakeholder row with the "Site Contact" role — see §2) rather than a fourth parallel identity
+>   mechanism, per direct user feedback ("the site contact should be a CRM linked thing").
+>
+> `custom_egc_work_scope` and `custom_egc_contract_value` were also dropped in this same
+> revision — scope lives in Activities/WBS, not a freeform rich-text duplicate; contract value is
+> covered by core `total_sales_amount` plus `EGC Change Order` (see `api/change_orders.py`), so a
+> second, unsynced number would only contradict it.
 
-All under one native-form tab, `custom_egc_project_info_tab` ("EGC Project Info"), inserted
-after the core "More Info" tab's content (`insert_after: notes`) so it never has to reason about
-`egc_hr`'s own field positions, or vice versa — each app only anchors to core fields.
+### Fields — `custom_egc_*` Custom Fields on `Project`, distributed across the native Details/More Info tabs
+
+Placement (see `project_custom_fields.py` for the exact `insert_after` chain): Classification,
+Description, and Contract Dates land at the end of the Details tab; Stakeholders, Address, and
+Healthcare/Equipment land at the end of More Info, after `notes` (and after `egc_hr`'s own
+Supervisors table).
 
 **Classification**
-- `custom_egc_project_code` (Data) — distinct from the Project's own name/number when the two
-  differ.
 - `custom_egc_project_stage` (Select: `Design`, `Procurement`, `Construction`, `Commissioning`,
   `Closeout`, `Warranty`) — a construction-lifecycle stage, a different axis from core
   `Project.status` (Open/Completed/Cancelled/On Hold).
@@ -88,76 +118,197 @@ after the core "More Info" tab's content (`insert_after: notes`) so it never has
   `Other`).
 - `custom_egc_contract_type` (Select: `Lump Sum`, `Unit Price`, `Cost Plus`, `Time & Material`,
   `Other`).
-- `custom_egc_project_description` (Small Text), `custom_egc_work_scope` (Text Editor).
 
-**Commercial**
-- `custom_egc_contract_value` (Currency) — **explicitly labelled and documented as
-  contract-sourced, not an ERPNext actual.** Never conflated with `total_sales_amount` in the
-  Financials tab; shown only in Project Information.
-- `custom_egc_project_image` (Attach Image).
+**Description**
+- `custom_egc_project_description` (Small Text), `custom_egc_project_image` (Attach Image).
 
 **Stakeholders** — Table field `custom_egc_stakeholders` (`EGC Project Stakeholder`), see §2.
 
-**Address** — postal/administrative address, distinct from `egc_hr`'s GPS/geofence Project
-Location section above it on the same form: `custom_egc_country` (Link `Country`),
-`custom_egc_region`, `custom_egc_city`, `custom_egc_address` (Small Text), `custom_egc_time_zone`.
-
-**Site Contact** — `custom_egc_site_contact_name`, `custom_egc_site_contact_phone`,
-`custom_egc_site_contact_email`.
-
-**Contract Dates** — only what core `Project` doesn't already carry: `custom_egc_contract_date`,
-`custom_egc_forecast_completion_date`, `custom_egc_warranty_start_date`,
-`custom_egc_dlp_end_date`.
+**Address** — `custom_project_address` (Link → core `Address`), see the revision note above.
 
 **Healthcare / Equipment** — Table field `custom_egc_equipment_items`
 (`EGC Project Equipment Item`), see §3. Deliberately a *child table*, not singular fields,
 because the v1 brief's own example (`Radiology Department > MRI-01, MRI-02, CT-01`) already
 implies multiple pieces of equipment per project.
 
+**Contract Dates** — only what core `Project` doesn't already carry: `custom_egc_contract_date`,
+`custom_egc_forecast_completion_date`, `custom_egc_warranty_start_date`,
+`custom_egc_dlp_end_date`.
+
 ### Validation
 - `Project`'s `validate` doc_event (`hooks.py` → `project_custom_fields.validate_project`,
   since `Project` is core and can't carry its own `validate()` override) checks every
   Healthcare/Equipment row's `wbs_node` belongs to the same project, via the existing
   `validators.validate_same_project` helper — no new validation pattern invented, same rule v1
-  had, just relocated from a doctype-controller `validate()` to a hook.
+  had, just relocated from a doctype-controller `validate()` to a hook. This same hook is also
+  where `EGC Project Stakeholder.fetch_from_person()` gets explicitly called per row — see §2's
+  own note on why that can't just be a doctype-controller `validate()`.
 
 ---
 
-## 2. Stakeholders — a reusable model, not hard-coded parties
+## 2. Stakeholders and the Directory — identity is the User, not a satellite doctype
+
+> **This section has been rewritten twice since v2 originally shipped, and is the single most
+> important piece of this document for a future contributor to get right — this exact ground has
+> been re-invented from scratch three times in this app's history.** The full story, in order:
+>
+> 1. **v2 original (this section as first written):** a flat `party_name`/`organization`
+>    (Data)/`user`/`contact` (Link `Contact`) shape directly on `EGC Project Stakeholder`, no
+>    dedicated identity doctype.
+> 2. **Level 0 (project-controls expansion, "Project Directory Must Be Used Everywhere"):**
+>    introduced `EGC Person`/`EGC Organization` as reusable, dedicated Directory doctypes,
+>    referenced from Stakeholder/`EGC Assignment`/`EGC Project Document.originator_person`/
+>    `EGC Submittal.received_from_person` — reasoning: a person/org referenced from multiple
+>    places needed one canonical record, not five copies.
+> 3. **2026-08-30, corrected twice in one session, after direct user pushback:** `EGC Person` and
+>    `EGC Organization` were themselves reinventions of primitives Frappe/ERPNext already ship —
+>    core `Contact` and `Customer`. First correction replaced them with `Contact`/`Customer`. The
+>    user rejected that too — *"the directory needs the people in it to be users"* — Contact was
+>    still the wrong abstraction for a system where "is this person a Directory entry" and "does
+>    this person have a Hub login" are the same question. **Final, current state:** `person`
+>    fields link directly to core `User`. No separate identity doctype exists at all.
+>
+> **The lesson, stated as a standing rule, not just history:** before adding any kind of
+> "person"/"organization"/"contact" concept to this app, check whether core Frappe/ERPNext
+> already models it (`User`, `Contact`, `Customer`, `Supplier`, `Employee`) — and if the concept
+> is "a person who may or may not have a login," the answer is `User` directly (a `User` can
+> exist `enabled: 1` with no password and no `send_welcome_email` — a fully valid, non-logging-in
+> identity — never a separate "lightweight person" doctype).
 
 `EGC Stakeholder Role` — small master (mirrors `EGC Discipline`): `role_name` (unique),
-`is_egc_internal` (Check — distinguishes an EGC staff role, which resolves to a `User`, from an
-external party role, which does not), `enabled`, `sequence`.
+`is_egc_internal` (Check — distinguishes an EGC staff role from an external party role, purely a
+display/filter flag now, not a resolution mechanism — see below), `enabled`, `sequence`.
 
-Seeded (idempotent, in `install.py`, `is_egc_internal` marked as noted): `Client`,
-`Main Contractor`, `Consultant`, `Architect`, `OEM`, `EGC Project Manager` (internal),
-`EGC Site Manager` (internal), `Project Engineer` (internal), `Document Controller` (internal),
-`QA/QC` (internal), `HSE` (internal), `Commercial` (internal).
+Seeded (idempotent, in `install.py`, `STAKEHOLDER_ROLES`): `Client`, `Client Representative`,
+`Site Contact` (folds the old flat Site Contact fields into the Directory, §1), `Main Contractor`,
+`Consultant`, `Architect`, `OEM`, `OEM Engineer`, `Subcontractor Engineer`,
+`Supplier Representative`, plus the internal roles `EGC Project Manager`, `EGC Site Manager`,
+`Project Superintendent`, `Office Engineer`, `Project Engineer`, `Document Controller`, `QA/QC`,
+`HSE`, `Commercial`, `Quantity Surveyor`.
 
-`EGC Project Stakeholder` — child table, now on `Project` itself (`custom_egc_stakeholders`,
-`parenttype="Project"`), not a satellite doctype: `role` (Link, reqd), `party_name` (Data, reqd
-— the org or person's display name), `organization` (Data, optional), `user` (Link `User`,
-optional — set for internal roles so the person can be assigned/notified), `contact` (Link
-`Contact`, optional), `email`/`phone` (Data, fetched from `contact`/`user` when present, else
-manual), `is_primary` (Check).
+### `EGC Project Stakeholder` — child table on `Project` (`custom_egc_stakeholders`)
+
+- `role` (Link `EGC Stakeholder Role`, reqd).
+- `person` (Link **`User`**, optional) — the normal path. Links this row directly to a User;
+  their login IS their identity here, no separate record to keep in sync.
+- `party_name` (Data, reqd) — mirrors `person`'s `full_name` once `person` is set; stays
+  independently typed **only** for a genuine one-off party with no User yet (Frappe's own
+  "controlled free-text fallback").
+- `organization_type` (Select: `Customer`/`Supplier`, hidden, field-defaults to `Customer`) +
+  `organization` (**Dynamic Link**, `options: organization_type`) — see "Organization
+  resolution" below for how this gets filled.
+- `email`/`phone` (Data) — mirror `person`'s `User.email`/`User.phone` (falling back to
+  `mobile_no`) once `person` is set.
+- `is_primary` (Check).
+
+**Mirroring discipline:** once `person` is set, `party_name`/`organization_type`/`organization`/
+`email`/`phone` **always** re-derive from the live `User` record on every save, never drift into
+an independent copy — the free-text fields stay directly editable only when `person` is blank.
+This is implemented in `EGCProjectStakeholder.fetch_from_person()` (the child doctype's own
+`validate()`) — **but Frappe never dispatches a child table row's own `validate()` automatically
+on parent save** (confirmed directly against `frappe/model/document.py`: `Document._save()`'s
+`update_children()` only calls `d.db_update()` per row, never `run_method("validate")`). So
+`project_custom_fields.validate_project` (Project's own `validate` doc_event, §1) explicitly
+loops over `custom_egc_stakeholders` and calls `row.fetch_from_person()` on each — the same
+workaround that section's WBS Node check already needed. **Any new child-table doctype in this
+app that wants "always re-derive on save" behavior must do the same** — a doctype-controller
+`validate()` alone will silently never fire outside whatever code path happens to duplicate its
+logic manually (e.g. `project_profile.add_stakeholder`'s own pre-fill, which exists for the
+unrelated reason that `party_name`'s `reqd` check runs before the row-level fetch would anyway).
+
+### Organization resolution — ERPNext's own native Portal User mechanism, not a custom join
+
+A person's organization is resolved via `directory.resolve_organization(user)`
+(`egc_projects/egc_projects/directory.py`): checks whether `user` is a Portal User (the
+`portal_users` child table, `options: "Portal User"`, that already exists on both core `Customer`
+and `Supplier` — no fields added, no join table invented) of a `Customer`; if not, checks
+`Supplier`; if neither, the person is **EGC-internal** (no organization at all — the correct
+state for an EGC staff member holding an internal role, not an error case). This is why
+`organization` on Stakeholder/`EGC Assignment` is a Dynamic Link, not a plain `Customer` Link —
+the person-derived organization can genuinely be either a Customer or a Supplier.
+
+A *directly*-picked organization (a PM typing one in without going through `person`) is always a
+`Customer` — the Hub's own dialogs only offer a Customer-only picker for that manual path, and
+`organization_type` field-defaults to `Customer` for exactly that reason (a **field-level**
+default, not a controller one — `_validate_links()`, the Dynamic Link's own existence check,
+runs before a row's `validate()` can set anything, so only a field-level default is early enough;
+this bit both the `organization_type` field and the `party_name` `reqd` check for the same
+underlying reason, and is worth internalizing as its own rule).
+
+Every ERPNext organization in this app (client, consultant, main contractor, OEM, even EGC
+itself when it needs a Directory identity, e.g. as a Submittal's Responsible Organization) is
+plain `Customer` — **never split by ERPNext's own accounting Party Type** (Customer/Supplier/
+Employee/Shareholder). Direct instruction: *"this has nothing to do with Accounting, this is a
+very simple thing, it just tells me that this user is from this customer."* One new Custom
+Field, `custom_organization_type` (Select, same options `Customer`'s old EGC-Organization
+predecessor had — Client/Main Contractor/Consultant/Architect/OEM/Subcontractor/Specialty
+Contractor/Supplier/Specialist Vendor/Other), preserves that org's own fixed global identity —
+**distinct from, and never conflated with, this table's own `role`**, which is what that person
+holds **on this one project** (rule: organization identity ≠ project role — EGC itself might be
+a "Specialty Contractor" by global identity while acting as, say, a subcontractor to a Main
+Contractor on one particular job; that's a Stakeholder Role, not a change to EGC's own
+`custom_organization_type`).
 
 **"Siemens / Philips / GE" become data, never schema**: role = `OEM`, `party_name` = whichever
 manufacturer applies to that project. No manufacturer is ever a role, a Select option, or a
-doctype.
+doctype (the equipment-item-level manufacturer master, `EGC Equipment Manufacturer`, §3, is a
+separate, narrower concern — which piece of kit, not who represents the vendor on this project).
 
-This table is also the **resolution source for the Submittal workflow engine** (§6): a workflow
-template step naming `reviewer_role = "Consultant"` resolves, at instantiation time, to that
-project's actual `EGC Project Stakeholder` row with `role="Consultant"` and reads its `user`
-(or — if the role has no `user` set, e.g. a pure external party with no Frappe login — the step
-is recorded against `party_name` for display but cannot be a live in-app reviewer; the UI must
-make this distinction obvious rather than silently failing to notify anyone).
+### Directory tab and Portal Access — `api/directory.py`
 
-`egc_projects/egc_projects/project_profile.py` exposes (signatures unchanged since v1 — only
-the internal `parenttype` filter moved from `"EGC Project Profile"` to `"Project"`):
+The Hub's Directory tab (`DirectoryTab.vue`) surfaces every Stakeholder row as an actionable
+list — who's on the project, their role, whether they're internal or external, and whether they
+can currently log into the Hub at all. "Portal Access" is nothing new: the same read-only
+`EGC External Viewer` role + `User Permission`-scoped-to-one-Project pattern
+`test_external_viewer.py` already proves out, just reachable from the Hub (`grant_portal_access`/
+`revoke_portal_access`) instead of requiring a System Manager to wire it up by hand. Granting
+access to a Stakeholder row with no `person` yet creates the `User` first (via a supplied email,
+reusing an existing `User` of that address if one exists) and mirrors it straight onto that row's
+`person` field — no separate identity record to mirror onto anymore, unlike the Level 0/Contact
+eras of this same flow.
+
+A client-side submittal **reviewer is not a separate access tier from a viewer**:
+`record_step_response` (§7) authorizes purely by identity ("are you the assigned
+`reviewer_user`"), not by doctype role permission — so `EGC External Viewer` already grants
+everything an external reviewer needs to both watch a project and respond to a step assigned to
+them. No separate "reviewer" role exists or is needed (a planned "EGC External Reviewer" role was
+dropped mid-build for exactly this reason, once the actual authorization code was read rather
+than assumed).
+
+Add-Person dialogs across the Hub (Directory, Project Details, Activities, Submittals, Documents)
+call a shared preview endpoint, `project_profile.get_person_info(person)`, wired as a `change`
+callback on the Person field, so picking a person fills Party Name/Organization/Email/Phone live
+in the dialog — the same resolution the record's own save-time mirroring does, just exposed for
+a client-side preview instead of only surfacing after the record is actually created. The
+Directory/Project-Details "Add Person" pickers additionally exclude anyone already on that
+project's Directory (`get_query` filtering on the already-loaded stakeholder list) — Activity/
+Submittal "Add Person" assignment dialogs deliberately do **not** apply that same exclusion,
+since the same person legitimately holding two different roles on one Activity/Submittal is a
+real, tested case (unlike the Directory, which is one row per person).
+
+### Resolution source for the Submittal workflow engine (§7)
+
+`egc_projects/egc_projects/project_profile.py` exposes (signatures unchanged since v1 — only the
+internal `parenttype` filter moved from `"EGC Project Profile"` to `"Project"`, and the returned
+value is now a `User` email directly rather than going through any intermediate identity record):
 ```python
 def resolve_role_user(project: str, role_name: str) -> str | None: ...
 def get_stakeholders(project: str) -> list[dict]: ...
 ```
+A workflow template step naming `reviewer_role = "Consultant"` resolves, at instantiation time,
+to that project's actual Stakeholder row with `role="Consultant"` and reads its `person` (or — if
+the role's stakeholder has no `person` set, e.g. a pure external party with no Frappe login — the
+step is recorded against `party_name` for display but cannot be a live in-app reviewer; the UI
+must make this distinction obvious rather than silently failing to notify anyone).
+
+### `EGC Assignment` — the generic multi-person/multi-organization relationship (§5/§7)
+
+Same `person` (Link `User`)/`organization_type`+`organization` (Dynamic Link) shape as
+Stakeholder, same Portal User-based resolution (`fetch_organization_from_person`, fill-if-blank
+rather than always-overwrite — a caller may deliberately override the derived organization).
+Standalone doctype (not a child table, unlike Stakeholder) because a person can be assigned
+across many Activities/Submittals and one record can carry many assignees — a genuine
+many-to-many. See §5/§6.
 
 ---
 
@@ -191,14 +342,17 @@ get_project_context(project) -> {
   percent_complete, company, currency,
   permissions: {financials: bool, edit_profile: bool},
     # edit_profile is exactly frappe.has_permission("Project", "write", doc=project) — a UI
-    # hint, not a bespoke gate, since editing now happens on the native Project form.
+    # hint, not a bespoke gate.
   profile: {
-    project_code, project_stage, sector, project_image, contract_value,   # never null fields
-    key_stakeholders: [{role, role_label, party_name, organization, user, user_full_name}],
-      # capped to a header-relevant subset (PM, Site Manager, Client, Consultant, OEM) —
-      # the FULL stakeholder/equipment list is fetched separately via get_project_info()
-  }   # ALWAYS a dict now — the fields live directly on Project, so there is no separate row
-      # whose absence needs representing. An untouched project's fields simply read as blank
+    project_stage, sector, project_image, project_description,   # never null fields;
+      # project_code no longer exists (§1) — dropped from this contract entirely, not just
+      # left null
+    key_stakeholders: [{role, role_label, party_name, organization, person}],
+      # `person` is a User email directly (§2) — capped to a header-relevant subset (PM, Site
+      # Manager, Client, Consultant, OEM); the FULL stakeholder/equipment list is fetched
+      # separately via get_project_info()
+  }   # ALWAYS a dict — the fields live directly on Project, so there is no separate row whose
+      # absence needs representing. An untouched project's fields simply read as blank
       # (None / "" / []), same as any other fresh Project field.
 }
 ```
@@ -208,7 +362,11 @@ One whitelisted read method (added to `api/hub.py`):
 get_project_info(project) -> full info dict incl. every field + full stakeholders[] +
   equipment_items[]   # gated on Project read permission only — read-only, no save counterpart.
 ```
-There is no `save_project_info`. Project Information is edited on the native `Project` form.
+Editing is `project_profile.py`'s own whitelisted functions (`save_project_profile`,
+`add_stakeholder`/`remove_stakeholder`, `add_equipment_item`/`remove_equipment_item`), called
+from the Hub's `ProjectInfoTab.vue` — §1's revision note above explains why this is no longer
+"the native form only." The native `Project` form still works as a secondary path; nothing makes
+it read-only.
 
 ---
 
@@ -399,20 +557,46 @@ same "one writer per derived value" rule as document approval status.
 - `EGC Submittal Workflow Template` is where "Standard Consultant Review" /
   "Siemens Material Approval" style reuse lives — apply a template rather than rebuilding a
   reviewer sequence by hand, exactly per the brief.
+- **Email is a genuinely additive second channel, added later** (`notify_email.py`, kept
+  separate from `notifications.py` on purpose — that module's own docstring is explicit that
+  Ball-in-Court delivery stays in-app-only via `assign_to`, never emailed). Two events reach an
+  inbox: a review-requested email the moment `submittal_control._assign_step` creates the
+  in-app assignment, and a one-time Directory welcome email the moment `grant_portal_access`
+  (§2) first creates real Hub access for someone — guarded on current `User Permission`
+  existence, not a separate "already welcomed" flag, so it fires again if access is properly
+  revoked and later restored. Sent from the site's configured no-reply address, plain text, no
+  `Email Template` doctype — deliberately simple per instruction.
 
-### 7a. Expanded Submittal metadata
+### 7a. Expanded Submittal metadata — superseded by the Directory (§2)
+
+> **Revision note:** `responsible_party`/`received_from` as originally specified below were
+> plain free-text Data fields with no structured link, matching a "don't force a bad Customer/
+> Supplier shoehorn" call that itself got superseded once §2's Directory model landed. Both
+> fields **still exist** (as the controlled free-text fallback for a genuine one-off party), but
+> each now has a companion Directory-linked field that — once set — always wins on save (Level 1,
+> "Project Directory Must Be Used Everywhere"): `responsible_organization` (Link `Customer`,
+> mirrors into `responsible_party` via `EGCSubmittal.fetch_from_directory()`) and
+> `received_from_person` (Link `User`, mirrors into `received_from`, same mechanism). Same
+> "always re-derive on save, not fill-once" discipline as Stakeholder's `person` (§2) — and the
+> same standalone-doctype exception applies in the *other* direction here: `EGC Submittal` is
+> not a child table, so its own `validate()` genuinely does fire on every save, unlike
+> Stakeholder's child-row case.
 
 Per the brief's "Expand Submittal Information": fields that manage a real construction
 submission, not a bare identity. Added where they don't already exist and don't duplicate
 something derivable — `related Activities` is not a field, it is the existing
 `EGC Activity Link` relationship (§ v1 doc), and is not repeated here.
 
-New on **`EGC Submittal`**: `responsible_party` (Data — the contractor/vendor responsible for
-the submission; free text, matching the same "don't force a bad Customer/Supplier shoehorn"
-call made for stakeholders in §2), `received_from` (Data), `submittal_manager` (Link `User`),
+New on **`EGC Submittal`**: `responsible_party` (Data, controlled free-text fallback — see
+revision note above), `responsible_organization` (Link `Customer`), `received_from` (Data,
+same fallback), `received_from_person` (Link `User`), `submittal_manager` (Link `User`),
 `ball_in_court` (Data, **read-only, engine-set** — mirrors `current_submission_label`'s pattern,
 see §7's Ball in Court subsection), `specification_section` (Data, optional, reserved for future
 spec-section cross-referencing — not used by any logic in v2).
+
+New on **`EGC Project Document`** (the same Level 1 Directory-linking pass): `originator`
+(Data, controlled free-text fallback) + `originator_person` (Link `User`, mirrors into
+`originator` via `EGCProjectDocument.fetch_from_directory()`), same discipline.
 
 New on **`EGC Submittal Revision`**: `required_submission_date`, `required_approval_date`,
 `final_due_date`, `required_on_site_date` (all Date), `lead_time_days` (Int, optional,
@@ -529,6 +713,10 @@ implements exactly these, and no more:
 | `egc_projects/document_control.py` | Drawings package may **add** a `readiness` pass-through; must not change existing revision-state functions |
 | `egc_projects/action_items.py` (new) | Overview/Actions package (Wave E) |
 | `egc_projects/notifications.py` (new) | Submittal Workflow package |
+| `egc_projects/notify_email.py` (new, Level 0) | Email notification channel (§7) — separate from `notifications.py`, kept that way deliberately |
+| `api/directory.py` (new, Level 0) | Directory tab / Portal Access (§2) |
+| `egc_projects/directory.py` (new, 2026-08-30) | `resolve_organization()` — the Portal User lookup every mirroring controller shares (§2) |
+| `egc_projects/assignments.py` (new, Level 0) | `EGC Assignment`, the generic multi-person/multi-organization relationship (§2) |
 | every new DocType directory | the package that introduces it, listed per-package at delegation time |
 
 **Frontend wrapper convention (settled during Wave A, applies to every later wave):** each new

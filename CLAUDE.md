@@ -57,6 +57,26 @@ Enforced by code — you will get a `ValidationError`, not a silent wrong answer
   that ERPNext/HRMS already maintain (`docs/ARCHITECTURE.md` §6). Never re-aggregate invoices.
 - **Do not edit Frappe/ERPNext/HRMS core, ever.** Extend only via this app's DocTypes and
   `hooks.py`. Verify with `git status` inside `apps/frappe`, `apps/erpnext`, `apps/hrms`.
+- **A "person" in this app IS a core `User` — never invent a lightweight identity doctype.**
+  This exact ground has been rebuilt three times (flat fields → `EGC Person`/`EGC Organization`
+  → `Contact`/`Customer` → `User` directly — see `docs/ARCHITECTURE_V2.md` §2's full account).
+  Before adding any "person"/"party"/"contact" concept, check whether `User`, `Contact`,
+  `Customer`, `Supplier`, or `Employee` already covers it. A `User` with no login intended is
+  still `enabled: 1`, just with no password set and `send_welcome_email: 0` — **never
+  `enabled: 0`**, which silently makes that User invisible to every Link search in the whole
+  system (`user_query` hardcodes `enabled: 1`), including for records that already reference it.
+- **A child table row's own `validate()` never fires automatically on parent save.** Confirmed
+  directly against `frappe/model/document.py` — `Document._save()`'s `update_children()` only
+  calls `d.db_update()` per row, never `run_method("validate")`. Any "this child row should
+  always re-derive X on save" behavior needs the PARENT's own `validate` doc_event to explicitly
+  loop over that child table and call the row's method itself (see
+  `project_custom_fields.validate_project`'s WBS Node check and Stakeholder mirroring, both doing
+  exactly this). A doctype-controller `validate()` alone on a child table is easy to write, looks
+  correct, passes a casual read — and silently never runs.
+- **Organization identity ≠ project role.** An org's own fixed global identity
+  (`Customer.custom_organization_type` — Client/Consultant/Main Contractor/...) is a different
+  concept from the project-scoped role a person holds on one job (`EGC Stakeholder Role`, via
+  `EGC Project Stakeholder`/`EGC Assignment`). Never set the former to describe the latter.
 
 ## Where things live
 
@@ -65,10 +85,22 @@ Enforced by code — you will get a `ValidationError`, not a silent wrong answer
 | change a status label | `egc_projects/constants.py` — every enum is defined once |
 | add a project-isolation rule | `egc_projects/validators.py` |
 | change revision or approval logic | `egc_projects/document_control.py` |
-| change submittal review flow | `egc_projects/submittal_control.py` |
+| change submittal review flow (multi-step, Ball in Court) | `egc_projects/submittal_control.py` |
 | allow a new record type to link to an Activity | `egc_projects/relationships.py`, one entry in the registry |
-| add a Project Hub panel | `api/hub.py` (data) + `egc_projects/page/egc_project_hub/` (Vue) |
-| seed a new master record | `install.py` — it is idempotent and reruns on every migrate |
+| add a Project Hub panel | `api/hub.py` (data) + `egc_projects/public/js/egc_project_hub/` (Vue — see `EgcProjectHub.vue` + one component per tab) |
+| seed a new master record / role | `install.py` — it is idempotent and reruns on every migrate |
+| change what fields live on `Project` itself | `egc_projects/egc_projects/project_custom_fields.py` (Custom Fields, distributed across native Details/More Info tabs — see its own module docstring for the `insert_after` anchor discipline) |
+| change Hub-side Project Information read/write | `egc_projects/egc_projects/project_profile.py` (`save_project_profile`, `add_stakeholder`/`remove_stakeholder`, `add_equipment_item`/`remove_equipment_item`, `get_person_info`, `resolve_role_user`, `get_stakeholders`) — called from `ProjectInfoTab.vue` |
+| change how a person's organization resolves | `egc_projects/egc_projects/directory.py` — `resolve_organization(user)`, the Portal User (Customer/Supplier `portal_users` child table) lookup every mirroring controller shares |
+| change the Directory tab / Portal Access grant-revoke | `api/directory.py` (`get_directory`, `grant_portal_access`, `revoke_portal_access`, `update_stakeholder_role`) + `DirectoryTab.vue` |
+| change the generic person/org assignment on an Activity or Submittal | `egc_projects/egc_projects/assignments.py` (`EGC Assignment` — standalone doctype, many-to-many, not a child table) |
+| change what counts as a stakeholder role, or add one | `install.py`'s `STAKEHOLDER_ROLES` tuple, seeds `EGC Stakeholder Role` |
+| change in-app (ToDo/Notification Log) notifications | `egc_projects/egc_projects/notifications.py` |
+| change email notifications | `egc_projects/egc_projects/notify_email.py` — deliberately separate from `notifications.py`, an additive second channel only, never a replacement |
+| change My Open Items / Overview action items | `egc_projects/egc_projects/action_items.py` |
+| change Activity schedule rollup (group Activities) | `egc_projects/egc_projects/activity_control.py` |
+| add a Drawing/Document field | `egc_projects/egc_projects/doctype/egc_project_document/` + `api/documents.py` |
+| change project health / financials drill-down | `api/hub.py` (`_project_health`, `get_financial_transactions`) |
 
 ## Running the test suite
 
@@ -515,3 +547,126 @@ not a navbar is actually visible in a given runtime (traced via `getComputedStyl
 No backend changes in this pass — `docs/ARCHITECTURE_V2.md` §1-§4 rewritten to match the new
 Project Information model; full suite still 161 (9 of which moved from `test_project_profile.py`
 to `test_project_info.py`, testing the new field-based model instead of the deleted doctype).
+
+## Build history — v3 technical changelog
+
+v3 is "Level 0"/"Level 1" of the project-controls expansion, plus a same-session correction
+cycle on the Directory/identity model driven directly by user feedback rather than a written
+brief. `docs/ARCHITECTURE_V2.md` §2 carries the full technical account of the identity model's
+three rebuilds; this section is the commit-level record of how it happened and what else shipped
+alongside it.
+
+### Level 0 — "Project Directory Must Be Used Everywhere," multi-assignment, Hub notifications
+
+Introduced `EGC Person`/`EGC Organization` as dedicated Directory doctypes (reasoning at the
+time: a person/org referenced from Stakeholder, `EGC Assignment`, a Submittal's
+`received_from_person`, and a Document's `originator_person` needed one canonical record, not
+four independent copies). `EGC Assignment` (new, standalone) — the generic multi-person/
+multi-organization relationship replacing `EGC Activity`'s old single `responsible_user`/
+`responsible_supplier` fields, extended to also carry `EGC Submittal`'s reviewers/team.
+`api/directory.py` + `DirectoryTab.vue` — the Hub's Directory tab, and Portal Access grant/revoke
+(the same `EGC External Viewer` + `User Permission` pattern `test_external_viewer.py` already
+proved out, now reachable from the Hub). Discovered mid-build and documented directly in
+`api/directory.py`'s own module docstring: a client-side submittal reviewer is not a separate
+access tier from a viewer — `record_step_response` authorizes purely by identity, not doctype
+permission, so a planned "External Reviewer" role was dropped once the actual authorization code
+was read rather than assumed. `notify_email.py` (new) added email as a genuinely additive second
+channel on top of `notifications.py`'s existing in-app-only delivery — two events (review
+requested, Directory welcome) reach an inbox, kept deliberately simple (plain text, no
+`Email Template` doctype).
+
+Also this phase: `Project`'s own Details/More Info tabs cleaned up (hid ~15 core fields this app
+never used — `actual_start_date`, `is_active`, the whole `collect_progress` email-schedule
+cluster, etc. — via Property Setter, never deleted, reversible); a real `custom_project_address`
+Link to core `Address` replacing five flat country/region/city/address/time-zone fields, wired
+through the standard `Dynamic Link` mechanism; `percent_complete_method`'s options trimmed to
+`Manual`/`Activity Completion` (the two this app actually uses); the Hub's `"Open in EGC
+Projects"` button and its redundant dropdown (WBS/Activities/Drawing Register/Submittal Log —
+all already reachable as Hub tabs) trimmed to one clean entry point.
+
+**A real mistake, caught by direct user feedback and fixed the same day:** the field-hiding pass
+above hid `sales_order`/`department`/`cost_center` on the reasoning "nothing in this app's own
+code reads them" — which is not the same claim as "nobody uses them." The user links Sales
+Orders to Projects directly via native ERPNext workflows entirely independent of what this app's
+own code queries. *"did you remove sales orders being linked to projects?? are we acting
+stupid??"* — all three un-hidden, plus a `_unhide_previously_hidden_project_fields()` cleanup so
+a site that had already run the flawed version self-heals on the next migrate, not just future
+installs. **Lesson generalized into the invariants above:** "no code reference" is never
+sufficient grounds to hide/remove a native field — verify it isn't used through a path this app's
+own code doesn't touch.
+
+### Level 1 — Submittal architecture redesign
+
+A full rebuild of the Submittals UX around explicit, user-set rules (recorded verbatim in
+project memory, not this file, since they're behavioral/product rules rather than technical
+architecture — see rules like "a Submittal is by definition a formal review/approval process,"
+"submitted history is permanent, no delete/bypass," "one Submittal revision can carry multiple
+Document Revisions," "never make someone pick a Document Revision directly when starting a
+submission," "a resubmission must feel like continuing the same submittal, not starting a new
+one"). Technical highlights: `SubmittalDetail.vue` rebuilt as a full-page view (not a side
+drawer — explicit user preference, "I don't want a side bar I want to have a full screen thing")
+with one merged chronological timeline (state changes and comments interleaved by real
+timestamp, GitHub-PR-style) instead of separate boxes per review cycle; `EGC Project Document`/
+`EGC Submittal` gained the Directory-linked `originator_person`/`received_from_person`/
+`responsible_organization` fields (§2 of the v2 addendum) so "who/what org" on a document or
+submittal is a real link, not free text, everywhere it appears — the free-text field remains
+only as a controlled fallback for a genuine one-off party.
+
+### 2026-08-30 — the identity model rebuilt twice in one session
+
+Starting point: the user's review of the shipped work above escalated into a full audit —
+*"why do we need EGC Person doctype? Why? I don't believe we need that, you can just use the
+user doctype."* Research-verified (not guessed) that `EGC Person`/`EGC Organization` were
+themselves reinventions of core `Contact`/`Customer`, and that Project Code
+(`custom_egc_project_code`) was a second, disconnected identity field alongside `Project`'s own
+`PROJ-.####` naming series. First pass replaced `EGC Person`/`EGC Organization` with `Contact`/
+`Customer` (association via `Contact.links`, the same Dynamic Link mechanism already used for
+`custom_project_address`); dropped Project Code entirely; folded the three flat Site Contact
+fields into the Directory as a new "Site Contact" stakeholder role.
+
+**The user rejected the Contact-based design too**, and specified the actual target directly:
+*"the directory needs the people in it to be users... the user itself is linked with the
+customer using the Customer Portal User child table in Customer Doctype... or linked with the
+supplier, if not linked then he is a EGC Internal user."* Second pass: every `person` field
+(`EGC Project Stakeholder`, `EGC Assignment`, `EGC Submittal.received_from_person`,
+`EGC Project Document.originator_person`) repointed straight at `User`; `organization` on
+Stakeholder/Assignment became a Dynamic Link (`Customer` or `Supplier`) resolved via
+`directory.resolve_organization()`, reading ERPNext's own native `Portal User` child table
+(`portal_users`, already on both `Customer` and `Supplier` — no join table invented). `Contact`
+is now absent from this app's code entirely.
+
+Two genuine, previously-invisible Frappe bugs surfaced and fixed while wiring this up, both
+generalized into standing rules in the invariants section above:
+- **A child table row's own `validate()` never fires on parent save** — confirmed directly
+  against `frappe/model/document.py`. `EGCProjectStakeholder.fetch_from_person()` had silently
+  never executed via a plain native-form edit, in any version of this doctype, ever — only
+  `project_profile.add_stakeholder`'s own API-layer pre-fill (which exists for an unrelated
+  reason, `party_name`'s `reqd` check) ever exercised the mirroring logic. Fixed by having
+  `project_custom_fields.validate_project` (already doing the same workaround for the WBS Node
+  check) explicitly loop over stakeholder rows and call `fetch_from_person()` on each.
+- **A Dynamic Link's own existence check (`_validate_links()`) runs before a row's `validate()`
+  can set anything** — same ordering trap, different mechanism. `organization_type` needed a
+  field-level `"default"` (evaluated at row-construction time), not a controller-side default.
+
+**A live UX gap caught by direct user feedback, twice in a row:**
+1. Every "Add Person" dialog's own description text promised "auto-fill the fields below," but
+   the auto-fill only ever happened server-side, invisible until after the dialog closed —
+   *"what are we doing man."* Fixed with a shared whitelisted preview endpoint
+   (`project_profile.get_person_info`) wired as a `change` callback (the field-def property
+   Frappe's `base_control.js` actually dispatches — `me.df.change || me.df.onchange`, confirmed
+   against source) on the Person field of all 5 affected dialogs.
+2. The same dialogs let a PM pick someone already on the project's Directory, creating a
+   duplicate row — *"it shouldn't show me the users that are already in the directory."* Fixed
+   by filtering the Person Link's own `get_query` against the already-loaded stakeholder list
+   (client-side, no new endpoint) — scoped to the two Directory-adding dialogs only, since the
+   same person legitimately holding two different roles on one Activity/Submittal is a separate,
+   valid, already-tested case.
+
+Also caught mid-build: two demo Users created `enabled: 0` on the wrong assumption that "no
+login intended" meant disabled — Frappe's default `User` Link search hardcodes `enabled: 1`, so
+a disabled User silently disappears from every Person picker in the app. Re-enabled; generalized
+into the invariant above.
+
+Full suite green (320 tests) after every step in this sequence — commit-by-commit, never one
+giant batch. `docs/ARCHITECTURE_V2.md` §1/§2/§4/§7 rewritten to match; this file's "Where things
+live" table and invariants updated in the same pass.
