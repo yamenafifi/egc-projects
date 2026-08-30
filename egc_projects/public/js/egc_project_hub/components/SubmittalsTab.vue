@@ -2,6 +2,7 @@
 import { computed, ref, watch, onMounted } from "vue";
 import { get_submittals } from "../api";
 import { create_submittal } from "./submittals_api";
+import { get_person_info } from "./project_profile_api";
 import { useHubResource } from "../composables/useHubResource";
 import { consumeOverdueIntent } from "../composables/useOverdueIntent";
 import LoadingState from "./LoadingState.vue";
@@ -84,6 +85,12 @@ function open_create_dialog() {
 				label: __("Responsible Organization"),
 				options: "Customer",
 				description: __("Pick a Project Directory entry, or leave blank and type a one-off party below."),
+				onchange: async function () {
+					const customer = this.value;
+					if (!customer) return;
+					const customer_name = await frappe.db.get_value("Customer", customer, "customer_name").then((r) => r.message.customer_name).catch(() => null);
+					if (customer_name) dialog.set_value("responsible_party", customer_name);
+				},
 			},
 			{ fieldname: "responsible_party", fieldtype: "Data", label: __("Responsible Party") },
 			{
@@ -92,6 +99,12 @@ function open_create_dialog() {
 				label: __("Received From (Person)"),
 				options: "User",
 				description: __("Pick a Project Directory entry, or leave blank and type a one-off party below."),
+				onchange: async function () {
+					const person = this.value;
+					if (!person) return;
+					const info = await get_person_info(person).catch(() => null);
+					if (info && info.party_name) dialog.set_value("received_from", info.party_name);
+				},
 			},
 			{ fieldname: "received_from", fieldtype: "Data", label: __("Received From") },
 			{ fieldname: "submittal_manager", fieldtype: "Link", label: __("Submittal Manager"), options: "User" },

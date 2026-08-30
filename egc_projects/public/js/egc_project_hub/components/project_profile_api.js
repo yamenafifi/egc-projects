@@ -1,7 +1,7 @@
-// Thin wrapper around egc_projects.egc_projects.project_profile.*'s write side — the read side
-// (get_project_info) stays in ../api.js alongside the rest of api/hub.py's endpoints, since it
-// lives there on the server; this file exists only because the mutations below live in a
-// different module (project_profile.py, not api/hub.py).
+// Thin wrapper around egc_projects.egc_projects.project_profile.* — mostly its write side
+// (get_project_info itself stays in ../api.js alongside the rest of api/hub.py's endpoints,
+// since it lives there on the server); get_person_info is the one read here because it lives in
+// this same Python module, used to preview a Person's directory info live in a dialog.
 
 const PROFILE_MODULE = "egc_projects.egc_projects.project_profile";
 
@@ -45,6 +45,10 @@ export function save_project_profile(project, values) {
 
 export function add_stakeholder(project, values) {
 	return call(`${PROFILE_MODULE}.add_stakeholder`, { project, values });
+}
+
+export function get_person_info(person) {
+	return call(`${PROFILE_MODULE}.get_person_info`, { person });
 }
 
 export function remove_stakeholder(project, row_name) {

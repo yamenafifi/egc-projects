@@ -100,6 +100,34 @@ def save_project_profile(project: str, values: dict | str) -> None:
 
 
 @frappe.whitelist()
+def get_person_info(person: str) -> dict:
+	"""Party Name/Organization/Email/Phone as they'd be filled in for `person` — the exact same
+	resolution `EGCProjectStakeholder.fetch_from_person()` does on save (User's own fields,
+	organization via `directory.resolve_organization`'s Portal User lookup), exposed so the Hub's
+	own "Add to Directory"/"Add Person" dialogs can show it live the moment `person` is picked,
+	not only after the record is actually created."""
+	if not person:
+		return {}
+	user = frappe.db.get_value("User", person, ["full_name", "email", "phone", "mobile_no"], as_dict=True)
+	if not user:
+		return {}
+	org = directory.resolve_organization(person)
+	organization_type, organization = org if org else (None, None)
+	organization_name = None
+	if organization:
+		name_field = "supplier_name" if organization_type == "Supplier" else "customer_name"
+		organization_name = frappe.db.get_value(organization_type, organization, name_field)
+	return {
+		"party_name": user.full_name,
+		"organization_type": organization_type,
+		"organization": organization,
+		"organization_name": organization_name,
+		"email": user.email,
+		"phone": user.phone or user.mobile_no,
+	}
+
+
+@frappe.whitelist()
 def add_stakeholder(project: str, values: dict | str) -> str:
 	_require_profile_edit_access(project)
 	if isinstance(values, str):
@@ -111,22 +139,18 @@ def add_stakeholder(project: str, values: dict | str) -> str:
 	# BEFORE it runs the `validate` doc_event that would have filled it in. Resolving it here
 	# means a person-only row (the normal path) never trips that ordering. A blank string counts
 	# as "not provided" here, not just an absent key — a dialog submits every field it declared,
-	# empty ones included. `person` links directly to a User (their login is their identity here).
+	# empty ones included.
 	if row_values.get("person"):
-		user = frappe.db.get_value("User", row_values["person"], "full_name")
-		if user:
-			row_values["party_name"] = row_values.get("party_name") or user
-			org = directory.resolve_organization(row_values["person"])
-			if org and not row_values.get("organization"):
-				row_values["organization_type"], row_values["organization"] = org
-			row_values["email"] = row_values.get("email") or frappe.db.get_value(
-				"User", row_values["person"], "email"
-			)
-			row_values["phone"] = row_values.get("phone") or frappe.db.get_value(
-				"User", row_values["person"], "phone"
-			)
-	# `organization_type` (when `organization` is set directly, no `person`) defaults in the
-	# child row's own `default_organization_type()` — that runs on every save regardless of entry
+		info = get_person_info(row_values["person"])
+		if info:
+			row_values["party_name"] = row_values.get("party_name") or info["party_name"]
+			if not row_values.get("organization"):
+				row_values["organization_type"] = info["organization_type"]
+				row_values["organization"] = info["organization"]
+			row_values["email"] = row_values.get("email") or info["email"]
+			row_values["phone"] = row_values.get("phone") or info["phone"]
+	# `organization_type` (when `organization` is set directly, no `person`) field-defaults to
+	# "Customer" on the child doctype itself — that applies on every save regardless of entry
 	# path (this endpoint, the native form, ...), so it isn't duplicated here.
 
 	doc = frappe.get_doc("Project", project)

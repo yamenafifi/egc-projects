@@ -300,6 +300,35 @@ class TestProjectInfo(IntegrationTestCase):
 
 		self.assertEqual(frappe.db.get_value("Project", self.project, "status"), "Open")
 
+	# -- 7b. get_person_info — the live preview the Hub's own "Add Person" dialogs call on
+	#         change, so a picked Person's fields show up in the dialog itself, not only after
+	#         the record is actually created. --------------------------------------------------
+
+	def test_get_person_info_returns_directory_fields(self):
+		org_name = "EGC-PI-Preview-Org"
+		org = frappe.get_doc({"doctype": "Customer", "customer_name": org_name}).insert(ignore_permissions=True)
+		user = frappe.get_doc(
+			{"doctype": "User", "email": "egc-pi-preview@example.com", "first_name": "Preview Person", "send_welcome_email": 0}
+		).insert(ignore_permissions=True)
+		customer = frappe.get_doc("Customer", org.name)
+		customer.append("portal_users", {"user": user.name})
+		customer.save(ignore_permissions=True)
+
+		info = project_profile.get_person_info(user.name)
+		self.assertEqual(info["party_name"], "Preview Person")
+		self.assertEqual(info["organization_type"], "Customer")
+		self.assertEqual(info["organization"], org.name)
+		self.assertEqual(info["organization_name"], org_name)
+		self.assertEqual(info["email"], user.name)
+
+	def test_get_person_info_empty_for_egc_internal_user(self):
+		info = project_profile.get_person_info(self.manager_user)
+		self.assertIsNone(info["organization"])
+		self.assertIsNone(info["organization_type"])
+
+	def test_get_person_info_empty_dict_when_blank(self):
+		self.assertEqual(project_profile.get_person_info(""), {})
+
 	# -- 8. add_stakeholder / remove_stakeholder --------------------------------------------------
 
 	def test_add_stakeholder_round_trips(self):

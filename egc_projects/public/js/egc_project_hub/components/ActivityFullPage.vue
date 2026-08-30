@@ -23,6 +23,7 @@ import {
 	unlink_activity_record,
 } from "./activities_api";
 import { add_assignment, remove_assignment } from "./assignments_api";
+import { get_person_info } from "./project_profile_api";
 import { get_comments, add_comment } from "./comments_api";
 import { useHubResource } from "../composables/useHubResource";
 import LoadingState from "./LoadingState.vue";
@@ -197,7 +198,19 @@ function open_add_assignment_dialog() {
 	const dialog = new frappe.ui.Dialog({
 		title: __("Add Person"),
 		fields: [
-			{ fieldname: "person", fieldtype: "Link", label: __("Person"), options: "User", description: __("Leave blank to assign a whole Organization with no specific individual named.") },
+			{
+				fieldname: "person",
+				fieldtype: "Link",
+				label: __("Person"),
+				options: "User",
+				description: __("Leave blank to assign a whole Organization with no specific individual named."),
+				onchange: async function () {
+					const person = this.value;
+					if (!person) return;
+					const info = await get_person_info(person).catch(() => null);
+					if (info && info.organization) dialog.set_value("organization", info.organization);
+				},
+			},
 			{ fieldname: "organization", fieldtype: "Link", label: __("Organization"), options: "Customer", description: __("Defaults from the Person's own organization when one is picked above.") },
 			{ fieldname: "assignment_role", fieldtype: "Select", label: __("Role on this Activity"), options: ASSIGNMENT_ROLES, default: "Responsible", reqd: 1 },
 			{ fieldname: "is_primary", fieldtype: "Check", label: __("Primary") },

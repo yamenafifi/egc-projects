@@ -1,6 +1,7 @@
 <script setup>
 import { computed, ref, watch, onMounted } from "vue";
 import { get_documents, create_document, get_drawing_document_types } from "./documents_api";
+import { get_person_info } from "./project_profile_api";
 import { useHubResource } from "../composables/useHubResource";
 import { consumeDrawingsApprovalIntent } from "../composables/useDrawingsIntent";
 import LoadingState from "./LoadingState.vue";
@@ -123,6 +124,12 @@ function open_create_dialog() {
 				label: __("Originator (Person)"),
 				options: "User",
 				description: __("Pick a Project Directory entry, or leave blank and type a one-off party below."),
+				onchange: async function () {
+					const person = this.value;
+					if (!person) return;
+					const info = await get_person_info(person).catch(() => null);
+					if (info && info.party_name) dialog.set_value("originator", info.party_name);
+				},
 			},
 			{ fieldname: "originator", fieldtype: "Data", label: __("Originator") },
 			{

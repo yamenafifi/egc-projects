@@ -11,7 +11,7 @@
 <script setup>
 import { computed, ref, watch } from "vue";
 import { get_directory, grant_portal_access, revoke_portal_access, update_stakeholder_role } from "./directory_api";
-import { add_stakeholder, remove_stakeholder } from "./project_profile_api";
+import { add_stakeholder, remove_stakeholder, get_person_info } from "./project_profile_api";
 import { useHubResource } from "../composables/useHubResource";
 import LoadingState from "./LoadingState.vue";
 import ErrorState from "./ErrorState.vue";
@@ -77,6 +77,16 @@ function open_add_dialog() {
 				label: __("Person"),
 				options: "User",
 				description: __("Pick a Project Directory entry to auto-fill the fields below, or leave blank for a one-off party."),
+				onchange: async function () {
+					const person = this.value;
+					if (!person) return;
+					const info = await get_person_info(person).catch(() => null);
+					if (!info) return;
+					dialog.set_value("party_name", info.party_name || "");
+					dialog.set_value("organization", info.organization || "");
+					dialog.set_value("email", info.email || "");
+					dialog.set_value("phone", info.phone || "");
+				},
 			},
 			{ fieldname: "party_name", fieldtype: "Data", label: __("Party Name") },
 			{ fieldname: "organization", fieldtype: "Link", label: __("Organization"), options: "Customer" },
