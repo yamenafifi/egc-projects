@@ -14,7 +14,16 @@ import { reactive, readonly } from "vue";
 // register with its own parallel create-dialog and filter bar. DocumentsTab.vue's "Drawings
 // only" toggle covers the same ground now; a bare "drawings" tab in an old bookmark/localStorage
 // falls through to DEFAULT_TAB via the TABS.includes() guard in read_route() below.
-export const TABS = ["overview", "wbs", "activities", "submittals", "documents", "financials", "project-info"];
+export const TABS = [
+	"overview",
+	"wbs",
+	"activities",
+	"submittals",
+	"documents",
+	"directory",
+	"financials",
+	"project-info",
+];
 const DEFAULT_TAB = TABS[0];
 const STORAGE_KEY = "egc_project_hub:last_project";
 

@@ -72,6 +72,8 @@ const ICONS = {
 		'<path d="M21 3 3 10.5l7 2.5m11-10L14 21l-4-8m11-10L10 13"/>',
 	documents:
 		'<path d="M7 3h7l4 4v13a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z"/><path d="M14 3v4h4"/><path d="M9 12h6M9 15.5h6M9 8.5h2"/>',
+	directory:
+		'<circle cx="9" cy="8" r="3"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><circle cx="17" cy="8" r="2.5"/><path d="M15.5 14.3c2.9.4 5 2.8 5 5.7"/>',
 	financials:
 		'<path d="M12 2v20"/><path d="M17 6.5c0-1.7-2.2-3-5-3s-5 1.2-5 3 2.2 2.5 5 3 5 1.3 5 3-2.2 3-5 3-5-1.3-5-3"/>',
 	"project-info":

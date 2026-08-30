@@ -41,6 +41,8 @@ STAKEHOLDER_ROLES = (
 	("Supplier Representative", 0),
 	("EGC Project Manager", 1),
 	("EGC Site Manager", 1),
+	("Project Superintendent", 1),
+	("Office Engineer", 1),
 	("Project Engineer", 1),
 	("Document Controller", 1),
 	("QA/QC", 1),

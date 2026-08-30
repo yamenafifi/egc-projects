@@ -15,6 +15,7 @@ import FinancialsTab from "./components/FinancialsTab.vue";
 // WP-10/WP-09 landed while this shell was in progress — wired straight in, no placeholder left.
 import DocumentsTab from "./components/DocumentsTab.vue";
 import ProjectInfoTab from "./components/ProjectInfoTab.vue";
+import DirectoryTab from "./components/DirectoryTab.vue";
 
 defineProps({ page: { type: Object, default: null } });
 
@@ -26,6 +27,7 @@ const TAB_LABELS = {
 	activities: __("Activities"),
 	submittals: __("Submittals"),
 	documents: __("Documents"),
+	directory: __("Directory"),
 	financials: __("Financials"),
 	"project-info": __("Project Details"),
 };
@@ -51,6 +53,7 @@ const tab_component = computed(() => {
 		activities: ActivitiesTab,
 		submittals: SubmittalsTab,
 		documents: DocumentsTab,
+		directory: DirectoryTab,
 		financials: FinancialsTab,
 		"project-info": ProjectInfoTab,
 	}[route.tab];

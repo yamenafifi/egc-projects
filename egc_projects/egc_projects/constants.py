@@ -126,6 +126,11 @@ ROLE_PROJECT_VIEWER = "EGC Project Viewer"
 #: just because ROLE_PROJECT_VIEWER (an internal-staff role) gains some new capability later.
 #: Deliberately absent from every financial doctype's permissions (EGC Change Order) and from
 #: FINANCIAL_ROLES below — an external party never sees commercial figures through this role.
+#: This is ALSO the role a client-side submittal REVIEWER holds — not a separate one. Recording
+#: a response on a Submittal Review Step (`record_step_response`, submittal_control.py) is
+#: authorized by identity ("are you the assigned reviewer_user"), not by doctype role
+#: permission, so this read-only role is already sufficient for the write itself; no broader
+#: write grant was needed (confirmed by reading that function before assuming otherwise).
 ROLE_EXTERNAL_VIEWER = "EGC External Viewer"
 
 EGC_ROLES = (
