@@ -1,5 +1,5 @@
 <script setup>
-import { computed, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import { get_overview, get_my_open_items } from "../api";
 import { useHubResource } from "../composables/useHubResource";
 import { useHubRoute } from "../composables/useHubRoute";
@@ -22,6 +22,13 @@ const { data: open_items, loading: open_items_loading, reload: reload_open_items
 
 watch(() => props.project, reload, { immediate: true });
 watch(() => props.project, reload_open_items, { immediate: true });
+
+// -- Overview / My Tasks switch — a real tab, not a small buried card, so "what do I need to
+// do" is as easy to find as the KPIs are (same VIEWS-switcher pattern ActivitiesTab.vue uses). --
+const VIEWS = ["overview", "tasks"];
+const active_view = ref("overview");
+
+const task_count = computed(() => (open_items.value || []).length);
 
 // Label says "Drawings", not "Documents" — the backend signal behind this key
 // (_drawings_health in api/hub.py) only ever looks at drawings' review due dates, not every
@@ -66,6 +73,11 @@ const HEALTH_TARGET_TAB = {
 	documents: "documents",
 	financials: "financials",
 };
+
+// Already fetched once per project by EgcProjectHub.vue and passed down as `context` — no
+// second round-trip for the image/description already sitting in context.profile.
+const profile = computed(() => props.context?.profile || {});
+const has_profile_content = computed(() => Boolean(profile.value.project_image || profile.value.project_description));
 
 const health_entries = computed(() => {
 	if (!data.value?.health) return [];
@@ -156,6 +168,65 @@ const recent_entries = computed(() => {
 		/>
 
 		<template v-else>
+			<div v-if="has_profile_content" class="hub-card hub-profile">
+				<img v-if="profile.project_image" :src="profile.project_image" class="hub-profile__image" :alt="context?.project_name" />
+				<div class="hub-profile__body">
+					<div class="hub-profile__name">{{ context?.project_name }}</div>
+					<p v-if="profile.project_description" class="hub-profile__description">{{ profile.project_description }}</p>
+				</div>
+			</div>
+
+			<div class="hub-view-switch">
+				<button
+					type="button"
+					class="hub-view-switch__btn"
+					:class="{ 'hub-view-switch__btn--active': active_view === 'overview' }"
+					@click="active_view = 'overview'"
+				>
+					{{ __("Overview") }}
+				</button>
+				<button
+					type="button"
+					class="hub-view-switch__btn"
+					:class="{ 'hub-view-switch__btn--active': active_view === 'tasks' }"
+					@click="active_view = 'tasks'"
+				>
+					{{ __("My Tasks") }}
+					<span v-if="task_count" class="hub-view-switch__badge">{{ task_count }}</span>
+				</button>
+			</div>
+
+			<template v-if="active_view === 'tasks'">
+				<div class="hub-card">
+					<div class="hub-card__title">{{ __("My Tasks") }}</div>
+					<LoadingState v-if="open_items_loading" :rows="4" />
+					<EmptyState
+						v-else-if="!(open_items || []).length"
+						:title="__('Nothing on your plate right now')"
+						:description="__('Submittals awaiting your review and your overdue activities will show up here.')"
+					/>
+					<ul v-else class="hub-recent">
+						<li
+							v-for="item in open_items"
+							:key="item.source + ':' + item.name"
+							class="hub-recent__item"
+							@click="open_item(item)"
+						>
+							<span class="hub-recent__icon">{{ item.source === "activity_overdue" ? "⏱" : "📩" }}</span>
+							<span class="hub-recent__text">{{ item.title }}</span>
+							<span class="hub-recent__sub">
+								{{ item.source === "activity_overdue" ? __("Overdue Activity") : __("Awaiting Your Review") }}
+							</span>
+							<span v-if="item.is_overdue" class="hub-open-items__overdue">{{ __("Overdue") }}</span>
+							<span v-if="item.due_date" class="hub-recent__time">
+								{{ frappe.datetime.str_to_user(item.due_date) }}
+							</span>
+						</li>
+					</ul>
+				</div>
+			</template>
+
+			<template v-else>
 			<div v-if="health_entries.length" class="hub-card hub-health">
 				<div class="hub-card__title">{{ __("Project Health") }}</div>
 				<div class="hub-health__row">
@@ -171,25 +242,6 @@ const recent_entries = computed(() => {
 						<span class="hub-health__label">{{ entry.label }}</span>
 					</button>
 				</div>
-			</div>
-
-			<div v-if="!open_items_loading && (open_items || []).length" class="hub-card hub-open-items">
-				<div class="hub-card__title">{{ __("My Open Items") }}</div>
-				<ul class="hub-recent">
-					<li
-						v-for="item in open_items"
-						:key="item.source + ':' + item.name"
-						class="hub-recent__item"
-						@click="open_item(item)"
-					>
-						<span class="hub-recent__icon">{{ item.source === "activity_overdue" ? "⏱" : "📩" }}</span>
-						<span class="hub-recent__text">{{ item.title }}</span>
-						<span v-if="item.is_overdue" class="hub-open-items__overdue">{{ __("Overdue") }}</span>
-						<span v-if="item.due_date" class="hub-recent__time">
-							{{ frappe.datetime.str_to_user(item.due_date) }}
-						</span>
-					</li>
-				</ul>
 			</div>
 
 			<div class="hub-overview__grid">
@@ -304,10 +356,94 @@ const recent_entries = computed(() => {
 				</ul>
 			</div>
 		</template>
+		</template>
 	</div>
 </template>
 
 <style scoped>
+.hub-profile {
+	display: flex;
+	align-items: center;
+	gap: 16px;
+	margin-bottom: 14px;
+}
+
+.hub-profile__image {
+	width: 64px;
+	height: 64px;
+	border-radius: var(--border-radius-lg);
+	object-fit: cover;
+	border: 1px solid var(--border-color);
+	flex: 0 0 auto;
+}
+
+.hub-profile__body {
+	min-width: 0;
+}
+
+.hub-profile__name {
+	font-size: var(--text-lg);
+	font-weight: 600;
+	color: var(--text-color);
+}
+
+.hub-profile__description {
+	margin: 4px 0 0;
+	font-size: var(--text-sm);
+	color: var(--text-muted);
+	white-space: pre-wrap;
+}
+
+.hub-view-switch {
+	display: flex;
+	border: 1px solid var(--border-color);
+	border-radius: var(--border-radius);
+	overflow: hidden;
+	width: fit-content;
+	margin-bottom: 14px;
+}
+
+.hub-view-switch__btn {
+	appearance: none;
+	border: none;
+	background: var(--fg-color);
+	color: var(--text-muted);
+	padding: 5px 12px;
+	font-size: var(--text-sm);
+	cursor: pointer;
+	display: flex;
+	align-items: center;
+	gap: 6px;
+}
+
+.hub-view-switch__btn + .hub-view-switch__btn {
+	border-left: 1px solid var(--border-color);
+}
+
+.hub-view-switch__btn:hover {
+	color: var(--text-color);
+}
+
+.hub-view-switch__btn--active {
+	background: var(--control-bg);
+	color: var(--text-color);
+	font-weight: 600;
+}
+
+.hub-view-switch__badge {
+	font-size: var(--text-xs);
+	color: var(--text-muted);
+	background: var(--control-bg);
+	border-radius: var(--border-radius-full);
+	padding: 0 6px;
+	min-width: 16px;
+	text-align: center;
+}
+
+.hub-view-switch__btn--active .hub-view-switch__badge {
+	background: var(--fg-color);
+}
+
 .hub-health {
 	margin-bottom: 14px;
 }

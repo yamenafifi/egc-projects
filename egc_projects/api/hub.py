@@ -122,6 +122,7 @@ def _project_profile_summary(project: str) -> dict:
 			"custom_egc_project_stage",
 			"custom_egc_sector",
 			"custom_egc_project_image",
+			"custom_egc_project_description",
 		],
 		as_dict=True,
 	)
@@ -130,6 +131,7 @@ def _project_profile_summary(project: str) -> dict:
 		"project_stage": raw.custom_egc_project_stage,
 		"sector": raw.custom_egc_sector,
 		"project_image": raw.custom_egc_project_image,
+		"project_description": raw.custom_egc_project_description,
 	}
 
 	stakeholders = project_profile.get_stakeholders(project)
