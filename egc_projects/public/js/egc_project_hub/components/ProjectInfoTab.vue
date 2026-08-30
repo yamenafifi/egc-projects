@@ -207,6 +207,11 @@ function open_add_stakeholder_dialog() {
 				label: __("Person"),
 				options: "User",
 				description: __("Pick a Project Directory entry to auto-fill the fields below, or leave blank for a one-off party."),
+				get_query: () => ({
+					filters: {
+						name: ["not in", (data.value.info.stakeholders || []).filter((r) => r.person).map((r) => r.person)],
+					},
+				}),
 				onchange: async function () {
 					const person = this.value;
 					if (!person) return;
