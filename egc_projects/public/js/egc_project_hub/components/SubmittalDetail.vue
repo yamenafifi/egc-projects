@@ -14,10 +14,7 @@ import { computed, ref, watch } from "vue";
 import {
 	get_submittal_detail,
 	submit_submission,
-	mark_under_review,
-	record_response,
 	create_next_revision,
-	create_first_submission,
 	apply_workflow_template,
 	get_workflow_templates,
 	record_step_response,
@@ -27,17 +24,20 @@ import {
 	remove_review_step,
 	delete_submittal,
 	update_submission_dates,
-	get_documents_with_current_revision,
 } from "./submittals_api";
+import { openSubmitForReviewFlow } from "./submit_for_review_flow";
 import { link_activity_record, unlink_activity_record } from "./activities_api";
 import { add_assignment, remove_assignment } from "./assignments_api";
 import { get_person_info } from "./project_profile_api";
 import { get_comments, add_comment } from "./comments_api";
+import { useHubRoute } from "../composables/useHubRoute";
+import { openDocumentIntent } from "../composables/useOpenDocumentIntent";
 import { useHubResource } from "../composables/useHubResource";
 import LoadingState from "./LoadingState.vue";
 import ErrorState from "./ErrorState.vue";
 import EmptyState from "./EmptyState.vue";
 import StatusPill from "./StatusPill.vue";
+import WorkflowStepper from "./WorkflowStepper.vue";
 
 const props = defineProps({
 	submittal: { type: String, required: true },
@@ -60,6 +60,16 @@ function open_form() {
 
 function open_activity(name) {
 	frappe.set_route("Form", "EGC Activity", name);
+}
+
+const { setTab } = useHubRoute();
+
+function open_document(name) {
+	// Into the Hub's own DocumentsTab/DocumentDetail, not the raw native form — Documents and
+	// Submittals should be able to cross-navigate into each other's rich Hub view, not just the
+	// plain Frappe form (docs/ARCHITECTURE_V2.md's Documents/Submittals redesign).
+	openDocumentIntent.document = name;
+	setTab("documents");
 }
 
 function format_date(value) {
@@ -166,7 +176,13 @@ const next_step_text = computed(() => {
 			: __("Draft — add at least one document revision, then submit for review.");
 	}
 
-	return __("{0} — mark it Under Review once someone starts looking, or record the response.", [s.submission_status]);
+	// Reachable only for a pre-existing submission with no formal review steps at all (created
+	// before every Submittal went through the reviewer workflow, or via the raw native form) —
+	// every new submission now always has at least one step, so this has no in-Hub action any
+	// more; record its outcome from the native EGC Submittal Revision form instead.
+	return __("{0} — no formal review steps on this cycle. Record its outcome from the native Submittal Revision form.", [
+		s.submission_status,
+	]);
 });
 
 // The actual reason behind a Rejected/Revise & Resubmit response, surfaced prominently in the
@@ -192,7 +208,7 @@ function can_respond_to(step) {
 	return step.reviewer_user === current_user || is_step_override_user.value;
 }
 
-// -- submit / mark under review / record response (no-steps v1 path) -------------------------
+// -- submit / record a reviewer's response on their step ------------------------------------
 
 const submitting = ref(false);
 
@@ -208,52 +224,34 @@ async function do_submit() {
 	}
 }
 
-async function do_mark_under_review() {
-	try {
-		await mark_under_review(current_submission.value.name);
-		notify_changed();
-	} catch (e) {
-		frappe.msgprint({ title: __("Could Not Update"), message: e.message, indicator: "red" });
-	}
-}
-
 const RESPONSES = ["Approved", "Approved with Comments", "Revise & Resubmit", "Rejected"];
 
 function open_record_response_dialog(step) {
-	const is_step = Boolean(step);
-	const fields = [
-		{ fieldname: "response", fieldtype: "Select", label: __("Response"), options: RESPONSES, reqd: 1 },
-		{
-			fieldname: "remarks",
-			fieldtype: "Small Text",
-			label: __("Remarks"),
-			// Required specifically for Rejected/Revise & Resubmit — approving with nothing to
-			// say is fine, but sending something back with no reason leaves whoever inherits the
-			// resubmission with nothing to act on.
-			mandatory_depends_on: 'eval:["Rejected", "Revise & Resubmit"].includes(doc.response)',
-			description: __("Required when rejecting or requesting a revision — this is what shows as the reason."),
-		},
-	];
-	// Only a review step already has a docname to attach the file to (the step is inserted the
-	// moment a reviewer is added) — the no-steps v1 path has nothing to bind an Attach field to.
-	if (is_step) {
-		fields.push({
-			fieldname: "attachment",
-			fieldtype: "Attach",
-			label: __("Attachment"),
-			description: __("Optional — a marked-up file you're returning with your response (e.g. an annotated drawing)."),
-			options: { doctype: "EGC Submittal Review Step", docname: step.name, fieldname: "response_attachment" },
-		});
-	}
 	const dialog = new frappe.ui.Dialog({
 		title: __("Record Response"),
-		fields,
+		fields: [
+			{ fieldname: "response", fieldtype: "Select", label: __("Response"), options: RESPONSES, reqd: 1 },
+			{
+				fieldname: "remarks",
+				fieldtype: "Small Text",
+				label: __("Remarks"),
+				// Required specifically for Rejected/Revise & Resubmit — approving with nothing to
+				// say is fine, but sending something back with no reason leaves whoever inherits the
+				// resubmission with nothing to act on.
+				mandatory_depends_on: 'eval:["Rejected", "Revise & Resubmit"].includes(doc.response)',
+				description: __("Required when rejecting or requesting a revision — this is what shows as the reason."),
+			},
+			{
+				fieldname: "attachment",
+				fieldtype: "Attach",
+				label: __("Attachment"),
+				description: __("Optional — a marked-up file you're returning with your response (e.g. an annotated drawing)."),
+				options: { doctype: "EGC Submittal Review Step", docname: step.name, fieldname: "response_attachment" },
+			},
+		],
 		primary_action_label: __("Record"),
 		primary_action(values) {
-			const action = is_step
-				? record_step_response(step.name, values.response, values.remarks, values.attachment)
-				: record_response(current_submission.value.name, values.response, values.remarks);
-			action
+			record_step_response(step.name, values.response, values.remarks, values.attachment)
 				.then(() => {
 					dialog.hide();
 					notify_changed();
@@ -269,135 +267,24 @@ function open_record_response_dialog(step) {
 // -- start a submission: ONE guided entry point instead of a maze of separately-conditioned
 // buttons. A Submittal is a formal review/approval process by definition, so this always ends
 // with at least one reviewer configured — there is deliberately no "no review" choice here.
+// Reached only when this Submittal already exists but has no submission cycle yet (e.g. created
+// via the raw native form) — the ordinary creation path (SubmittalsTab.vue's "+ New Submittal",
+// or DocumentDetail.vue's "Submit for Review") already creates the first cycle as part of
+// creating the Submittal itself, via the same shared flow, so this empty state is the rare
+// leftover case, not the common one.
 
-const DATE_FIELDS = [
-	"due_date",
-	"required_submission_date",
-	"required_approval_date",
-	"required_on_site_date",
-	"lead_time_days",
-];
-
-async function open_start_submission_dialog() {
-	// FIRST cycle only — resubmitting after a Rejected/Revise & Resubmit response goes through
-	// open_resubmit_dialog() below instead, which is deliberately much lighter: the document(s)
-	// and reviewer roster are already known, so there's nothing left to ask for.
-	let templates = [];
-	try {
-		templates = await get_workflow_templates();
-	} catch (e) {
-		// Non-fatal — the ad-hoc reviewer path still works with no templates defined.
-	}
-
-	const approach_options = templates.length
-		? ["Ad-hoc reviewer(s)", "Apply a workflow template"]
-		: ["Ad-hoc reviewer(s)"];
-
-	const dialog = new frappe.ui.Dialog({
-		title: __("Start Submission"),
-		fields: [
-			{
-				fieldname: "documents",
-				fieldtype: "MultiSelectPills",
-				label: __("Documents"),
-				reqd: 1,
-				description: __("Pick the document(s) this is about — the current issued revision of each is used automatically. You never pick a revision directly."),
-				get_data: (txt) =>
-					frappe.db.get_link_options("EGC Project Document", txt, {
-						project: props.project,
-						document_status: "Issued",
-					}),
-			},
-			{
-				fieldname: "review_approach",
-				fieldtype: "Select",
-				label: __("Review Approach"),
-				options: approach_options,
-				default: approach_options[0],
-				reqd: 1,
-			},
-			{
-				fieldname: "template",
-				fieldtype: "Select",
-				label: __("Workflow Template"),
-				options: templates.map((t) => t.name),
-				depends_on: 'eval:doc.review_approach == "Apply a workflow template"',
-				mandatory_depends_on: 'eval:doc.review_approach == "Apply a workflow template"',
-			},
-			{ fieldtype: "Section Break", label: __("Review Dates (optional)"), collapsible: 1 },
-			{ fieldname: "due_date", fieldtype: "Date", label: __("Response Due") },
-			{ fieldname: "required_submission_date", fieldtype: "Date", label: __("Required Submission Date") },
-			{ fieldtype: "Column Break" },
-			{ fieldname: "required_approval_date", fieldtype: "Date", label: __("Required Approval Date") },
-			{ fieldname: "required_on_site_date", fieldtype: "Date", label: __("Required On-Site Date") },
-			{ fieldname: "lead_time_days", fieldtype: "Int", label: __("Lead Time (Days)") },
-		],
-		primary_action_label: __("Start Submission"),
-		async primary_action(values) {
-			dialog.disable_primary_action();
-			// Once the submission cycle itself is created below, it's a real Draft row in the
-			// database — a later step failing (e.g. a document already attached elsewhere) must
-			// NOT be reported as though nothing happened, or a retry would immediately fail again
-			// with "already has a submission" against an orphaned cycle the user can't see. Track
-			// this so the catch block below can tell the two situations apart.
-			let submission_name = null;
-			try {
-				const resolved = await get_documents_with_current_revision(props.project, values.documents || []);
-				const missing = resolved.filter((d) => !d.current_revision);
-				if (missing.length) {
-					throw new Error(
-						__("{0} has no issued revision yet.", [missing.map((d) => d.document_number).join(", ")])
-					);
-				}
-
-				submission_name = (await create_first_submission(props.submittal)).name;
-
-				for (const doc of resolved) {
-					await add_submission_document(submission_name, doc.current_revision);
-				}
-
-				const dates = {};
-				let has_dates = false;
-				for (const field of DATE_FIELDS) {
-					if (values[field]) {
-						dates[field] = values[field];
-						has_dates = true;
-					}
-				}
-				if (has_dates) await update_submission_dates(submission_name, dates);
-
-				if (values.review_approach === "Apply a workflow template") {
-					await apply_workflow_template(submission_name, values.template);
-				}
-
-				dialog.hide();
-				notify_changed();
-
-				if (values.review_approach !== "Apply a workflow template") {
-					// Ad-hoc path — immediately continue into naming the reviewer(s) rather than
-					// leaving the submission sitting there with nobody assigned to it yet.
-					open_add_reviewer_dialog();
-				}
-			} catch (e) {
-				if (submission_name) {
-					dialog.hide();
-					notify_changed();
-					frappe.msgprint({
-						title: __("Submission Started, But Incomplete"),
-						message: __(
-							"{0} was created, but this step failed: {1} Finish configuring it — documents, reviewers, dates — below.",
-							[frappe.utils.escape_html(submission_name), e.message]
-						),
-						indicator: "orange",
-					});
-				} else {
-					dialog.enable_primary_action();
-					frappe.msgprint({ title: __("Could Not Start Submission"), message: e.message, indicator: "red" });
-				}
-			}
+function open_start_submission_dialog() {
+	openSubmitForReviewFlow({
+		project: props.project,
+		existingSubmittal: props.submittal,
+		onCreated(_name, { needsReviewers }) {
+			notify_changed();
+			// Ad-hoc path — immediately continue into naming the reviewer(s) rather than leaving
+			// the submission sitting there with nobody assigned to it yet. A template application
+			// already resolves reviewers itself, so it doesn't need this follow-up.
+			if (needsReviewers) open_add_reviewer_dialog();
 		},
 	});
-	dialog.show();
 }
 
 // -- resubmit: the SAME submittal, picking straight back up with whatever it's already tracking
@@ -973,22 +860,6 @@ const timeline_events = computed(() => {
 							{{ __("Submit") }}
 						</button>
 						<button
-							v-if="current_submission.docstatus === 1 && current_submission.submission_status === 'Submitted' && !has_steps"
-							type="button"
-							class="btn btn-sm btn-default"
-							@click="do_mark_under_review"
-						>
-							{{ __("Mark Under Review") }}
-						</button>
-						<button
-							v-if="current_submission.docstatus === 1 && ['Submitted', 'Under Review'].includes(current_submission.submission_status) && !has_steps"
-							type="button"
-							class="btn btn-sm btn-default"
-							@click="open_record_response_dialog(null)"
-						>
-							{{ __("Record Response") }}
-						</button>
-						<button
 							v-if="current_submission.submission_status === 'Responded' && !RESPONSE_IS_FINAL_OK.includes(current_submission.response)"
 							type="button"
 							class="btn btn-sm btn-primary"
@@ -1105,7 +976,7 @@ const timeline_events = computed(() => {
 							</div>
 							<div v-if="tracked_documents_display.length" class="submittal-tracked-docs">
 								<div v-for="doc in tracked_documents_display" :key="doc.name" class="submittal-tracked-docs__item">
-									<a href="#" class="hub-link" @click.prevent="frappe.set_route('Form', 'EGC Project Document', doc.name)">
+									<a href="#" class="hub-link" @click.prevent="open_document(doc.name)">
 										{{ doc.document_number }} — {{ doc.title }}
 									</a>
 									<span class="submittal-tracked-docs__rev">
@@ -1139,6 +1010,12 @@ const timeline_events = computed(() => {
 									{{ __("Add") }}
 								</button>
 							</div>
+							<!-- At-a-glance chain (Aconex-inspired "Workflow Steps" panel — a connected
+							     step visualization, not just a flat list) above the detailed,
+							     interactive stage list below it. Same data, two views: this one for
+							     "what's the shape of this review," the list below for actually acting
+							     on it. -->
+							<WorkflowStepper v-if="has_steps" :stages="stages" compact />
 							<template v-if="has_steps">
 								<div v-for="stage in stages" :key="stage.sequence" class="submittal-sidebar__stage">
 									<div class="submittal-sidebar__stage-label">{{ __("Stage {0}", [stage.sequence]) }}</div>

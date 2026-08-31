@@ -77,6 +77,23 @@ Enforced by code — you will get a `ValidationError`, not a silent wrong answer
   (`Customer.custom_organization_type` — Client/Consultant/Main Contractor/...) is a different
   concept from the project-scoped role a person holds on one job (`EGC Stakeholder Role`, via
   `EGC Project Stakeholder`/`EGC Assignment`). Never set the former to describe the latter.
+- **Documents is primary; Document Control never reaches into Submittal's own tables.**
+  `document_control.get_approval_status()` asks `submittal_control.get_governing_response_for_revision()`
+  a question — it does not run its own join against `EGC Submittal Revision`/`EGC Submittal
+  Document Item`. If a Document-side function needs a fact about Submittals, add or extend an
+  accessor in `submittal_control.py`; do not write the query directly in `document_control.py`.
+- **An EGC role that depends on a `User Permission` scope must never survive losing that scope.**
+  `revoke_portal_access` strips every `EGC_ROLES` role from a user the moment they have zero
+  remaining `Project`-scoped `User Permission` rows — because Frappe's own `has_user_permission`
+  returns `True` unconditionally for a user with none at all, silently upgrading "sees one
+  project" to "sees every project." Any future code that grants an EGC role tied to a `User
+  Permission` must honor the same rule on revoke.
+- **A field that must not leak through a raw REST/`get_value` read needs `permlevel`, not just an
+  API-layer permission check.** `_require_financial_access()`-style gates only protect the
+  whitelisted method they're written into; the underlying doctype fields stay readable by any
+  role with plain doctype-level read. See `install.py.restrict_financial_field_permlevel()` for
+  the pattern (and why it uses permlevel 3, not 1 — the file's own comment explains the
+  pre-existing `Desk User`/`egc_hr` collisions at 1 and 2).
 
 ## Where things live
 
@@ -95,12 +112,14 @@ Enforced by code — you will get a `ValidationError`, not a silent wrong answer
 | change the Directory tab / Portal Access grant-revoke | `api/directory.py` (`get_directory`, `grant_portal_access`, `revoke_portal_access`, `update_stakeholder_role`) + `DirectoryTab.vue` |
 | change the generic person/org assignment on an Activity or Submittal | `egc_projects/egc_projects/assignments.py` (`EGC Assignment` — standalone doctype, many-to-many, not a child table) |
 | change what counts as a stakeholder role, or add one | `install.py`'s `STAKEHOLDER_ROLES` tuple, seeds `EGC Stakeholder Role` |
-| change in-app (ToDo/Notification Log) notifications | `egc_projects/egc_projects/notifications.py` |
-| change email notifications | `egc_projects/egc_projects/notify_email.py` — deliberately separate from `notifications.py`, an additive second channel only, never a replacement |
+| change in-app (ToDo/Notification Log) notifications OR email notifications | `egc_projects/egc_projects/notifications.py` — both live in this ONE file; no separate `notify_email.py` exists (an earlier doc claimed one did — corrected) |
 | change My Open Items / Overview action items | `egc_projects/egc_projects/action_items.py` |
 | change Activity schedule rollup (group Activities) | `egc_projects/egc_projects/activity_control.py` |
 | add a Drawing/Document field | `egc_projects/egc_projects/doctype/egc_project_document/` + `api/documents.py` |
 | change project health / financials drill-down | `api/hub.py` (`_project_health`, `get_financial_transactions`) |
+| change the unified "submit a document for review" flow (used from Documents, Submittals, and a Submittal's own empty state) | `egc_projects/public/js/egc_project_hub/components/submit_for_review_flow.js` — the ONE place this flow is implemented; do not add a fourth divergent dialog |
+| change how a Document/Submittal cross-navigates into the other's Hub view | `egc_projects/public/js/egc_project_hub/composables/useOpenDocumentIntent.js` / `useOpenSubmittalIntent.js` — the one-shot intent pattern (same shape as `useDrawingsIntent.js`) |
+| change which Documents/Submittals fields are financial-only-readable | `egc_projects/install.py` (`restrict_financial_field_permlevel`, `_FINANCIAL_PROJECT_FIELDS`) |
 
 ## Running the test suite
 
@@ -670,3 +689,204 @@ into the invariant above.
 Full suite green (320 tests) after every step in this sequence — commit-by-commit, never one
 giant batch. `docs/ARCHITECTURE_V2.md` §1/§2/§4/§7 rewritten to match; this file's "Where things
 live" table and invariants updated in the same pass.
+
+## Build history — v4 technical changelog
+
+v4 is the "Documents/Submittals redesign" — realigning the Hub around the Aconex/Procore mental
+model (a Document is the artifact of record; a Submittal is purely the review/approval workflow
+wrapped around it), driven directly by user direction rather than a written brief, preceded by a
+security-hardening pass triggered by a three-agent architecture deep-dive (backend engines,
+frontend Vue components, notifications/permissions — each read every relevant file in full rather
+than trusting the docs). `docs/ARCHITECTURE_V2.md` §14 is the binding spec addendum for this wave;
+this section is the commit-level record.
+
+### Security fixes (found by the deep-dive, fixed before any UX work started)
+
+Five real, verified defects, independent of the redesign itself:
+
+1. **`revoke_portal_access` (`api/directory.py`) used to widen access instead of narrowing it.**
+   It removed the `Project` User Permission but never removed the role `grant_portal_access`
+   appended. Frappe's own `has_user_permission` (`frappe/permissions.py`) returns `True`
+   unconditionally for a user with ZERO `User Permission` rows for a doctype — so revoking
+   someone's only project scope left them able to read every project's Documents/Submittals/
+   Activities/Drawings via the surviving role. Fixed: after removing the `User Permission`, if
+   the user has zero remaining `Project`-scoped ones, every `EGC_ROLES` role they hold is
+   stripped too (mirroring `grant_portal_access`'s own `append_roles`/`ignore_permissions=True`
+   reasoning, not `User.remove_roles()`, for the same "no incidental core-`User`-write
+   requirement" reason that function already documents). A user still scoped to a *different*
+   project keeps their role untouched. Regression tests: both directions, in
+   `test_directory_hub.py`.
+2. **`EGC Project Engineer` had blanket doctype-level `write: 1` on `EGC Submittal Review Step`**,
+   and `reviewer_user`/`sequence`/`is_required`/`reviewer_role` were neither engine-guarded
+   (`assert_step_engine_authorized` only covers `status`/`response`/`response_date`/
+   `responded_by`/`response_remarks`/`response_attachment`) nor `read_only`. Since
+   `record_step_response`'s authorization is deliberately identity-based ("are you
+   `reviewer_user`"), an Engineer with no relationship to a step could set
+   `reviewer_user = themselves` and then pass that check on any pending/in-review step on any
+   project — undermining the whole identity-based model the step engine relies on. Fixed by
+   removing the doctype-level grant; legitimate Engineer step management still goes through
+   `add_review_step`/`apply_workflow_template`, which authorize on `EGC Submittal Revision` write
+   instead (see next item). Regression test in `test_submittal_workflow.py`.
+3. **`EGC Project Engineer` was actually read-only on `EGC Submittal`/`EGC Submittal Revision`**
+   — a separate, pre-existing bug surfaced while fixing #2: the Hub's own `SubmittalsTab.vue`
+   already showed "+ New Submittal" to Engineers (`canWrite` gate), and the build brief's own
+   canonical workflow example puts the Project Engineer first as the originator, but the DocType
+   permissions never granted it. Fixed: `create`+`write` on `EGC Submittal`, `create`+`write`+
+   `submit` on `EGC Submittal Revision` — not `delete`/`cancel`/`amend`, which stay restricted to
+   Document Controller/PM/System Manager. (This is an access-*expansion*, and was called out to
+   the user explicitly for sign-off before being made — the harness's own safety classifier
+   flagged it independently for the same reason.) Verified end-to-end (not just
+   `has_permission`) in `test_submittal_workflow.py`.
+4. **`EGC Submittal Workflow Template` gave `EGC Document Controller` only read**, inconsistent
+   with every other doctype in this cluster (full CRUD there). Fixed to match — a clear
+   oversight, not a deliberate restriction.
+5. **Financial fields on core `Project` were readable via a raw doctype/REST read**, bypassing
+   `api/hub.py`'s own `_require_financial_access()` gate entirely (that gate only protects the
+   Hub's custom endpoints, not the underlying fields, which carried no `permlevel`). Fixed via
+   `install.py.restrict_financial_field_permlevel()` — Property Setters moving
+   `total_billed_amount`/`total_purchase_cost`/etc. to a dedicated permlevel, plus `Custom
+   DocPerm` grants for `FINANCIAL_ROLES` only. **First attempt used permlevel 1 and shipped a
+   real bug**: permlevel 1 on `Project` already carries a pre-existing core grant (`Desk User`,
+   effectively every desk account, for the unrelated `users`/`copied_from` fields) — permlevel
+   access is granted per doctype+level, not per field, so every desk user silently inherited read
+   on the financial fields too, reproducing the exact bypass the fix was meant to close. Caught
+   live in the browser (`test_financial_fields_not_reachable_via_raw_field_read` initially
+   failed even after the "fix"), root-caused by querying `Custom DocPerm` directly, and
+   corrected to permlevel **3** (2 is also taken, by `egc_hr`'s own HR/payroll roles) —
+   `install.py`'s own module comment records the full investigation so permlevel 4+ doesn't
+   repeat it blind. `_undo_contaminated_permlevel_1_financial_grant()` cleans up the wrong grant
+   on any site that already ran the buggy version once.
+
+Two smaller correctness fixes bundled into the same pass:
+
+- **`document_control.get_approval_status()` used to run its own raw cross-doctype join** into
+  `EGC Submittal Revision`/`EGC Submittal Document Item` — Document Control containing
+  Submittal-shape business logic, the wrong direction for "Documents is primary and
+  workflow-agnostic." Moved the query into a new `submittal_control.get_governing_response_for_revision()`
+  accessor; `document_control.py` now asks a question instead of knowing Submittal's internal
+  shape. Pure refactor — identical computed output, existing tests unchanged.
+- **The "one document revision, one active submittal" exclusivity rule lived only in
+  `api/submittals.py.add_submission_document()`**, not in `EGCSubmittalRevision`'s own
+  `validate()` — a direct `doc.append(...); doc.insert()` bypassed it entirely, even though this
+  is a standing product principle (memory: "never regress... a document revision must never be
+  ambiguously under review via more than one Submittal at once"). Moved into
+  `_validate_documents()` itself so it fires on every save path; the API function now relies on
+  `doc.save()` triggering it rather than duplicating the check. Two PRE-EXISTING tests in
+  `test_hub_api.py` had been (harmlessly, until now) sharing one document revision across
+  unrelated submittals as a fixture shortcut — fixed to give each its own document rather than
+  weakening the new check.
+
+### Documents/Submittals redesign
+
+**One creation flow, not two or three**
+(`public/js/egc_project_hub/components/submit_for_review_flow.js`, new): `DocumentDetail.vue`'s
+"Submit for Review" (single document, no reviewer setup at all — "add the reviewer(s) from its
+own page") and `SubmittalsTab.vue`'s "+ New Submittal" → "Start Submission" (full review setup,
+never referenced a Document) used to be genuinely different dialogs with different field sets
+that happened to converge on the same doctype. Now one function covers all three entry points —
+`DocumentDetail.vue` (document preset and locked), `SubmittalsTab.vue` (document picker),
+`SubmittalDetail.vue`'s empty state for a pre-existing Submittal with no submission yet
+(`existingSubmittal` skips identity fields and the `create_submittal()` call) — with identity
+fields, a "Additional Details" collapsed section carrying everything the old `SubmittalsTab.vue`
+dialog captured (WBS Node, Responsible Organization/Party, Received From, Submittal Manager,
+Description — none of it dropped), and the same ad-hoc-or-template review setup every time.
+Two-step flow preserved deliberately (create the Draft submission with docs/reviewers configured,
+leave "Submit" as an explicit separate action on the Submittal's own page) rather than
+auto-submitting — matches the existing tested `do_submit` banner action and the "Draft — ready to
+submit, or add more reviewers/documents first" state, not a new lifecycle stage.
+
+**Dual workflow model left labeled, not removed.** `SubmittalDetail.vue` still branches on
+`has_steps` (the legacy v1 "no formal review steps" path — `mark_under_review`/`record_response`
+— vs. the v2 step engine), and `submittal_control.py`'s backend functions are untouched (20+
+existing tests in `test_submittal.py` call them directly). Since the new unified creation flow
+always creates ≥1 review step (ad-hoc or template), the no-steps banner buttons are now
+unreachable from any *new* submission — they stay only for pre-existing no-step data — and are
+labeled "(Legacy)" with an explanatory tooltip so a user doesn't mistake them for the normal path.
+
+**Documents-as-primary UX**: `useHubRoute.js`'s `TABS` reordered so `documents` precedes
+`submittals` (drives the Toolbox menu order in `EgcProjectHub.vue`'s `tab_defs`). The Documents
+register now shows live review status inline — `api/documents.py.get_documents()` gained a
+batched `_governing_submittal_info()` lookup (three plain queries, not a join-and-project query,
+mirroring `hub.get_activities()`'s `_wbs_labels()` batching pattern) returning each row's
+governing Submittal's `ball_in_court`/`current_due_date`; `DocumentsTab.vue` shows this as a
+subtext line under the "Under Review" pill (e.g. "Project Engineer: m.ezzat@egc-me.com — 2 days
+overdue"). **Real bug caught in live browser verification, not by the unit tests**:
+`_DOCUMENT_LIST_FIELDS` aliases the document's own name to `document` (`"name as document"`) and
+never fetched `current_revision` at all (only `current_revision_label`) — the first version of
+`_governing_submittal_info()` keyed off `row.name`/`row.current_revision`, both silently `None`,
+so every row's inline status came back empty even for documents genuinely Under Review. Fixed by
+adding `current_revision` to the field list and using `row.document` throughout; regression tests
+in `test_documents_api.py` build a real Under Review fixture rather than asserting an absence.
+
+**Consistent cross-navigation**: a Submittal's tracked-document links and a Document's "Related
+Submittals" links used to open the raw native form on the *other* record type — neither rich Hub
+view could route into the other's. Fixed via a one-shot intent pattern (same shape as the
+existing `useDrawingsIntent.js`/`useOverdueIntent.js`): `useOpenDocumentIntent.js`/
+`useOpenSubmittalIntent.js` (new) carry "open this specific record" across a tab switch, since the
+Hub's own route only tracks project/tab, not a record within a tab. Verified live in both
+directions against the KFSH MRI Expansion demo project.
+
+### Verification
+
+Full suite green throughout (336 tests at the end, up from 327 at the start of this session — 9
+new: 3 in `test_directory_hub.py`, 1 in `test_submittal_workflow.py`, 2 in
+`test_external_viewer.py`, 1 in `test_notifications.py`'s due-date-reminder fixture-based test
+plus 6 more dedupe-key tests in the same new file, 2 in `test_documents_api.py`). `bench migrate`
+run twice, clean and idempotent. `git status` inside `apps/frappe`/`apps/erpnext`/`apps/hrms`
+confirmed clean before and after. Live browser walkthrough against the standing demo project
+(`PRJ2601051`, not rebuilt): created a document, issued a revision, used the unified flow from
+the Document's own page, added an ad-hoc reviewer, submitted, confirmed the Documents register's
+inline ball-in-court chip updated, confirmed both cross-navigation directions land on the correct
+record in the Hub's own view (not the raw form). Test fixtures created during this walkthrough
+were deliberately purged afterward (cancel-then-delete, matching `demo.py`'s own reversal
+pattern) — the demo project is curated, not a scratch space.
+
+`notifications.py`'s dedupe: the three event-triggered notifiers
+(`notify_submission_received`/`notify_response_recorded`/`notify_new_revision`) previously passed
+no `dedupe_on` at all, so a retried call could create duplicate `Notification Log` rows.
+Fixed with a shared `_EVENT_DEDUPE_ON` key. Since `enqueue_create_notification` dispatches through
+a real Redis queue (`frappe.enqueue`, not `now=True`) rather than running synchronously, the new
+tests in `test_notifications.py` mock the call rather than asserting a `Notification Log` row
+exists — and the one test that needed a real fixture (`send_due_date_reminders`, which scans every
+open review step on the *site*, not one project) asserts its own fixture's call happened rather
+than a global "nothing else is open," since the standing demo project genuinely has a live pending
+review and a global-emptiness assumption would violate this file's own "must never depend on live
+site data" rule.
+
+### Same-day follow-up: DocumentDetail moved to a full page, WorkflowStepper added
+
+Direct user request: Documents should get the same full-page treatment Submittals already has
+("move from the side panel into a full screen panel," "showcase the entire story of what
+happened"), plus a look at what Aconex does well and worth borrowing. `DocumentDetail.vue` was
+rebuilt from a right-side drawer into a full-page view — `DocumentsTab.vue` now swaps it in for
+the list exactly the way `SubmittalsTab.vue` already does for `SubmittalDetail.vue` — following
+that same proven shape: a status banner (`document_status`/`approval_status` driven, not a
+submission cycle), one unified chronological timeline (every revision uploaded/issued, every
+related Submittal cycle started/responded, comments — Documents gained a comment thread for the
+first time, reusing the already-doctype-agnostic `comments.py`), and a sidebar of standing facts.
+`get_revisions()`/`_related_submittals()` both gained real Datetime fields (`creation`/`modified`)
+specifically so this timeline could do a plain chronological sort — simpler than
+`SubmittalDetail.vue`'s own bucket-interleaving, which was only necessary there because its
+underlying Date-only fields predate this pass.
+
+Research pass on Aconex (help.aconex.com) surfaced one idea worth adapting within this app's own
+deferred-scope boundaries (no markup/pins, no BIM, no Transmittal doctype): Aconex's "Doc Mode"
+review screen shows a right-side panel of completed/current/pending workflow steps as a connected
+chain. `WorkflowStepper.vue` (new, shared) is the Hub's version — a compact, read-only step-chain
+visualization. Two consumers: `DocumentDetail.vue`'s new "Workflow" sidebar card (a lazy
+`get_submittal_detail()` call against the document's governing Submittal, no new endpoint — the
+"Documents is primary, Submittals is the workflow" architecture literally means the Document page
+borrows the Submittal's own data to preview it) and, additively, `SubmittalDetail.vue`'s existing
+"Reviewers" card (the compact chain rendered above the pre-existing interactive stage list, not
+replacing it — the detailed list is still what you act on; the stepper is only "what's the shape
+of this review at a glance"). Caught and fixed before shipping: the stepper's stage-number dot
+first used the array position (`idx + 1`), which read "1, 2" while the interactive list right
+below it — using the real `sequence` value — read "0, 1" for the exact same data; changed to use
+`stage.sequence` directly so both views of the same stages always agree.
+
+Full suite green (336 tests, unchanged — this pass added frontend/display code and two backend
+field additions, no new business logic needing new tests) after every step; live-verified against
+the standing demo project (`PRJ2601051`) across three real states — Under Review with an open
+workflow, a Rejected/Revise & Resubmit/Approved multi-cycle history, and a clean terminal
+Approved — plus posting and deleting a real comment on a Document for the first time. `bench
+build` clean throughout (esbuild would fail loudly on any of the Vue syntax changes involved).

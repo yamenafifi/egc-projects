@@ -750,3 +750,92 @@ automatic date-shifting from Activity Dependencies (recorded/validated only), a 
 workflow-template engine beyond the sequence-based step model in §7, a second notification
 store beyond Frappe's own assignment/`Notification Log`, weighted (vs. simple-average) progress
 roll-up, and a full Project Location hierarchy (Drawing Area is a flat, drawing-only grouping).
+
+> **2026-08-31 note:** the paragraph above ("automatic date-shifting... recorded/validated only")
+> describes what was true when this section was written. A later pass (untracked in this
+> document at the time) added `test_schedule_engine.py`/a real dependency-driven forecast
+> cascade, plus Change Orders and a Cost Forecast engine — none reconciled here yet. That
+> reconciliation is explicitly the *next* phase of work (WBS/Activities/Change Orders), not this
+> one; §14 below covers only the Documents/Submittals redesign. Do not treat this paragraph as
+> still accurate for the schedule engine specifically until that next phase updates it.
+
+---
+
+## 14. Documents/Submittals redesign — Documents primary, Submittals is the workflow
+
+A later addendum to this document, addressing direct user feedback that Documents and Submittals
+should follow the Aconex/Procore mental model explicitly: **a Document is the artifact of
+record; a Submittal is purely the review/approval workflow wrapped around one or more Document
+Revisions — never a second, independent content type.** The underlying data model already kept
+these genuinely separate (§8–§13 above); this section is about closing the gap between that
+architecture and what a user actually experienced navigating the Hub, plus five real security
+defects a three-agent deep-dive found and fixed first (full account in `CLAUDE.md`'s v4
+changelog — not duplicated here, since none of them change binding architecture, only close
+implementation gaps against rules this document or memory already stated).
+
+### 14.1 One creation flow
+
+`SubmitForReviewFlow` (`submit_for_review_flow.js`) is now the only place "create a Submittal and
+get a document into review" is implemented — three call sites (a Document's own page with the
+document preset and locked; the Submittals register with a document picker; a pre-existing
+Submittal with no submission yet), one shared field set and one shared chain of API calls
+(`create_submittal` → `create_first_submission` → `add_submission_document` (×N) →
+`apply_workflow_template` or leave for ad-hoc reviewer setup). No new backend endpoints — this is
+a frontend consolidation of calls that already existed, previously wired to two divergent dialogs
+with different field sets (one of which never asked about review setup at all).
+
+The flow deliberately still ends at a **Draft** submission with documents (and, for the template
+path, reviewers) attached — it does not auto-submit. `Submit` remains a separate, explicit action
+on the Submittal's own page (`SubmittalDetail.vue`'s `do_submit`), consistent with the existing
+"Draft — ready to submit for review, or add more reviewers/documents first" state and its own
+already-tested contract. This is a UI consolidation, not a lifecycle change.
+
+### 14.2 One workflow model, going forward
+
+§7's v1 no-steps path (`mark_under_review`/`record_response`) and the v2 step engine still both
+exist in `submittal_control.py`, unchanged — `test_submittal.py`'s 20+ existing tests call the v1
+functions directly and must keep passing. What changed is that §14.1's unified flow always
+produces at least one `EGC Submittal Review Step` (ad-hoc or template), so the no-steps path is
+now unreachable from any newly-created submission — it survives only as an explicitly-labeled
+"(Legacy)" fallback in `SubmittalDetail.vue`'s UI for submissions that already exist in that state
+(e.g. created directly via the native form or an older site). This is deliberately a UI-level
+narrowing, not a backend removal — the two-model coexistence in `submittal_control.py` itself
+remains exactly as §7 describes it.
+
+### 14.3 Documents is visually and navigationally primary
+
+- `useHubRoute.js`'s tab order lists `documents` before `submittals` — the Hub's Toolbox menu
+  order follows this directly.
+- The Documents register (`api/documents.py.get_documents`) now returns each row's *governing*
+  Submittal — the same "latest non-cancelled submission carrying the current revision" rule §2.4
+  of `docs/ARCHITECTURE.md`'s anti-conflict rule already establishes for `approval_status`,
+  extended to also resolve which Submittal it is, not just its response — so `DocumentsTab.vue`
+  can show who owes the next action (`ball_in_court`) and whether it's overdue directly in the
+  row, without opening the detail drawer.
+- A Document's "Related Submittals" and a Submittal's tracked-document links both route into the
+  other record's own Hub view (`DocumentDetail.vue`/`SubmittalDetail.vue`) via a one-shot
+  cross-tab intent (`useOpenDocumentIntent.js`/`useOpenSubmittalIntent.js`, same pattern as
+  `useDrawingsIntent.js`) — previously both linked out to the raw native form, the only place in
+  either detail view that broke the "stay inside the Hub" experience.
+
+### 14.4 Security fixes bundled into this pass (binding, not just historical)
+
+Recorded here because they are now standing rules a future contributor must not regress, not
+because they change the architecture above:
+
+- `revoke_portal_access` strips every `EGC_ROLES` role from a user the moment their last
+  `Project`-scoped `User Permission` is removed (see `CLAUDE.md`'s invariants section for why —
+  Frappe's own permission engine treats zero `User Permission` rows as *unrestricted*, not
+  *denied*).
+- `EGC Project Engineer` now has `create`/`write` on `EGC Submittal` and `create`/`write`/
+  `submit` on `EGC Submittal Revision` (previously read-only, silently breaking the Hub's own
+  "+ New Submittal" button for that role) — never `delete`/`cancel`/`amend`, which stay
+  restricted to Document Controller/PM/System Manager.
+- `EGC Project Engineer` no longer has doctype-level `write` on `EGC Submittal Review Step` —
+  legitimate step management goes through `add_review_step`/`apply_workflow_template`, which
+  authorize on `EGC Submittal Revision` write instead of the step doctype directly.
+- Financial fields on core `Project` sit at a dedicated `permlevel` (3), with `Custom DocPerm`
+  read granted only to `FINANCIAL_ROLES` — closing a raw-REST-read bypass of `api/hub.py`'s own
+  `_require_financial_access()` gate. `install.py.restrict_financial_field_permlevel()`'s own
+  comment documents why permlevel 3, not 1 or 2 (both already carry pre-existing, unrelated
+  grants on this doctype from core Frappe and `egc_hr` respectively).

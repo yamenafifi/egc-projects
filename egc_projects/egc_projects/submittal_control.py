@@ -56,6 +56,35 @@ def next_submission_seq(submittal: str) -> int:
 	return (max_seq or 0) + 1
 
 
+def get_governing_response_for_revision(document_revision: str) -> frappe._dict | None:
+	"""The one fact `document_control.get_approval_status()` needs from this module: the latest
+	non-cancelled submission that currently carries `document_revision`, if any.
+
+	Owning this query here (not as a raw cross-doctype join written inline in Document Control)
+	is what lets Documents stay primary and workflow-agnostic — Document Control asks a question
+	instead of reaching into `EGC Submittal Revision`/`EGC Submittal Document Item`'s own shape
+	itself. Returns `None` when the revision was never submitted through any submittal, or while
+	the submittal doctypes don't exist yet (e.g. mid-install, before both work packages have run).
+	"""
+	if not frappe.db.table_exists("EGC Submittal Revision") or not frappe.db.table_exists(
+		"EGC Submittal Document Item"
+	):
+		return None
+
+	rows = frappe.get_all(
+		"EGC Submittal Revision",
+		filters=[
+			["EGC Submittal Revision", "docstatus", "=", 1],
+			["EGC Submittal Revision", "submission_status", "!=", c.SUBMISSION_CANCELLED],
+			["EGC Submittal Document Item", "document_revision", "=", document_revision],
+		],
+		fields=["submission_status", "response", "submission_seq"],
+		order_by="submission_seq desc",
+		limit=1,
+	)
+	return rows[0] if rows else None
+
+
 def suggest_next_revision_label(submittal: str) -> str:
 	"""The system-suggested `revision_label` for a new submission of `submittal`.
 

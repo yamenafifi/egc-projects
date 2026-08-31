@@ -178,6 +178,97 @@ class TestDocumentsAPI(IntegrationTestCase):
 		self.assertEqual(row.document_status, c.DOCUMENT_ISSUED)
 		self.assertEqual(row.approval_status, c.APPROVAL_NOT_SUBMITTED)
 
+	def test_create_document_revision_accepts_a_paired_native_file(self):
+		"""Direct user request: a Drawing revision can carry TWO attachments — the viewable
+		`file` (e.g. PDF) and a `native_file` (e.g. .dwg) — sharing one revision number, not a
+		revision each."""
+		doc = self._make_document("DA-NATIVE-001", document_type=self.drawing_type)
+		revision = documents.create_document_revision(
+			document=doc.name,
+			revision="00",
+			file=_make_private_file(),
+			native_file=_make_private_file(),
+		)
+		self.assertTrue(revision["native_file"])
+
+		rows = documents.egc_project_document.get_revisions(doc.name)
+		self.assertTrue(rows[0]["native_file"])
+
+	def test_create_document_revision_blocked_while_current_revision_is_under_review(self):
+		"""Direct user instruction: "if there is a current revision and the document status is
+		'under review' ... you should not be able to add revisions." Enforced in
+		`EGCProjectDocumentRevision.validate()` itself (`document_control.assert_new_revision_allowed`),
+		not just the Hub's own create dialog, so a raw `doc.insert()` can't bypass it either."""
+		doc = self._make_document("DA-BLOCK-001")
+		rev00 = self._make_issued_revision(doc.name, "00")
+		submittal = self._make_submittal("SUB-BLOCK-001")
+		submission = self._make_submission(submittal.name, "00", document_revisions=[rev00.name])
+		submission.submit()
+
+		self.assertEqual(frappe.db.get_value("EGC Project Document", doc.name, "approval_status"), c.APPROVAL_UNDER_REVIEW)
+		with self.assertRaises(frappe.ValidationError):
+			documents.create_document_revision(document=doc.name, revision="01", file=_make_private_file())
+
+	def test_create_document_revision_allowed_after_revise_and_resubmit(self):
+		from egc_projects.egc_projects import submittal_control
+
+		doc = self._make_document("DA-BLOCK-002")
+		rev00 = self._make_issued_revision(doc.name, "00")
+		submittal = self._make_submittal("SUB-BLOCK-002")
+		submission = self._make_submission(submittal.name, "00", document_revisions=[rev00.name])
+		submission.submit()
+		submittal_control.record_response(submission.name, c.RESPONSE_REVISE_AND_RESUBMIT, "Fix it")
+
+		revision = documents.create_document_revision(document=doc.name, revision="01", file=_make_private_file())
+		self.assertEqual(revision["revision"], "01")
+
+	def test_create_document_revision_allowed_when_never_submitted(self):
+		doc = self._make_document("DA-BLOCK-003")
+		self._make_issued_revision(doc.name, "00")
+		self.assertEqual(frappe.db.get_value("EGC Project Document", doc.name, "approval_status"), c.APPROVAL_NOT_SUBMITTED)
+
+		revision = documents.create_document_revision(document=doc.name, revision="01", file=_make_private_file())
+		self.assertEqual(revision["revision"], "01")
+
+	def test_get_documents_shows_governing_submittal_inline_when_under_review(self):
+		"""Regression: `_governing_submittal_info()`'s batching originally keyed on `row.name`/
+		`row.current_revision`, but `_DOCUMENT_LIST_FIELDS` aliases the document's own name to
+		`document` (not `name`) and never fetched `current_revision` at all — so every row's
+		`governing_submittal`/`ball_in_court` silently came back None even for a document
+		genuinely Under Review, caught live in the browser against the KFSH demo project before
+		being caught here."""
+		doc = self._make_document("DA-GOV-001")
+		rev = self._make_issued_revision(doc.name, "00")
+		submittal = self._make_submittal("SUB-GOV-001", submittal_manager=self.manager_user)
+		submission = self._make_submission(submittal.name, "00", document_revisions=[rev.name])
+		submission.submit()
+
+		rows = documents.get_documents(self.project)
+		row = next(r for r in rows if r.document == doc.name)
+		self.assertEqual(row.approval_status, c.APPROVAL_UNDER_REVIEW)
+		self.assertEqual(row.governing_submittal, "SUB-GOV-001")
+		# No review steps on this submission (v1-style, no workflow applied) — ball_in_court is
+		# genuinely empty in that case, which is a different, already-covered scenario
+		# (submittal_control.py's own ball-in-court derivation). This test's job is only to prove
+		# the JOIN itself resolves to the right Submittal, which the None case above couldn't do.
+		self.assertIsNone(row.ball_in_court)
+
+	def test_get_documents_governing_submittal_reflects_ball_in_court_when_steps_exist(self):
+		doc = self._make_document("DA-GOV-002")
+		rev = self._make_issued_revision(doc.name, "00")
+		submittal = self._make_submittal("SUB-GOV-002")
+		submission = self._make_submission(submittal.name, "00", document_revisions=[rev.name])
+		from egc_projects.egc_projects import submittal_control
+
+		submittal_control.add_review_step(submission.name, 1, reviewer_user=self.manager_user)
+		submission.reload()
+		submission.submit()
+
+		rows = documents.get_documents(self.project)
+		row = next(r for r in rows if r.document == doc.name)
+		self.assertEqual(row.governing_submittal, "SUB-GOV-002")
+		self.assertTrue(row.ball_in_court)
+
 	# -- 2. Filter allow-list ----------------------------------------------------------------------
 
 	def test_get_documents_filter_allow_list(self):
@@ -202,6 +293,14 @@ class TestDocumentsAPI(IntegrationTestCase):
 		submittal = self._make_submittal("DA-SUB-001")
 		submission = self._make_submission(submittal.name, "00", document_revisions=[rev00.name])
 		submission.submit()
+
+		# ...responded Revise & Resubmit, which is what actually entitles rev01 to exist at all —
+		# document_control.assert_new_revision_allowed() now refuses a new revision while the
+		# current one is still Under Review (direct user instruction), so this fixture must reach
+		# a real "sent back" state first, not jump straight to a second revision.
+		from egc_projects.egc_projects import submittal_control
+
+		submittal_control.record_response(submission.name, c.RESPONSE_REVISE_AND_RESUBMIT, "Needs changes")
 
 		# ...then rev01 supersedes it. The submittal must still show up: "ever included", not
 		# "currently includes" (docs/ARCHITECTURE_V2.md's own wording for this endpoint).

@@ -232,23 +232,29 @@ class TestHubAPI(IntegrationTestCase):
 		)
 		review_submission.submit()  # left Submitted, no response yet -> document Under Review
 
-		# Submittals: one issued revision shared as the reviewed document for four responded
-		# submittals (Approved / Approved with Comments / Revise & Resubmit / Rejected), plus the
-		# still-open `review_submission` above (contributes to `under_review`, not overdue: due
-		# date is in the future) and one more open submission that IS overdue.
-		submittal_doc = self._make_document("OV-SUB-DOC")
-		submittal_rev = self._make_issued_revision(submittal_doc.name, "00")
+		# Submittals: a distinct issued revision per responded submittal (Approved / Approved
+		# with Comments / Revise & Resubmit / Rejected) plus one more for the overdue open
+		# submission — a document revision can only be under review through one submittal at a
+		# time (egc_submittal_revision.py's own `_validate_documents()`), so each of these five
+		# needs its own document even though this test only cares about the aggregate counts.
+		def _make_reviewed_revision(suffix):
+			doc = self._make_document(f"OV-SUB-DOC-{suffix}")
+			return self._make_issued_revision(doc.name, "00")
 
-		self._make_responded_submittal("OV-SUB-APPR", c.RESPONSE_APPROVED, submittal_rev)
-		self._make_responded_submittal("OV-SUB-AWC", c.RESPONSE_APPROVED_WITH_COMMENTS, submittal_rev)
-		self._make_responded_submittal("OV-SUB-REV", c.RESPONSE_REVISE_AND_RESUBMIT, submittal_rev)
-		self._make_responded_submittal("OV-SUB-REJ", c.RESPONSE_REJECTED, submittal_rev)
+		self._make_responded_submittal("OV-SUB-APPR", c.RESPONSE_APPROVED, _make_reviewed_revision("APPR"))
+		self._make_responded_submittal(
+			"OV-SUB-AWC", c.RESPONSE_APPROVED_WITH_COMMENTS, _make_reviewed_revision("AWC")
+		)
+		self._make_responded_submittal(
+			"OV-SUB-REV", c.RESPONSE_REVISE_AND_RESUBMIT, _make_reviewed_revision("REV")
+		)
+		self._make_responded_submittal("OV-SUB-REJ", c.RESPONSE_REJECTED, _make_reviewed_revision("REJ"))
 
 		overdue_submittal = self._make_submittal("OV-SUB-OVERDUE")
 		overdue_submission = self._make_submission(
 			overdue_submittal.name,
 			"00",
-			document_revisions=[submittal_rev.name],
+			document_revisions=[_make_reviewed_revision("OVERDUE").name],
 			due_date=add_days(today(), -2),
 		)
 		overdue_submission.submit()
@@ -513,14 +519,19 @@ class TestHubAPI(IntegrationTestCase):
 		self.assertEqual(hub.get_overview(self.project)["health"]["schedule"], "green")
 
 	def test_submittals_health_red_overdue_beats_orange_needs_resubmit(self):
-		doc = self._make_document("HLT-SUB-DOC")
-		rev = self._make_issued_revision(doc.name, "00")
-		self._make_responded_submittal("HLT-SUB-RNR", c.RESPONSE_REVISE_AND_RESUBMIT, rev)
+		# Two distinct documents — a document revision can only be under review through one
+		# submittal at a time (egc_submittal_revision.py's own `_validate_documents()`), so the
+		# Revise & Resubmit submittal and the overdue submittal cannot share one revision.
+		rnr_doc = self._make_document("HLT-SUB-DOC-RNR")
+		rnr_rev = self._make_issued_revision(rnr_doc.name, "00")
+		self._make_responded_submittal("HLT-SUB-RNR", c.RESPONSE_REVISE_AND_RESUBMIT, rnr_rev)
 		self.assertEqual(hub.get_overview(self.project)["health"]["submittals"], "orange")
 
+		overdue_doc = self._make_document("HLT-SUB-DOC-OVERDUE")
+		overdue_rev = self._make_issued_revision(overdue_doc.name, "00")
 		overdue_submittal = self._make_submittal("HLT-SUB-OVERDUE")
 		overdue_submission = self._make_submission(
-			overdue_submittal.name, "00", document_revisions=[rev.name], due_date=add_days(today(), -5)
+			overdue_submittal.name, "00", document_revisions=[overdue_rev.name], due_date=add_days(today(), -5)
 		)
 		overdue_submission.submit()
 		self.assertEqual(hub.get_overview(self.project)["health"]["submittals"], "red")

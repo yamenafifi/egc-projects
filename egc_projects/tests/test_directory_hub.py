@@ -247,6 +247,46 @@ class TestDirectoryHub(IntegrationTestCase):
 		)
 		self.assertTrue(frappe.db.exists("User", user))
 
+	def test_revoke_portal_access_strips_egc_roles_when_it_was_the_last_project_scope(self):
+		# Regression for a real privilege-escalation bug: Frappe's own `has_user_permission`
+		# returns True unconditionally for a user with ZERO `User Permission` rows for a doctype
+		# (confirmed directly against frappe/permissions.py), so leaving an EGC role behind after
+		# removing someone's only Project scope would silently upgrade them from "sees one
+		# project" to "sees every project" the moment revoke runs. The role must go with it.
+		row_name = self._add_stakeholder(self.role_external, "Last Scope Revoke")
+		frappe.set_user(self.manager_user)
+		result = directory.grant_portal_access(
+			self.project, row_name, c.ROLE_EXTERNAL_VIEWER, email="egc-dh-lastscope@example.com"
+		)
+		user = result["user"]
+		self.assertIn(c.ROLE_EXTERNAL_VIEWER, frappe.get_roles(user))
+
+		directory.revoke_portal_access(self.project, user)
+
+		self.assertNotIn(c.ROLE_EXTERNAL_VIEWER, frappe.get_roles(user))
+		self.assertTrue(frappe.db.exists("User", user))
+
+	def test_revoke_portal_access_keeps_role_when_user_still_scoped_to_another_project(self):
+		# The opposite case must also hold: revoking ONE project's access must not strip a role
+		# the user still legitimately needs for a DIFFERENT project they remain scoped to.
+		from frappe.permissions import add_user_permission
+
+		other_project = _make_project(_make_company())
+		row_name = self._add_stakeholder(self.role_external, "Multi Project Person")
+		frappe.set_user(self.manager_user)
+		result = directory.grant_portal_access(
+			self.project, row_name, c.ROLE_EXTERNAL_VIEWER, email="egc-dh-multiproj@example.com"
+		)
+		user = result["user"]
+		add_user_permission("Project", other_project, user, ignore_permissions=True)
+
+		directory.revoke_portal_access(self.project, user)
+
+		self.assertIn(c.ROLE_EXTERNAL_VIEWER, frappe.get_roles(user))
+		self.assertTrue(
+			frappe.db.exists("User Permission", {"user": user, "allow": "Project", "for_value": other_project})
+		)
+
 	# -- update_stakeholder_role -------------------------------------------------------------------
 
 	def test_update_stakeholder_role_changes_the_row(self):

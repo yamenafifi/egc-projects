@@ -80,11 +80,18 @@ def get_revisions(document: str) -> list[dict]:
 			"revision_status",
 			"docstatus",
 			"file",
+			"native_file",
 			"revision_date",
 			"issue_date",
 			"remarks",
 			"readiness",
 			"superseded_by",
+			# Real Datetimes, unlike revision_date/issue_date (Date-only) — needed to interleave
+			# revision events correctly against Submittal events/comments in the Hub's unified
+			# document timeline (DocumentDetail.vue), same reasoning as SubmittalDetail.vue's own
+			# timeline already documents for its own events.
+			"creation",
+			"modified",
 		],
 		order_by="revision_seq desc",
 	)

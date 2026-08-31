@@ -92,6 +92,36 @@ class EGCSubmittalRevision(Document):
 					title=_("Cross-Project Link Rejected"),
 				)
 
+			# A document revision can only be under review through ONE submittal's lineage at a
+			# time — otherwise `document_control.get_approval_status` has no reliable way to say
+			# which submittal's outcome is "the" approval status (its ordering is only reliable
+			# within one submittal's own revisions; `submission_seq` is scoped per-submittal, not
+			# globally unique). Re-attaching to a LATER revision of the SAME submittal stays
+			# allowed (the ordinary "resubmit the same drawing" case), and so does re-attaching
+			# after the earlier attachment's submission was cancelled. Lives here, not only in
+			# `api/submittals.py.add_submission_document()`, so a direct `doc.append(...);
+			# doc.save()` cannot bypass it — the API function used to duplicate this exact check
+			# before its own `append`+`save`; it now relies on this `validate()` firing instead.
+			conflict = frappe.get_all(
+				"EGC Submittal Revision",
+				filters=[
+					["EGC Submittal Revision", "submittal", "!=", self.submittal],
+					["EGC Submittal Revision", "submission_status", "!=", c.SUBMISSION_CANCELLED],
+					["EGC Submittal Document Item", "document_revision", "=", row.document_revision],
+				],
+				fields=["submittal"],
+				limit=1,
+			)
+			if conflict:
+				frappe.throw(
+					_(
+						"Document Revision {0} is already attached to submittal {1}. A document revision"
+						" can only be under review through one submittal at a time."
+					).format(frappe.bold(row.document_revision), frappe.bold(conflict[0].submittal)),
+					title=_("Already Attached Elsewhere"),
+					exc=frappe.ValidationError,
+				)
+
 			# `document`/`revision` are fetch_from'd automatically before validate() runs;
 			# `document_title` needs a second hop (document_revision.document.title), so it is
 			# set here rather than via fetch_from.

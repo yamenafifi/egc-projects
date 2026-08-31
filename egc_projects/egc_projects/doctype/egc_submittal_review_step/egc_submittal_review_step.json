@@ -189,8 +189,7 @@
 			"print": 1,
 			"read": 1,
 			"report": 1,
-			"role": "EGC Project Engineer",
-			"write": 1
+			"role": "EGC Project Engineer"
 		},
 		{
 			"email": 1,

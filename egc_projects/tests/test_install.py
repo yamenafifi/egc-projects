@@ -168,3 +168,18 @@ class TestTrimPercentCompleteMethodOptions(IntegrationTestCase):
 		# same as "Manual" — this is also a preserving rename, not a behavior change.
 		self.assertEqual(frappe.db.get_value("Project", project.name, "percent_complete_method"), "Manual")
 		frappe.get_doc("Project", project.name).save(ignore_permissions=True)
+
+
+class TestRaiseProjectAttachmentLimit(IntegrationTestCase):
+	def test_raises_the_effective_meta_limit(self):
+		install.raise_project_attachment_limit()
+		frappe.clear_cache(doctype="Project")
+		self.assertEqual(frappe.get_meta("Project").max_attachments, install.PROJECT_MAX_ATTACHMENTS)
+
+	def test_is_idempotent(self):
+		install.raise_project_attachment_limit()
+		install.raise_project_attachment_limit()
+		rows = frappe.get_all(
+			"Property Setter", filters={"doc_type": "Project", "property": "max_attachments"}, fields=["name"]
+		)
+		self.assertEqual(len(rows), 1)

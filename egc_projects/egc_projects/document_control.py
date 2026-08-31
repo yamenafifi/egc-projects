@@ -83,40 +83,71 @@ def get_approval_status(document: str) -> str:
 	"""Derive `approval_status` strictly from the current revision (the anti-conflict rule).
 
 	A revision that is no longer current never contributes here, so a later revision never
-	inherits an earlier one's approval. Degrades safely to `Not Submitted` while
-	`EGC Submittal Revision` / `EGC Submittal Document Item` (built concurrently by another
-	work package) do not exist yet.
+	inherits an earlier one's approval.
+
+	Documents is meant to be primary and workflow-agnostic — this function used to reach
+	directly into `EGC Submittal Revision`/`EGC Submittal Document Item` with its own raw
+	cross-doctype join, meaning Document Control contained Submittal-shape business logic
+	instead of asking Submittal Control a question. `submittal_control.get_governing_response_for_revision`
+	now owns that query; this function only interprets the answer. Lazy import (not a top-level
+	one) because `submittal_control.py` imports THIS module at load time — a top-level import
+	here would be circular.
 	"""
 	current_revision = get_current_revision(document)
 	if not current_revision:
 		return c.APPROVAL_NOT_SUBMITTED
 
-	if not frappe.db.table_exists("EGC Submittal Revision") or not frappe.db.table_exists(
-		"EGC Submittal Document Item"
-	):
+	from egc_projects.egc_projects import submittal_control
+
+	governing = submittal_control.get_governing_response_for_revision(current_revision)
+	if not governing:
 		return c.APPROVAL_NOT_SUBMITTED
 
-	rows = frappe.get_all(
-		"EGC Submittal Revision",
-		filters=[
-			["EGC Submittal Revision", "docstatus", "=", 1],
-			["EGC Submittal Revision", "submission_status", "!=", c.SUBMISSION_CANCELLED],
-			["EGC Submittal Document Item", "document_revision", "=", current_revision],
-		],
-		fields=["submission_status", "response", "submission_seq"],
-		order_by="submission_seq desc",
-		limit=1,
-	)
-	if not rows:
-		return c.APPROVAL_NOT_SUBMITTED
-
-	latest = rows[0]
-	if latest.submission_status == c.SUBMISSION_RESPONDED:
-		return latest.response or c.APPROVAL_NOT_SUBMITTED
-	if latest.submission_status in c.SUBMISSION_OPEN_STATUSES:
+	if governing.submission_status == c.SUBMISSION_RESPONDED:
+		return governing.response or c.APPROVAL_NOT_SUBMITTED
+	if governing.submission_status in c.SUBMISSION_OPEN_STATUSES:
 		return c.APPROVAL_UNDER_REVIEW
 
 	return c.APPROVAL_NOT_SUBMITTED
+
+
+#: Once a document has an Issued current revision, a new one can only be started while that
+#: revision is genuinely open to being superseded: never submitted yet, or sent back by a
+#: reviewer. Direct user instruction: "if there is a current revision and the document status is
+#: 'under review' or anything else except for 'revise & resubmit', 'rejected' ... you should not
+#: be able to add revisions" — mid-review and already-approved are exactly the states a new
+#: revision must not silently undercut.
+_NEW_REVISION_BLOCKED_APPROVAL_STATUSES = (
+	c.APPROVAL_UNDER_REVIEW,
+	c.RESPONSE_APPROVED,
+	c.RESPONSE_APPROVED_WITH_COMMENTS,
+)
+
+
+def assert_new_revision_allowed(document: str) -> None:
+	"""Raises when `document` already has a current (Issued) revision that is mid-review or
+	already approved — see `_NEW_REVISION_BLOCKED_APPROVAL_STATUSES`. A document with no current
+	revision yet (nothing issued, or issued but never submitted) is always allowed through: this
+	rule only guards against undercutting a live or settled review, not first-time drafting.
+
+	Called from `EGCProjectDocumentRevision.validate()` (`is_new()` only) so this can't be
+	bypassed by a direct `doc.insert()` any more than by the Hub's own `create_document_revision`
+	API — both paths go through the same controller.
+	"""
+	current_revision, approval_status = frappe.db.get_value(
+		"EGC Project Document", document, ["current_revision", "approval_status"]
+	)
+	if not current_revision or approval_status not in _NEW_REVISION_BLOCKED_APPROVAL_STATUSES:
+		return
+
+	frappe.throw(
+		_(
+			"{0} cannot take a new revision while it is {1}. A new revision is only allowed once a "
+			"review response comes back as Revise & Resubmit or Rejected."
+		).format(frappe.bold(document), frappe.bold(_(approval_status))),
+		title=_("Not Allowed"),
+		exc=frappe.ValidationError,
+	)
 
 
 def _load_revisions(document: str, exclude: str | None = None) -> list[frappe._dict]:

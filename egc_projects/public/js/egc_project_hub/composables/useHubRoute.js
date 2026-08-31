@@ -14,12 +14,15 @@ import { reactive, readonly } from "vue";
 // register with its own parallel create-dialog and filter bar. DocumentsTab.vue's "Drawings
 // only" toggle covers the same ground now; a bare "drawings" tab in an old bookmark/localStorage
 // falls through to DEFAULT_TAB via the TABS.includes() guard in read_route() below.
+// "documents" now comes BEFORE "submittals" — Documents is the primary register (the artifact
+// of record); Submittals is the review/approval workflow wrapped around it, not an independent
+// peer content type. Every Submittal creation path starts from a Document (submit_for_review_flow.js).
 export const TABS = [
 	"overview",
 	"wbs",
 	"activities",
-	"submittals",
 	"documents",
+	"submittals",
 	"directory",
 	"financials",
 	"project-info",

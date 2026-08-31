@@ -1,9 +1,10 @@
 <script setup>
 import { computed, ref, watch, onMounted } from "vue";
-import { get_documents, create_document, get_drawing_document_types } from "./documents_api";
-import { get_person_info } from "./project_profile_api";
+import { get_documents, create_document, create_document_revision, get_drawing_document_types } from "./documents_api";
+import { get_directory_person_emails, person_link_filter } from "./directory_helpers";
 import { useHubResource } from "../composables/useHubResource";
 import { consumeDrawingsApprovalIntent } from "../composables/useDrawingsIntent";
+import { consumeOpenDocumentIntent } from "../composables/useOpenDocumentIntent";
 import LoadingState from "./LoadingState.vue";
 import ErrorState from "./ErrorState.vue";
 import EmptyState from "./EmptyState.vue";
@@ -45,6 +46,10 @@ onMounted(async () => {
 		drawings_only.value = true;
 		approval_filter.value = approval_intent;
 	}
+	// Cross-nav from SubmittalDetail.vue's tracked documents — open straight into this specific
+	// document's detail drawer instead of just landing on the unfiltered register.
+	const open_document_intent = consumeOpenDocumentIntent();
+	if (open_document_intent) selected_document.value = open_document_intent;
 	try {
 		drawing_types.value = await get_drawing_document_types();
 	} catch (e) {
@@ -92,6 +97,18 @@ const filtered = computed(() => {
 	});
 });
 
+// A document Under Review shows who owes the next action right in the register (its governing
+// Submittal's ball_in_court/due date, batched server-side in api/documents.py.get_documents —
+// docs/ARCHITECTURE_V2.md's Documents/Submittals redesign) instead of only after opening the
+// detail drawer and scrolling to "Related Submittals".
+function is_overdue(due_date) {
+	return Boolean(due_date) && frappe.datetime.get_diff(frappe.datetime.now_date(), due_date) > 0;
+}
+
+function days_overdue(due_date) {
+	return frappe.datetime.get_diff(frappe.datetime.now_date(), due_date);
+}
+
 function open_detail(document_name) {
 	selected_document.value = document_name;
 }
@@ -104,34 +121,58 @@ function on_changed() {
 	reload();
 }
 
-function open_create_dialog() {
+// Anchors the two Attach fields below at the Project record (which already exists) rather than
+// leaving `doctype`/`docname` blank — a bare `frappe.ui.Dialog` Attach control with no `options`
+// uploads with an empty `attached_to_doctype`, which is invisible to /app/file and to any
+// attached_to_*-filtered permission check (the exact bug `DocumentDetail.vue`'s own "New
+// Revision" dialog already documents and works around). The Document being created doesn't exist
+// yet at upload time — unlike that dialog, which only ever runs against an already-existing
+// Document — so there is no real record of this doctype to point at yet; the Project is the
+// nearest real, already-existing, permission-checked anchor. The `fieldname` given here is
+// bookkeeping only (Project has no field that actually holds this URL) — same non-requirement
+// the existing "New Revision" workaround already relies on.
+function file_anchor() {
+	return { doctype: "Project", docname: props.project, fieldname: "notes" };
+}
+
+async function open_create_dialog() {
+	// Direct user instruction: Originator must be strictly a Project Directory person, no
+	// free-text fallback in this form (the underlying field still allows one for old/other
+	// callers — see directory_helpers.js). Fetched before building the dialog so the Link
+	// field's own get_query filter is final from the first render, not patched in later.
+	const directory_emails = await get_directory_person_emails(props.project);
+
 	const dialog = new frappe.ui.Dialog({
 		title: __("New Document"),
+		size: "large",
 		fields: [
 			{ fieldname: "document_number", fieldtype: "Data", label: __("Document Number"), reqd: 1 },
 			{ fieldname: "title", fieldtype: "Data", label: __("Title"), reqd: 1 },
+			{ fieldtype: "Column Break" },
 			{
 				fieldname: "document_type",
 				fieldtype: "Link",
 				label: __("Document Type"),
 				options: "EGC Document Type",
 				reqd: 1,
+				// The one, single behavior the user specifically called out as missing: Drawing
+				// fields (and the Native File attachment below) only ever appear once the picked
+				// type is actually a drawing type — never a "(optional, only meaningful if...)"
+				// section shown regardless and left to the user to ignore correctly.
+				onchange: () => toggle_drawing_fields(dialog),
 			},
 			{ fieldname: "discipline", fieldtype: "Link", label: __("Discipline"), options: "EGC Discipline" },
+
+			{ fieldtype: "Section Break" },
 			{
 				fieldname: "originator_person",
 				fieldtype: "Link",
-				label: __("Originator (Person)"),
+				label: __("Originator"),
 				options: "User",
-				description: __("Pick a Project Directory entry, or leave blank and type a one-off party below."),
-				onchange: async function () {
-					const person = this.value;
-					if (!person) return;
-					const info = await get_person_info(person).catch(() => null);
-					if (info && info.party_name) dialog.set_value("originator", info.party_name);
-				},
+				reqd: 1,
+				description: __("Must already be on this project's Directory — add them there first if they're missing."),
+				get_query: person_link_filter(directory_emails),
 			},
-			{ fieldname: "originator", fieldtype: "Data", label: __("Originator") },
 			{
 				fieldname: "wbs_node",
 				fieldtype: "Link",
@@ -139,18 +180,16 @@ function open_create_dialog() {
 				options: "EGC WBS Node",
 				get_query: () => ({ filters: { project: props.project } }),
 			},
+			{ fieldtype: "Column Break" },
 			{ fieldname: "description", fieldtype: "Small Text", label: __("Description") },
-			{
-				fieldtype: "Section Break",
-				label: __("Drawing Details (optional)"),
-				collapsible: 1,
-				description: __("Only meaningful if the Document Type above is a drawing type."),
-			},
+
+			{ fieldname: "drawing_section", fieldtype: "Section Break", label: __("Drawing Details"), hidden: 1 },
 			{
 				fieldname: "drawing_set",
 				fieldtype: "Link",
 				label: __("Drawing Set"),
 				options: "EGC Drawing Set",
+				hidden: 1,
 				get_query: () => ({ filters: { project: props.project } }),
 			},
 			{
@@ -158,31 +197,118 @@ function open_create_dialog() {
 				fieldtype: "Link",
 				label: __("Drawing Area"),
 				options: "EGC Drawing Area",
+				hidden: 1,
 				get_query: () => ({ filters: { project: props.project } }),
 			},
 			{ fieldtype: "Column Break" },
-			{ fieldname: "drawing_date", fieldtype: "Date", label: __("Drawing Date") },
-			{ fieldname: "received_date", fieldtype: "Date", label: __("Received Date") },
+			{ fieldname: "drawing_date", fieldtype: "Date", label: __("Drawing Date"), hidden: 1 },
+			{ fieldname: "received_date", fieldtype: "Date", label: __("Received Date"), hidden: 1 },
+
+			// The second explicitly-called-out gap: creating a Document never asked for a file at
+			// all — you had to save it, THEN separately find "New Revision" to attach anything.
+			// This is now one continuous action: the document AND its first revision, together.
+			{ fieldtype: "Section Break", label: __("First Revision") },
+			{ fieldname: "revision", fieldtype: "Data", label: __("Revision"), default: "00", reqd: 1 },
+			{
+				fieldname: "revision_date",
+				fieldtype: "Date",
+				label: __("Revision Date"),
+				default: frappe.datetime.get_today(),
+				reqd: 1,
+			},
+			{ fieldtype: "Column Break" },
+			{
+				fieldname: "file",
+				fieldtype: "Attach",
+				label: __("File"),
+				reqd: 1,
+				options: file_anchor(),
+			},
+			{
+				fieldname: "native_file",
+				fieldtype: "Attach",
+				label: __("Native File (e.g. .dwg)"),
+				hidden: 1,
+				description: __("Optional — the native authoring file, alongside File above. Same revision, two attachments."),
+				options: file_anchor(),
+			},
 		],
-		primary_action_label: __("Create"),
-		primary_action(values) {
-			create_document({ project: props.project, ...values })
-				.then((doc) => {
+		primary_action_label: __("Create Document"),
+		async primary_action(values) {
+			dialog.disable_primary_action();
+			// Once create_document() succeeds, it's a real row in the database — the revision
+			// step failing afterward must not be reported as though nothing happened.
+			let created_document = null;
+			try {
+				created_document = (
+					await create_document({
+						project: props.project,
+						document_number: values.document_number,
+						title: values.title,
+						document_type: values.document_type,
+						discipline: values.discipline,
+						originator_person: values.originator_person,
+						wbs_node: values.wbs_node,
+						description: values.description,
+						drawing_set: values.drawing_set,
+						drawing_area: values.drawing_area,
+						drawing_date: values.drawing_date,
+						received_date: values.received_date,
+					})
+				).name;
+
+				await create_document_revision({
+					document: created_document,
+					revision: values.revision,
+					file: values.file,
+					native_file: values.native_file || undefined,
+					revision_date: values.revision_date,
+				});
+
+				dialog.hide();
+				reload();
+				open_detail(created_document);
+			} catch (e) {
+				if (created_document) {
 					dialog.hide();
 					reload();
-					open_detail(doc.name);
-				})
-				.catch((e) => {
+					open_detail(created_document);
+					frappe.msgprint({
+						title: __("Document Created, But Incomplete"),
+						message: __("{0} was created, but the revision failed: {1} Add it from the document's own page.", [
+							frappe.utils.escape_html(created_document),
+							e.message,
+						]),
+						indicator: "orange",
+					});
+				} else {
+					dialog.enable_primary_action();
 					frappe.msgprint({ title: __("Could Not Create Document"), message: e.message, indicator: "red" });
-				});
+				}
+			}
 		},
 	});
 	dialog.show();
+}
+
+function toggle_drawing_fields(dialog) {
+	const is_drawing = drawing_types.value.includes(dialog.get_value("document_type"));
+	for (const fieldname of ["drawing_section", "drawing_set", "drawing_area", "drawing_date", "received_date", "native_file"]) {
+		dialog.set_df_property(fieldname, "hidden", !is_drawing);
+	}
 }
 </script>
 
 <template>
 	<div class="hub-documents">
+		<DocumentDetail
+			v-if="selected_document"
+			:document="selected_document"
+			@close="close_detail"
+			@changed="on_changed"
+		/>
+
+		<template v-else>
 		<LoadingState v-if="loading" :rows="8" />
 		<ErrorState v-else-if="error" :message="error" @retry="reload" />
 		<EmptyState
@@ -267,20 +393,22 @@ function open_create_dialog() {
 							</template>
 							<td>{{ row.current_revision_label || "—" }}</td>
 							<td><StatusPill :status="row.document_status" /></td>
-							<td><StatusPill :status="row.approval_status" /></td>
+							<td>
+								<StatusPill :status="row.approval_status" />
+								<div v-if="row.approval_status === 'Under Review' && row.ball_in_court" class="hub-table__subtext">
+									{{ row.ball_in_court }}
+									<span v-if="is_overdue(row.submittal_due_date)" class="hub-table__subtext--overdue">
+										— {{ __("{0} overdue", [days_overdue(row.submittal_due_date)]) }}
+									</span>
+								</div>
+							</td>
 							<td>{{ row.originator || "—" }}</td>
 						</tr>
 					</tbody>
 				</table>
 			</div>
 		</template>
-
-		<DocumentDetail
-			v-if="selected_document"
-			:document="selected_document"
-			@close="close_detail"
-			@changed="on_changed"
-		/>
+		</template>
 	</div>
 </template>
 
@@ -296,5 +424,17 @@ function open_create_dialog() {
 	font-size: var(--text-sm);
 	color: var(--text-color);
 	white-space: nowrap;
+}
+
+.hub-table__subtext {
+	margin-top: 2px;
+	font-size: var(--text-xs);
+	color: var(--text-muted);
+	white-space: nowrap;
+}
+
+.hub-table__subtext--overdue {
+	color: var(--red-500, var(--text-on-red));
+	font-weight: 500;
 }
 </style>

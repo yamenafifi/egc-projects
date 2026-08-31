@@ -14,6 +14,7 @@
 		"revision_seq",
 		"section_break_file",
 		"file",
+		"native_file",
 		"column_break_2",
 		"revision_date",
 		"issue_date",
@@ -72,7 +73,14 @@
 			"fieldname": "file",
 			"fieldtype": "Attach",
 			"label": "File",
-			"reqd": 1
+			"reqd": 1,
+			"description": "The primary, viewable file (e.g. PDF). For a Drawing, pair with Native File below — both share this same revision number, not a revision each."
+		},
+		{
+			"fieldname": "native_file",
+			"fieldtype": "Attach",
+			"label": "Native File",
+			"description": "Optional — the native authoring file (e.g. .dwg), only meaningful when this document is a Drawing. Same immutability rule as File: locked once this revision is issued."
 		},
 		{
 			"fieldname": "column_break_2",

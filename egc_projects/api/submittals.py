@@ -14,7 +14,7 @@ from __future__ import annotations
 import frappe
 from frappe import _
 
-from egc_projects.egc_projects import assignments, constants as c, relationships, submittal_control, validators
+from egc_projects.egc_projects import assignments, relationships, submittal_control, validators
 
 # --- add/remove a controlled document revision on a Draft submission --------------------------
 
@@ -36,33 +36,10 @@ def add_submission_document(submission: str, document_revision: str) -> dict:
 			exc=frappe.ValidationError,
 		)
 
-	# A document revision can only be under review through ONE submittal's lineage at a time —
-	# otherwise `document_control.get_approval_status` would have no reliable way to say which
-	# submittal's outcome is "the" approval status (its own ordering is only reliable within a
-	# single submittal's revisions; `submission_seq` is scoped per-submittal, not globally
-	# unique). Re-attaching to a LATER revision of the SAME submittal stays allowed — that's the
-	# ordinary "resubmit the same drawing for another look" case — and so does re-attaching after
-	# the earlier attachment's submission was cancelled.
-	conflict = frappe.get_all(
-		"EGC Submittal Revision",
-		filters=[
-			["EGC Submittal Revision", "submittal", "!=", doc.submittal],
-			["EGC Submittal Revision", "submission_status", "!=", c.SUBMISSION_CANCELLED],
-			["EGC Submittal Document Item", "document_revision", "=", document_revision],
-		],
-		fields=["submittal"],
-		limit=1,
-	)
-	if conflict:
-		frappe.throw(
-			_(
-				"Document Revision {0} is already attached to submittal {1}. A document revision"
-				" can only be under review through one submittal at a time."
-			).format(frappe.bold(document_revision), frappe.bold(conflict[0].submittal)),
-			title=_("Already Attached Elsewhere"),
-			exc=frappe.ValidationError,
-		)
-
+	# The cross-submittal exclusivity check (a document revision can only be under review through
+	# one submittal at a time) now lives in `EGCSubmittalRevision._validate_documents()` itself,
+	# so it can't be bypassed by a direct `doc.append(...); doc.save()` elsewhere — it fires below
+	# via this same `doc.save()`, not duplicated here.
 	doc.append("documents", {"document_revision": document_revision})
 	doc.save()
 	return {"name": doc.name}
@@ -318,7 +295,15 @@ def _resolve_documents(document_names: list[str]) -> list[dict]:
 	return frappe.get_all(
 		"EGC Project Document",
 		filters={"name": ("in", document_names)},
-		fields=["name", "document_number", "title", "current_revision", "current_revision_label", "document_status"],
+		fields=[
+			"name",
+			"document_number",
+			"title",
+			"document_type",
+			"current_revision",
+			"current_revision_label",
+			"document_status",
+		],
 		order_by="document_number asc",
 	)
 

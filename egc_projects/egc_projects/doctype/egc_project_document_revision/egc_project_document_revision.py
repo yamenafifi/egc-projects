@@ -45,6 +45,8 @@ class EGCProjectDocumentRevision(Document):
 	def validate(self):
 		if not self.is_new():
 			document_control.assert_engine_authorized(self)
+		else:
+			document_control.assert_new_revision_allowed(self.document)
 
 		validators.validate_same_project(self, "document", "EGC Project Document", _("Document"))
 		validators.validate_unique_under_parent(self, "document", "revision", _("Revision"))

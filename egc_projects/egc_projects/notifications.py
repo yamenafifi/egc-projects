@@ -1,11 +1,13 @@
 """Submittal notifications (docs/ARCHITECTURE_V2.md §7).
 
 Ball-in-court delivery is `frappe.desk.form.assign_to` — see `submittal_control.py`'s
-`_assign_step`/`_close_step_assignment`. Assigning a ToDo already creates a `Notification Log`
-entry and surfaces the item in that user's assignment list for free, so it is not duplicated
-here. This module covers the remaining events the brief asks for: submission received, response
-recorded, revise & resubmit, new revision submitted, upcoming due date, overdue — all via the
-documented core helper `enqueue_create_notification`, never a parallel notification store.
+`_assign_step`/`_close_step_assignment`, and this module's own `_assign_task` below, which
+mirrors it for the submittal_manager/originator roles: submission received, response recorded,
+new revision submitted all create a real ToDo, not just a bell — a passive Notification Log
+alone is easy to miss and does not read as an actual task. Assigning a ToDo already creates a
+`Notification Log` entry for free, so `_assign_task` events are never ALSO passed through
+`_notify`. `send_due_date_reminders` is the one event-family left on plain `_notify` — an
+in-app-only reminder ping, not a new actionable task each time it fires.
 
 **Email** (`send_ball_in_court_email`/`send_directory_welcome_email` below) is a separate,
 additive channel on top of all of the above — the in-app Notification Log stays exactly as it
@@ -41,11 +43,32 @@ def _notify(users: list[str], doctype: str, name: str, subject: str, dedupe_on: 
 	)
 
 
+def _assign_task(users: list[str], doctype: str, name: str, description: str) -> None:
+	"""A real, actionable Frappe ToDo — not just a bell — mirroring `submittal_control.py`'s own
+	`_assign_step` (the proven ball-in-court pattern). `assign_to._add` already creates its own
+	Notification Log entry as a side effect, so callers never also pass the same event through
+	`_notify`. Each `submittal_control.py` call site already fires this once per genuine lifecycle
+	event (submit, response, new revision) — never in a retry loop — so no dedupe guard is needed
+	here the way `_notify`'s callers need `dedupe_on`."""
+	from frappe.desk.form.assign_to import _add as assign_add
+
+	for user in dict.fromkeys(u for u in users if u and u != "Administrator"):
+		assign_add(
+			{
+				"doctype": doctype,
+				"name": name,
+				"assign_to": [user],
+				"description": description,
+			},
+			ignore_permissions=True,
+		)
+
+
 def notify_submission_received(submission: str, submittal_manager: str | None) -> None:
 	if not submittal_manager:
 		return
 	label = frappe.db.get_value("EGC Submittal Revision", submission, "revision_label")
-	_notify(
+	_assign_task(
 		[submittal_manager],
 		"EGC Submittal Revision",
 		submission,
@@ -55,7 +78,7 @@ def notify_submission_received(submission: str, submittal_manager: str | None) -
 
 def notify_response_recorded(submission: str, response: str, notify_users: list[str]) -> None:
 	label = frappe.db.get_value("EGC Submittal Revision", submission, "revision_label")
-	_notify(
+	_assign_task(
 		notify_users,
 		"EGC Submittal Revision",
 		submission,
@@ -65,7 +88,7 @@ def notify_response_recorded(submission: str, response: str, notify_users: list[
 
 def notify_new_revision(submittal_name: str, new_submission: str, notify_users: list[str]) -> None:
 	label = frappe.db.get_value("EGC Submittal Revision", new_submission, "revision_label")
-	_notify(
+	_assign_task(
 		notify_users,
 		"EGC Submittal",
 		submittal_name,

@@ -103,3 +103,32 @@ class TestExternalViewer(IntegrationTestCase):
 		)
 		frappe.set_user(viewer)
 		self.assertFalse(frappe.has_permission("EGC Change Order", "read"))
+
+	def test_financial_fields_not_reachable_via_raw_field_read(self):
+		"""Regression for a real bypass: `hub.get_financials()`'s own `_require_financial_access()`
+		gate only protects that one whitelisted method — it does nothing to the underlying
+		`Project` fields themselves. Before `install.py.restrict_financial_field_permlevel()`,
+		every role with plain `read` on `Project` (which is every role a Hub account needs,
+		including `Projects User`) could read these same figures via a raw
+		`frappe.client.get_value`/REST call, completely bypassing the Hub's own gate.
+		`frappe.model.get_permitted_fields` is the exact function that field-filtering REST/report
+		access goes through, so it is a faithful proxy for "can this user read this field at all,
+		by any path" — not just whether one whitelisted method happens to check first."""
+		from frappe.model import get_permitted_fields
+
+		frappe.set_user(self.external_user)
+		fields = get_permitted_fields("Project", user=self.external_user, permission_type="read")
+		self.assertNotIn("total_billed_amount", fields)
+		self.assertNotIn("gross_margin", fields)
+		self.assertNotIn("total_purchase_cost", fields)
+
+	def test_financial_fields_reachable_by_a_financial_role(self):
+		manager = _get_or_create_user(
+			f"egc-pm-{frappe.generate_hash(length=6)}@example.com",
+			["Projects User", c.ROLE_PROJECT_MANAGER],
+		)
+		from frappe.model import get_permitted_fields
+
+		fields = get_permitted_fields("Project", user=manager, permission_type="read")
+		self.assertIn("total_billed_amount", fields)
+		self.assertIn("gross_margin", fields)

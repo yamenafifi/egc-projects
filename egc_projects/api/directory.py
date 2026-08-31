@@ -148,12 +148,35 @@ def grant_portal_access(project: str, row_name: str, role: str, email: str | Non
 
 @frappe.whitelist()
 def revoke_portal_access(project: str, user: str) -> None:
-	"""Removes the `User Permission` scoping `user` to `project` — leaves the `User` account
-	itself, and any roles it holds, untouched. A separate, more destructive "disable this
-	person's login entirely" action is out of scope here; this is specifically "they no longer
-	see THIS project," which is the Directory's own concern."""
+	"""Removes the `User Permission` scoping `user` to `project`. If that was their only
+	remaining `Project` scope, also strips every EGC role they hold.
+
+	This second step is not optional cleanup — it closes a real privilege-escalation hole.
+	Frappe's own `has_user_permission` returns `True` unconditionally for a user with ZERO
+	`User Permission` rows for a doctype (confirmed directly against `frappe/permissions.py`):
+	an EGC role was only ever safe to hold *because* a `User Permission` scoped it to one
+	Project. Removing their last scope while leaving the role behind would silently upgrade
+	them from "sees one project" to "sees every project" the moment this function runs — the
+	opposite of what "revoke" means. A user who still has a `User Permission` on another
+	Project keeps their roles untouched; only the fully-unscoped case strips them."""
 	validators.require_project_permission(project, "write")
 	remove_user_permission("Project", project, user, ignore_permissions=True)
+
+	if frappe.db.count("User Permission", {"user": user, "allow": "Project"}):
+		return
+
+	user_doc = frappe.get_doc("User", user)
+	existing_roles = {d.role: d for d in user_doc.get("roles")}
+	held_egc_roles = [existing_roles[role] for role in c.EGC_ROLES if role in existing_roles]
+	if not held_egc_roles:
+		return
+	for row in held_egc_roles:
+		user_doc.get("roles").remove(row)
+	# Not `remove_roles()` — it ends in a plain `self.save()` with no permission bypass, and a
+	# Project Manager revoking scoped Hub access has no reason to also independently need write
+	# permission on the core `User` doctype. Same reasoning `grant_portal_access` already
+	# documents for `append_roles`/explicit `ignore_permissions=True` above.
+	user_doc.save(ignore_permissions=True)
 
 
 @frappe.whitelist()

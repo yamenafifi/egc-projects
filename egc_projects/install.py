@@ -7,7 +7,7 @@ without a patch.
 
 import frappe
 
-from egc_projects.egc_projects.constants import EGC_ROLES
+from egc_projects.egc_projects.constants import EGC_ROLES, FINANCIAL_ROLES
 
 DISCIPLINES = (
 	("ARCH", "Architectural"),
@@ -109,6 +109,8 @@ def setup() -> None:
 	create_activity_completion_method_option()
 	trim_percent_complete_method_options()
 	hide_unused_project_fields()
+	restrict_financial_field_permlevel()
+	raise_project_attachment_limit()
 	frappe.db.commit()
 
 
@@ -306,6 +308,100 @@ def hide_unused_project_fields() -> None:
 		if current == "1":
 			continue
 		make_property_setter("Project", fieldname, "hidden", 1, "Check")
+
+
+#: `api/hub.py.get_financials()`'s own `_require_financial_access()` gates its custom Hub
+#: endpoint, but does nothing to the underlying `Project` fields themselves — every role with
+#: plain `read` on `Project` at permlevel 0 (which is every role a Hub account needs, including
+#: `Projects User`) can read the same figures directly off a raw `frappe.client.get_value`/REST
+#: call, bypassing the Hub gate entirely. Fixed the way ERPNext itself gates sensitive fields
+#: elsewhere: move these fields to a dedicated permlevel (Property Setter, not a core edit) and
+#: grant read at that level only to `FINANCIAL_ROLES` via `Custom DocPerm` — Frappe's own
+#: supported field-level-permission mechanism (`frappe.permissions.add_permission`).
+#:
+#: permlevel **3**, specifically — verified against the actual site, not assumed. permlevel 1 on
+#: `Project` already carries a PRE-EXISTING core grant: `Desk User` (a role effectively every
+#: desk account holds) has plain `read: 1` at permlevel 1, there for two unrelated core fields
+#: (`users`, `copied_from`). Permlevel access is granted per DOCTYPE+LEVEL, not per field — so an
+#: earlier version of this function that used permlevel 1 accidentally handed every desk user
+#: read access to these financial fields too, the exact bypass this function exists to close.
+#: Permlevel 2 is also already claimed, by `egc_hr` (`EGC Integration Agent`/`EGC HR Officer`/
+#: `EGC Payroll Administrator`) — reusing it would leak financial read to HR/payroll roles that
+#: have nothing to do with project financials. 3 was confirmed empty (`Custom DocPerm` query
+#: returned zero rows for it) before choosing it.
+_FINANCIAL_PROJECT_FIELDS = (
+	"total_billed_amount",
+	"total_purchase_cost",
+	"total_consumed_material_cost",
+	"total_costing_amount",
+	"total_billable_amount",
+	"total_sales_amount",
+	"estimated_costing",
+	"gross_margin",
+	"per_gross_margin",
+	# HRMS-added, not core ERPNext — same `has_field` guard `api/hub.py.get_financials()` already
+	# uses, since a site without HRMS installed doesn't have this field to restrict at all.
+	"total_expense_claim",
+)
+
+_FINANCIAL_FIELD_PERMLEVEL = 3
+
+
+def _undo_contaminated_permlevel_1_financial_grant() -> None:
+	"""One-time cleanup of a mistake made and caught the same day: an earlier version of
+	`restrict_financial_field_permlevel()` used permlevel 1, which (see that function's own
+	comment) already carries a pre-existing `Desk User` grant for unrelated fields and so didn't
+	actually restrict anything. This removes exactly the `Custom DocPerm` rows THIS app added at
+	permlevel 1 for `FINANCIAL_ROLES` — never `Desk User`'s own pre-existing row, which this app
+	does not own and must not touch."""
+	for role in FINANCIAL_ROLES:
+		name = frappe.db.get_value("Custom DocPerm", {"parent": "Project", "role": role, "permlevel": 1})
+		if name:
+			frappe.delete_doc("Custom DocPerm", name, ignore_permissions=True, force=True)
+
+
+def restrict_financial_field_permlevel() -> None:
+	from frappe.custom.doctype.property_setter.property_setter import make_property_setter
+	from frappe.permissions import add_permission
+
+	_undo_contaminated_permlevel_1_financial_grant()
+
+	meta = frappe.get_meta("Project")
+	for fieldname in _FINANCIAL_PROJECT_FIELDS:
+		if not meta.has_field(fieldname):
+			continue
+		current = frappe.db.get_value(
+			"Property Setter", {"doc_type": "Project", "field_name": fieldname, "property": "permlevel"}, "value"
+		)
+		if current != str(_FINANCIAL_FIELD_PERMLEVEL):
+			make_property_setter("Project", fieldname, "permlevel", _FINANCIAL_FIELD_PERMLEVEL, "Int")
+
+	for role in FINANCIAL_ROLES:
+		if frappe.db.exists(
+			"Custom DocPerm", {"parent": "Project", "role": role, "permlevel": _FINANCIAL_FIELD_PERMLEVEL, "read": 1}
+		):
+			continue
+		add_permission("Project", role, permlevel=_FINANCIAL_FIELD_PERMLEVEL, ptype="read")
+
+
+#: ERPNext core ships `Project.max_attachments = 4` (erpnext/projects/doctype/project/project.json)
+#: — a per-record cap on how many File rows may ever be attached directly to one Project doc
+#: (`frappe.core.doctype.file.file.File.validate_attachment_limit` counts every File ever attached
+#: to that Project across its whole history, not just what's currently visible). A construction
+#: project's Project Details tab accumulates far more than 4 files over its life — direct user
+#: instruction to raise it to effectively no ceiling.
+PROJECT_MAX_ATTACHMENTS = 10000
+
+
+def raise_project_attachment_limit() -> None:
+	from frappe.custom.doctype.property_setter.property_setter import make_property_setter
+
+	current = frappe.db.get_value(
+		"Property Setter", {"doc_type": "Project", "property": "max_attachments", "doctype_or_field": "DocType"}, "value"
+	)
+	if current == str(PROJECT_MAX_ATTACHMENTS):
+		return
+	make_property_setter("Project", None, "max_attachments", PROJECT_MAX_ATTACHMENTS, "Int", for_doctype=True)
 
 
 def create_roles() -> None:

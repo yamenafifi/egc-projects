@@ -98,6 +98,9 @@ class TestSubmittalWorkflow(IntegrationTestCase):
 		cls.manager_user = _get_or_create_user(
 			"egc-swf-manager@example.com", ["Projects User", c.ROLE_PROJECT_MANAGER]
 		)
+		cls.engineer_user = _get_or_create_user(
+			"egc-swf-engineer@example.com", ["Projects User", c.ROLE_PROJECT_ENGINEER]
+		)
 
 	def setUp(self):
 		self.project = _make_project(self.company)
@@ -487,6 +490,75 @@ class TestSubmittalWorkflow(IntegrationTestCase):
 		step.status = c.STEP_RESPONDED
 		with self.assertRaises(frappe.ValidationError):
 			step.save()
+
+	def test_engineer_cannot_self_assign_someone_elses_step(self):
+		"""Regression for a real hole: `EGC Submittal Review Step` used to grant `EGC Project
+		Engineer` blanket doctype-level `write: 1`, and `reviewer_user` is neither engine-guarded
+		(`assert_step_engine_authorized` only covers status/response/response_date/responded_by/
+		response_remarks/response_attachment) nor read_only. Combined with `record_step_response`
+		authorizing purely by identity ("are you `reviewer_user`"), an Engineer with no
+		relationship to a step could set `reviewer_user = themselves` and then pass that identity
+		check on any pending/in-review step on any project — completely undermining the
+		identity-based security model the rest of the step engine relies on. The fix removes the
+		doctype-level write grant; legitimate Engineer step management still goes through
+		`add_review_step`/`apply_workflow_template`, which authorize on `EGC Submittal Revision`
+		write instead."""
+		submittal, submission, steps = self._build_submission_with_two_stage_workflow()
+		step_name = steps[0].name
+		self.assertNotEqual(
+			frappe.db.get_value("EGC Submittal Review Step", step_name, "reviewer_user"), self.engineer_user
+		)
+
+		frappe.set_user(self.engineer_user)
+		step = frappe.get_doc("EGC Submittal Review Step", step_name)
+		step.reviewer_user = self.engineer_user
+		with self.assertRaises(frappe.PermissionError):
+			step.save()
+
+	def test_engineer_can_originate_and_submit_a_submittal(self):
+		"""Regression for the flip side of the security fix above: EGC Project Engineer used to
+		be read-only on EGC Submittal/EGC Submittal Revision, silently breaking the Hub's own
+		"+ New Submittal" button for that role (`SubmittalsTab.vue`'s own `canWrite` gate already
+		shows it to Engineers) and contradicting the build brief's own workflow example, which
+		puts the Project Engineer first as the originator. Engineer now has create/write
+		(Submittal) and create/write/submit (Submittal Revision) — verified end to end through
+		the real api/submittals.py functions, not just a doctype has_permission check."""
+		from egc_projects.api import submittals as submittals_api
+
+		doc = self._make_document("DOC-ENGCREATE-1")
+		rev = self._make_issued_revision(doc.name, "00")
+
+		frappe.set_user(self.engineer_user)
+		result = submittals_api.create_submittal(
+			self.project,
+			submittal_number="SUB-ENGCREATE-1",
+			title="Engineer Originated",
+			submittal_type=self.submittal_type,
+			discipline=self.discipline,
+		)
+		submission = submittals_api.create_first_submission(result["name"])["name"]
+		submittals_api.add_submission_document(submission, rev.name)
+		submittals_api.submit_submission(submission)
+
+		self.assertEqual(
+			frappe.db.get_value("EGC Submittal Revision", submission, "submission_status"), c.SUBMISSION_SUBMITTED
+		)
+
+	def test_direct_save_cannot_bypass_cross_submittal_exclusivity(self):
+		"""The "one document revision under review through only one submittal at a time" rule
+		used to live only in `api/submittals.py.add_submission_document()` — a raw
+		`doc.append(...); doc.insert()`/`.save()` bypassed it entirely. It now lives in
+		`EGCSubmittalRevision._validate_documents()` itself, so it fires on every save path,
+		exactly like `_make_draft_submission()` here (a raw insert, not the whitelisted
+		endpoint)."""
+		doc = self._make_document("DOC-EXCL-1")
+		rev = self._make_issued_revision(doc.name, "00")
+		submittal_a = self._make_submittal("SUB-EXCL-A")
+		self._make_draft_submission(submittal_a.name, "00", [rev.name])
+
+		submittal_b = self._make_submittal("SUB-EXCL-B")
+		with self.assertRaises(frappe.ValidationError):
+			self._make_draft_submission(submittal_b.name, "00", [rev.name])
 
 	# -- v1 backward compatibility (no steps at all) -----------------------------------------
 

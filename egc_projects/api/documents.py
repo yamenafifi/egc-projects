@@ -14,7 +14,7 @@ from __future__ import annotations
 import frappe
 from frappe import _
 
-from egc_projects.egc_projects import relationships, validators
+from egc_projects.egc_projects import constants as c, relationships, validators
 from egc_projects.egc_projects.doctype.egc_project_document import egc_project_document
 
 
@@ -58,6 +58,7 @@ _DOCUMENT_LIST_FIELDS = (
 	"title",
 	"document_type",
 	"discipline",
+	"current_revision",
 	"current_revision_label",
 	"document_status",
 	"approval_status",
@@ -85,12 +86,85 @@ def get_documents(project: str, filters=None) -> list[dict]:
 	query_filters = _validated_filters(filters, _DOCUMENT_FILTER_FIELDS)
 	query_filters["project"] = project
 
-	return frappe.get_all(
+	rows = frappe.get_all(
 		"EGC Project Document",
 		filters=query_filters,
 		fields=list(_DOCUMENT_LIST_FIELDS),
 		order_by="document_number asc",
 	)
+	governing = _governing_submittal_info(rows)
+	for row in rows:
+		info = governing.get(row.document)
+		row["governing_submittal"] = info.submittal_number if info else None
+		row["ball_in_court"] = info.ball_in_court if info else None
+		row["submittal_due_date"] = info.current_due_date if info else None
+	return rows
+
+
+def _governing_submittal_info(document_rows: list[dict]) -> dict[str, frappe._dict]:
+	"""Batched (one round trip regardless of row count, mirroring `api/hub.py.get_activities()`'s
+	`_wbs_labels()` pattern): for every document row with a current revision, the Submittal that
+	currently governs its approval status — same "latest non-cancelled submission carrying this
+	revision" rule as `submittal_control.get_governing_response_for_revision()`, extended to
+	return which Submittal it is (not just its response), so the register can show inline who
+	owes the next action without a second round trip per row. Three simple queries rather than
+	one join-and-project query — Frappe's `get_all` field-selection-from-a-joined-child-table
+	syntax is finicky to get right; three plain queries stay obviously correct.
+	"""
+	revision_to_document = {row.current_revision: row.document for row in document_rows if row.get("current_revision")}
+	if not revision_to_document:
+		return {}
+	if not frappe.db.table_exists("EGC Submittal Revision") or not frappe.db.table_exists("EGC Submittal Document Item"):
+		return {}
+
+	item_rows = frappe.get_all(
+		"EGC Submittal Document Item",
+		filters={"document_revision": ("in", list(revision_to_document))},
+		fields=["document_revision", "parent as submission"],
+	)
+	if not item_rows:
+		return {}
+
+	submission_rows = frappe.get_all(
+		"EGC Submittal Revision",
+		filters={
+			"name": ("in", [r.submission for r in item_rows]),
+			"docstatus": 1,
+			"submission_status": ("!=", c.SUBMISSION_CANCELLED),
+		},
+		fields=["name", "submittal", "submission_seq"],
+	)
+	submission_by_name = {r.name: r for r in submission_rows}
+
+	# Latest (highest submission_seq) non-cancelled submission per document_revision — same
+	# "anti-conflict" rule document_control.get_approval_status() applies.
+	governing_submittal_by_revision = {}
+	for item in item_rows:
+		submission = submission_by_name.get(item.submission)
+		if not submission:
+			continue
+		current = governing_submittal_by_revision.get(item.document_revision)
+		if not current or submission.submission_seq > current.submission_seq:
+			governing_submittal_by_revision[item.document_revision] = submission
+
+	submittal_names = {s.submittal for s in governing_submittal_by_revision.values()}
+	if not submittal_names:
+		return {}
+	submittals = {
+		s.name: s
+		for s in frappe.get_all(
+			"EGC Submittal",
+			filters={"name": ("in", list(submittal_names))},
+			fields=["name", "submittal_number", "ball_in_court", "current_due_date"],
+		)
+	}
+
+	result = {}
+	for revision, document_name in revision_to_document.items():
+		submission = governing_submittal_by_revision.get(revision)
+		if submission and submission.submittal in submittals:
+			result[document_name] = submittals[submission.submittal]
+	return result
 
 
 @frappe.whitelist()
@@ -167,6 +241,13 @@ def _related_submittals(document: str) -> list[dict]:
 			"response",
 			"date_submitted",
 			"due_date",
+			# Real Datetimes (unlike date_submitted/due_date, Date-only) — `creation` anchors the
+			# "submitted for review" timeline event, `modified` is the best available proxy for
+			# "when the response was recorded" (this endpoint doesn't join into the step engine),
+			# needed so DocumentDetail.vue's unified timeline can interleave these against
+			# revision events and comments in real chronological order.
+			"creation",
+			"modified",
 		],
 		order_by="submission_seq desc",
 	)
@@ -178,7 +259,7 @@ def _related_submittals(document: str) -> list[dict]:
 		for row in frappe.get_all(
 			"EGC Submittal",
 			filters={"name": ("in", list({row.submittal for row in submission_rows}))},
-			fields=["name", "submittal_number", "title", "submittal_status"],
+			fields=["name", "submittal_number", "title", "submittal_status", "ball_in_court"],
 		)
 	}
 
@@ -193,12 +274,15 @@ def _related_submittals(document: str) -> list[dict]:
 				"submittal_number": submittal.submittal_number,
 				"submittal_title": submittal.title,
 				"submittal_status": submittal.submittal_status,
+				"ball_in_court": submittal.ball_in_court,
 				"submittal_revision": row.name,
 				"revision_label": row.revision_label,
 				"submission_status": row.submission_status,
 				"response": row.response,
 				"date_submitted": row.date_submitted,
 				"due_date": row.due_date,
+				"creation": row.creation,
+				"modified": row.modified,
 			}
 		)
 	return result
@@ -279,6 +363,7 @@ _REVISION_FIELDS = (
 	"revision",
 	"revision_seq",
 	"file",
+	"native_file",
 	"revision_date",
 	"issue_date",
 	"revision_status",
@@ -299,6 +384,7 @@ def create_document_revision(
 	document: str,
 	revision: str,
 	file: str,
+	native_file: str | None = None,
 	revision_date: str | None = None,
 	reason_for_revision: str | None = None,
 	remarks: str | None = None,
@@ -308,6 +394,13 @@ def create_document_revision(
 
 	Mirrors the existing "New Revision" flow already on the native `EGC Project Document
 	Revision` form; this is the same capability surfaced inside the Hub, not a new semantics.
+
+	`native_file` is the paired authoring file for a Drawing (e.g. a .dwg alongside `file`'s
+	.pdf) — same revision, two attachments, per direct user request. Meaningless for a
+	non-drawing document; the Hub only ever shows the field when the document's type is a
+	drawing type, but nothing here enforces that server-side since a non-drawing document
+	genuinely having a native CAD source file too is a harmless, plausible edge case, not a
+	violation of any invariant.
 	"""
 	if not document or not frappe.db.exists("EGC Project Document", document):
 		frappe.throw(_("Document {0} not found.").format(document), exc=frappe.DoesNotExistError)
@@ -321,6 +414,7 @@ def create_document_revision(
 		"document": document,
 		"revision": revision,
 		"file": file,
+		"native_file": native_file,
 		"reason_for_revision": reason_for_revision,
 		"remarks": remarks,
 	}

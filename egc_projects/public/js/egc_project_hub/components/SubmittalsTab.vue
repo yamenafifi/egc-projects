@@ -1,10 +1,10 @@
 <script setup>
 import { computed, ref, watch, onMounted } from "vue";
 import { get_submittals } from "../api";
-import { create_submittal } from "./submittals_api";
-import { get_person_info } from "./project_profile_api";
+import { openSubmitForReviewFlow } from "./submit_for_review_flow";
 import { useHubResource } from "../composables/useHubResource";
 import { consumeOverdueIntent } from "../composables/useOverdueIntent";
+import { consumeOpenSubmittalIntent } from "../composables/useOpenSubmittalIntent";
 import LoadingState from "./LoadingState.vue";
 import ErrorState from "./ErrorState.vue";
 import EmptyState from "./EmptyState.vue";
@@ -40,6 +40,10 @@ const overdue_only = ref(false);
 
 onMounted(() => {
 	if (consumeOverdueIntent("submittals")) overdue_only.value = true;
+	// Cross-nav from DocumentDetail.vue's "Related Submittals" — open straight into this specific
+	// submittal's full-page detail instead of just landing on the unfiltered register.
+	const open_submittal_intent = consumeOpenSubmittalIntent();
+	if (open_submittal_intent) open_detail(open_submittal_intent);
 });
 
 const statuses = computed(() =>
@@ -59,71 +63,16 @@ const filtered = computed(() => {
 });
 
 function open_create_dialog() {
-	const dialog = new frappe.ui.Dialog({
-		title: __("New Submittal"),
-		fields: [
-			{ fieldname: "submittal_number", fieldtype: "Data", label: __("Submittal Number"), reqd: 1 },
-			{ fieldname: "title", fieldtype: "Data", label: __("Title"), reqd: 1 },
-			{
-				fieldname: "submittal_type",
-				fieldtype: "Link",
-				label: __("Submittal Type"),
-				options: "EGC Submittal Type",
-				reqd: 1,
-			},
-			{ fieldname: "discipline", fieldtype: "Link", label: __("Discipline"), options: "EGC Discipline" },
-			{
-				fieldname: "wbs_node",
-				fieldtype: "Link",
-				label: __("WBS Node"),
-				options: "EGC WBS Node",
-				get_query: () => ({ filters: { project: props.project } }),
-			},
-			{
-				fieldname: "responsible_organization",
-				fieldtype: "Link",
-				label: __("Responsible Organization"),
-				options: "Customer",
-				description: __("Pick a Project Directory entry, or leave blank and type a one-off party below."),
-				onchange: async function () {
-					const customer = this.value;
-					if (!customer) return;
-					const customer_name = await frappe.db.get_value("Customer", customer, "customer_name").then((r) => r.message.customer_name).catch(() => null);
-					if (customer_name) dialog.set_value("responsible_party", customer_name);
-				},
-			},
-			{ fieldname: "responsible_party", fieldtype: "Data", label: __("Responsible Party") },
-			{
-				fieldname: "received_from_person",
-				fieldtype: "Link",
-				label: __("Received From (Person)"),
-				options: "User",
-				description: __("Pick a Project Directory entry, or leave blank and type a one-off party below."),
-				onchange: async function () {
-					const person = this.value;
-					if (!person) return;
-					const info = await get_person_info(person).catch(() => null);
-					if (info && info.party_name) dialog.set_value("received_from", info.party_name);
-				},
-			},
-			{ fieldname: "received_from", fieldtype: "Data", label: __("Received From") },
-			{ fieldname: "submittal_manager", fieldtype: "Link", label: __("Submittal Manager"), options: "User" },
-			{ fieldname: "description", fieldtype: "Small Text", label: __("Description") },
-		],
-		primary_action_label: __("Create"),
-		primary_action(values) {
-			create_submittal(props.project, values)
-				.then((result) => {
-					dialog.hide();
-					reload();
-					open_detail(result.name);
-				})
-				.catch((e) => {
-					frappe.msgprint({ title: __("Could Not Create Submittal"), message: e.message, indicator: "red" });
-				});
+	// Same shared flow DocumentDetail.vue's "Submit for Review" uses — creating a Submittal
+	// always includes picking the document(s) it's about and setting up its review, never a
+	// bare identity-only record (docs/ARCHITECTURE_V2.md's Documents/Submittals redesign).
+	openSubmitForReviewFlow({
+		project: props.project,
+		onCreated(name) {
+			reload();
+			open_detail(name);
 		},
 	});
-	dialog.show();
 }
 
 function on_detail_changed() {
