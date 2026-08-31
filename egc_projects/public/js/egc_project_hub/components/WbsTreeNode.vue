@@ -17,7 +17,7 @@ const props = defineProps({
 	siblingCount: { type: Number, default: 1 },
 	siblingIndex: { type: Number, default: 0 },
 });
-const emit = defineEmits(["move", "quick-add", "edit"]);
+const emit = defineEmits(["move", "quick-add", "edit", "view"]);
 
 const expanded = ref(props.depth < 1);
 
@@ -25,8 +25,8 @@ const children = computed(() => props.childrenByParent[props.node.name] || []);
 const has_children = computed(() => children.value.length > 0);
 const summary = computed(() => props.summaryByName[props.node.name] || null);
 
-// Deliberate escape hatch for the "⋯" menu only — the code label itself opens the in-Hub Edit
-// dialog (below), staying inside the Project Manager; this is for a System Manager/power user who
+// Deliberate escape hatch for the "⋯" menu only — the code label itself opens the in-Hub detail
+// drawer (below), staying inside the Project Manager; this is for a System Manager/power user who
 // specifically wants the raw native form.
 function open_form() {
 	frappe.set_route("Form", "EGC WBS Node", props.node.name);
@@ -71,8 +71,12 @@ onBeforeUnmount(() => document.removeEventListener("click", on_document_click));
 			>
 				<template v-if="has_children">{{ expanded ? "▾" : "▸" }}</template>
 			</span>
-			<span class="wbs-node__code hub-link" @click="canWrite ? emit('edit', node) : open_form()">{{ node.wbs_code }}</span>
-			<span class="wbs-node__name">{{ node.wbs_name }}</span>
+			<span class="wbs-node__code hub-link" @click="emit('view', node)">{{ node.wbs_code }}</span>
+			<span
+				class="wbs-node__name hub-link"
+				:title="node.description || ''"
+				@click="emit('view', node)"
+			>{{ node.wbs_name }}</span>
 			<span class="wbs-node__discipline">{{ node.discipline || "—" }}</span>
 
 			<span v-if="summary" class="wbs-node__metric">
@@ -143,6 +147,7 @@ onBeforeUnmount(() => document.removeEventListener("click", on_document_click));
 				@move="(...args) => emit('move', ...args)"
 				@quick-add="(...args) => emit('quick-add', ...args)"
 				@edit="(...args) => emit('edit', ...args)"
+				@view="(...args) => emit('view', ...args)"
 			/>
 		</div>
 	</div>

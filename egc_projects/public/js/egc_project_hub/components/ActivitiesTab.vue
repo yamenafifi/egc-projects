@@ -4,7 +4,9 @@ import { get_activities } from "../api";
 import { create_activity as create_activity_record, create_child_activity } from "./activities_api";
 import { useHubResource } from "../composables/useHubResource";
 import { useHubRoute } from "../composables/useHubRoute";
-import { openExportDialog, openImportDialog } from "./bulk_transfer_flow";
+import { openExportDialog, openImportDialog, confirmBulkDelete } from "./bulk_transfer_flow";
+import { useRowSelection } from "../composables/useRowSelection";
+import BulkActionsBar from "./BulkActionsBar.vue";
 import { consumeOverdueIntent } from "../composables/useOverdueIntent";
 import { consumeOpenActivityIntent } from "../composables/useOpenActivityIntent";
 import LoadingState from "./LoadingState.vue";
@@ -108,7 +110,7 @@ onMounted(() => {
 });
 
 // Toggle column + the 12 data columns, + 1 more when the trailing "+" quick-add column is shown.
-const column_count = computed(() => 13 + (can_write.value ? 1 : 0));
+const column_count = computed(() => 14 + (can_write.value ? 1 : 0));
 
 const statuses = computed(() => [...new Set((data.value || []).map((r) => r.status).filter(Boolean))].sort());
 const disciplines = computed(() =>
@@ -125,6 +127,31 @@ const filtered = computed(() => {
 		return true;
 	});
 });
+
+const { selected, selected_count, all_selected, some_selected, is_selected, toggle, toggle_all, clear } =
+	useRowSelection(filtered);
+
+function open_bulk_export() {
+	openExportDialog({
+		project: props.project,
+		doctype: "EGC Activity",
+		label: __("Activities"),
+		selectedNames: [...selected.value],
+	});
+}
+
+function open_bulk_delete() {
+	confirmBulkDelete({
+		project: props.project,
+		doctype: "EGC Activity",
+		label: __("Activities"),
+		selectedNames: [...selected.value],
+		onDeleted: () => {
+			clear();
+			reload();
+		},
+	});
+}
 
 function create_activity() {
 	// Root-level creation — same in-Hub dialog as the per-row "+" quick-add (open_quick_add
@@ -289,6 +316,15 @@ function open_quick_add(row) {
 				</button>
 			</div>
 
+			<BulkActionsBar
+				v-if="active_view === 'Table' && selected_count"
+				:selected-count="selected_count"
+				:can-delete="can_write"
+				@export="open_bulk_export"
+				@delete="open_bulk_delete"
+				@clear="clear"
+			/>
+
 			<ActivityGanttView v-if="active_view === 'Gantt'" :project="project" @open-activity="open_detail" />
 
 			<ActivityOutlineView
@@ -303,6 +339,15 @@ function open_quick_add(row) {
 				<table class="hub-table">
 					<thead>
 						<tr>
+							<th class="hub-table__check-col">
+								<input
+									type="checkbox"
+									:checked="all_selected"
+									:ref="(el) => el && (el.indeterminate = some_selected)"
+									:title="__('Select all')"
+									@click.stop="toggle_all"
+								/>
+							</th>
 							<th class="hub-activities__toggle-col"></th>
 							<th>{{ __("Code") }}</th>
 							<th>{{ __("Name") }}</th>
@@ -322,6 +367,9 @@ function open_quick_add(row) {
 					<tbody>
 						<template v-for="row in filtered" :key="row.name">
 							<tr class="hub-table__row--clickable" @click="toggle_expand(row.name)">
+								<td class="hub-table__check-col" @click.stop>
+									<input type="checkbox" :checked="is_selected(row)" @change="toggle(row)" />
+								</td>
 								<td class="hub-activities__toggle-col">
 									<button
 										type="button"

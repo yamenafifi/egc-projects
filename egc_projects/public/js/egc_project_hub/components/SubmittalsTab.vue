@@ -2,7 +2,9 @@
 import { computed, ref, watch, onMounted } from "vue";
 import { get_submittals } from "../api";
 import { openSubmitForReviewFlow } from "./submit_for_review_flow";
-import { openExportDialog, openImportDialog } from "./bulk_transfer_flow";
+import { openExportDialog, openImportDialog, confirmBulkDelete } from "./bulk_transfer_flow";
+import { useRowSelection } from "../composables/useRowSelection";
+import BulkActionsBar from "./BulkActionsBar.vue";
 import { useHubResource } from "../composables/useHubResource";
 import { consumeOverdueIntent } from "../composables/useOverdueIntent";
 import { consumeOpenSubmittalIntent } from "../composables/useOpenSubmittalIntent";
@@ -62,6 +64,39 @@ const filtered = computed(() => {
 		return true;
 	});
 });
+
+const {
+	selected: selected_rows,
+	selected_count,
+	all_selected,
+	some_selected,
+	is_selected,
+	toggle,
+	toggle_all,
+	clear,
+} = useRowSelection(filtered);
+
+function open_bulk_export() {
+	openExportDialog({
+		project: props.project,
+		doctype: "EGC Submittal",
+		label: __("Submittals"),
+		selectedNames: [...selected_rows.value],
+	});
+}
+
+function open_bulk_delete() {
+	confirmBulkDelete({
+		project: props.project,
+		doctype: "EGC Submittal",
+		label: __("Submittals"),
+		selectedNames: [...selected_rows.value],
+		onDeleted: () => {
+			clear();
+			reload();
+		},
+	});
+}
 
 function open_create_dialog() {
 	// Same shared flow DocumentDetail.vue's "Submit for Review" uses — creating a Submittal
@@ -155,11 +190,29 @@ function days_overdue(row) {
 				</button>
 			</div>
 
+			<BulkActionsBar
+				v-if="selected_count"
+				:selected-count="selected_count"
+				:can-delete="can_write"
+				@export="open_bulk_export"
+				@delete="open_bulk_delete"
+				@clear="clear"
+			/>
+
 			<EmptyState v-if="!filtered.length" :title="__('No submittals match these filters')" />
 			<div v-else class="hub-table-wrap">
 				<table class="hub-table">
 					<thead>
 						<tr>
+							<th class="hub-table__check-col">
+								<input
+									type="checkbox"
+									:checked="all_selected"
+									:ref="(el) => el && (el.indeterminate = some_selected)"
+									:title="__('Select all')"
+									@click.stop="toggle_all"
+								/>
+							</th>
 							<th>{{ __("Submittal No") }}</th>
 							<th>{{ __("Title") }}</th>
 							<th>{{ __("Type") }}</th>
@@ -178,6 +231,9 @@ function days_overdue(row) {
 							class="hub-table__row--clickable"
 							@click="open_detail(row.name)"
 						>
+							<td class="hub-table__check-col" @click.stop>
+								<input type="checkbox" :checked="is_selected(row)" @change="toggle(row)" />
+							</td>
 							<td>{{ row.submittal_number }}</td>
 							<td class="hub-table__truncate" :title="row.title">{{ row.title }}</td>
 							<td>{{ row.submittal_type || "—" }}</td>

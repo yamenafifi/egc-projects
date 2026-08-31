@@ -46,13 +46,32 @@ def _assert_allowed(doctype: str) -> None:
 		)
 
 
+def _all_export_fields(doctype: str) -> dict:
+	"""Every field on `doctype`, in the shape `Exporter` expects — the same `{doctype: [...]}`
+	map Frappe's own "Download Template" dialog builds from its "Select All" MultiCheck. Skipped
+	when calling `download_template` directly (not through that dialog): `Exporter.__init__`
+	unconditionally does `self.export_fields.items()`, so a missing/None `export_fields` is a hard
+	crash, not a "default to everything." None of this Hub's 4 export-enabled doctypes has a
+	Table field of its own, so a flat field list for just `doctype` is enough — Exporter's own
+	`get_exportable_fields` already drops anything non-exportable (Section Break, etc.)."""
+	meta = frappe.get_meta(doctype)
+	return {doctype: ["name", *(df.fieldname for df in meta.fields)]}
+
+
 # --- export / template -----------------------------------------------------------------------
 
 
 @frappe.whitelist()
-def get_export_template(project: str, doctype: str, file_type: str = "Excel", with_data: bool = True) -> None:
+def get_export_template(
+	project: str,
+	doctype: str,
+	file_type: str = "Excel",
+	with_data: bool = True,
+	names: list[str] | str | None = None,
+) -> None:
 	"""Downloads a template for `doctype`, scoped to `project` — the SAME file whether the caller
-	wants a blank template to fill in or the project's current rows to review/edit and re-import.
+	wants a blank template to fill in, the project's current rows to review/edit and re-import, or
+	(when `names` is given, from the Hub's own row-checkbox selection) just those specific rows.
 
 	Sets `frappe.response` directly and returns nothing: a real file download, via Frappe's own
 	hidden-form-POST convention (matching every Data Export/Import endpoint in core) — the caller
@@ -65,12 +84,54 @@ def get_export_template(project: str, doctype: str, file_type: str = "Excel", wi
 
 	from frappe.core.doctype.data_import.data_import import download_template
 
+	names = frappe.parse_json(names) if isinstance(names, str) else names
+	# `project` stays in the filter even for an explicit selection — a selection is always read
+	# off THIS project's own already-scoped table, but this keeps that invariant true regardless
+	# of how `names` was produced, the same "never trust the caller alone" discipline every other
+	# project-scoped filter in this module already follows.
+	export_filters = {"project": project, "name": ["in", names]} if names else {"project": project}
+
 	download_template(
 		doctype=doctype,
-		export_records="by_filter" if cint(with_data) else "blank_template",
-		export_filters=frappe.as_json({"project": project}),
+		export_fields=_all_export_fields(doctype),
+		export_records="by_filter" if (names or cint(with_data)) else "blank_template",
+		export_filters=frappe.as_json(export_filters),
 		file_type=file_type,
 	)
+
+
+@frappe.whitelist()
+def delete_records(project: str, doctype: str, names: list[str] | str) -> dict:
+	"""Bulk-deletes specific `doctype` rows — the Hub's own checkbox-select "Actions > Delete",
+	matching the Frappe List View's own select-all-then-bulk-delete convention. Each name is
+	verified to actually belong to `project` before deletion (same discipline as
+	`enforce_bulk_import_project`'s cross-project check on import): a crafted name list is never
+	trusted to already be scoped to the right project just because the UI it came from was.
+	"""
+	_assert_allowed(doctype)
+	validators.require_project_permission(project, "write")
+	frappe.has_permission(doctype, "delete", throw=True)
+
+	names = frappe.parse_json(names) if isinstance(names, str) else names
+	if not names:
+		frappe.throw(_("No records selected."), exc=frappe.ValidationError)
+
+	owned_names = set(
+		frappe.get_all(doctype, filters={"project": project, "name": ["in", names]}, pluck="name")
+	)
+
+	deleted, failures = [], []
+	for name in names:
+		if name not in owned_names:
+			failures.append({"name": name, "exception": _("Does not belong to this project.")})
+			continue
+		try:
+			frappe.delete_doc(doctype, name, ignore_permissions=True)
+			deleted.append(name)
+		except Exception as e:
+			failures.append({"name": name, "exception": str(e)})
+
+	return {"deleted_count": len(deleted), "failure_count": len(failures), "failures": failures}
 
 
 # --- import ------------------------------------------------------------------------------------

@@ -1,5 +1,5 @@
 <script setup>
-import { computed, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import {
 	get_wbs_summary,
 	reorder_wbs_nodes,
@@ -15,6 +15,7 @@ import LoadingState from "./LoadingState.vue";
 import ErrorState from "./ErrorState.vue";
 import EmptyState from "./EmptyState.vue";
 import WbsTreeNode from "./WbsTreeNode.vue";
+import WbsDetail from "./WbsDetail.vue";
 
 const props = defineProps({
 	project: { type: String, required: true },
@@ -49,6 +50,14 @@ const children_by_parent = computed(() => {
 
 const roots = computed(() => children_by_parent.value[""] || []);
 
+const selected_wbs_node = ref(null);
+function open_detail(node) {
+	selected_wbs_node.value = node.name;
+}
+function close_detail() {
+	selected_wbs_node.value = null;
+}
+
 function open_tree_view() {
 	frappe.set_route("Tree", "EGC WBS Node", { project: props.project });
 }
@@ -76,6 +85,7 @@ function create_root() {
 			{ fieldname: "wbs_name", fieldtype: "Data", label: __("WBS Name"), reqd: 1 },
 			{ fieldname: "is_group", fieldtype: "Check", label: __("Is Group") },
 			{ fieldname: "discipline", fieldtype: "Link", label: __("Discipline"), options: "EGC Discipline" },
+			{ fieldname: "description", fieldtype: "Small Text", label: __("Description") },
 		],
 		primary_action_label: __("Create"),
 		primary_action(values) {
@@ -121,6 +131,7 @@ function on_quick_add(node) {
 			{ fieldname: "wbs_name", fieldtype: "Data", label: __("WBS Name"), reqd: 1 },
 			{ fieldname: "is_group", fieldtype: "Check", label: __("Is Group") },
 			{ fieldname: "discipline", fieldtype: "Link", label: __("Discipline"), options: "EGC Discipline", default: node.discipline },
+			{ fieldname: "description", fieldtype: "Small Text", label: __("Description") },
 		],
 		primary_action_label: __("Create"),
 		primary_action(values) {
@@ -146,12 +157,18 @@ function on_edit(node) {
 	const dialog = new frappe.ui.Dialog({
 		title: __("Edit WBS Node"),
 		fields: [
+			{ fieldname: "wbs_code", fieldtype: "Data", label: __("WBS Code"), default: node.wbs_code, read_only: 1 },
+			{ fieldname: "column_break_edit_1", fieldtype: "Column Break" },
+			{ fieldname: "sequence", fieldtype: "Int", label: __("Sequence"), default: node.sequence },
 			{ fieldname: "wbs_name", fieldtype: "Data", label: __("WBS Name"), default: node.wbs_name, reqd: 1 },
 			{ fieldname: "discipline", fieldtype: "Link", label: __("Discipline"), options: "EGC Discipline", default: node.discipline },
+			{ fieldname: "column_break_edit_2", fieldtype: "Column Break" },
 			{ fieldname: "status", fieldtype: "Select", label: __("Status"), options: ["Active", "On Hold", "Completed", "Cancelled"], default: node.status },
+			{ fieldname: "description", fieldtype: "Small Text", label: __("Description"), default: node.description },
 		],
 		primary_action_label: __("Save"),
 		primary_action(values) {
+			delete values.wbs_code;
 			update_wbs_node(node.name, values)
 				.then(() => {
 					dialog.hide();
@@ -309,9 +326,20 @@ function open_bulk_dialog() {
 					@move="on_move"
 					@quick-add="on_quick_add"
 					@edit="on_edit"
+					@view="open_detail"
 				/>
 			</div>
 		</template>
+
+		<WbsDetail
+			v-if="selected_wbs_node && summary_by_name[selected_wbs_node]"
+			:node="summary_by_name[selected_wbs_node]"
+			:summary-by-name="summary_by_name"
+			:can-write="can_write"
+			@close="close_detail"
+			@edit="on_edit"
+			@quick-add="on_quick_add"
+		/>
 	</div>
 </template>
 

@@ -93,6 +93,15 @@ class TestWbsSummary(IntegrationTestCase):
 
 	# -- get_wbs_summary rollups -----------------------------------------------------------------
 
+	def test_summary_includes_description(self):
+		# Regression: `description` was fetched into the row query but never actually copied into
+		# the dict `get_wbs_summary` returns — every consumer (the WBS tab's tree tooltip, the Edit
+		# dialog's default, the detail drawer) silently got `undefined` regardless of what was
+		# actually saved on the record.
+		node = make_wbs_node(self.project, "MECH", description="Mechanical scope, per the BOQ.")
+		summary = {row["name"]: row for row in wbs.get_wbs_summary(self.project)}
+		self.assertEqual(summary[node.name]["description"], "Mechanical scope, per the BOQ.")
+
 	def test_summary_aggregates_across_whole_subtree(self):
 		mechanical, hvac = self._build_tree()
 		make_activity(

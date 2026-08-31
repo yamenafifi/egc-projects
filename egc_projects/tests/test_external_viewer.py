@@ -132,3 +132,30 @@ class TestExternalViewer(IntegrationTestCase):
 		fields = get_permitted_fields("Project", user=manager, permission_type="read")
 		self.assertIn("total_billed_amount", fields)
 		self.assertIn("gross_margin", fields)
+
+	def test_financial_fields_writable_by_a_financial_role(self):
+		# Regression: `restrict_financial_field_permlevel()` granted `read` at permlevel 3 but
+		# never `write` — a real bug a user actually hit ("estimated cost is greyed out, I can't
+		# change it"), since there is no Hub-native way to edit these fields either
+		# (`api/hub.py` only ever reads them). `get_permitted_fields` only proves read reachability
+		# (used above); write access needs `frappe.model.get_permitted_fields(..., "write")` — or,
+		# more directly, checking the field itself isn't `read_only` per `frappe.permissions`.
+		manager = _get_or_create_user(
+			f"egc-pm-write-{frappe.generate_hash(length=6)}@example.com",
+			["Projects User", c.ROLE_PROJECT_MANAGER],
+		)
+		from frappe.model import get_permitted_fields
+
+		fields = get_permitted_fields("Project", user=manager, permission_type="write")
+		self.assertIn("estimated_costing", fields)
+		self.assertIn("total_billed_amount", fields)
+
+	def test_financial_fields_not_writable_without_a_financial_role(self):
+		viewer = _get_or_create_user(
+			f"egc-piv-write-{frappe.generate_hash(length=6)}@example.com",
+			["Projects User", c.ROLE_PROJECT_VIEWER],
+		)
+		from frappe.model import get_permitted_fields
+
+		fields = get_permitted_fields("Project", user=viewer, permission_type="write")
+		self.assertNotIn("estimated_costing", fields)

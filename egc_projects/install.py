@@ -377,11 +377,22 @@ def restrict_financial_field_permlevel() -> None:
 			make_property_setter("Project", fieldname, "permlevel", _FINANCIAL_FIELD_PERMLEVEL, "Int")
 
 	for role in FINANCIAL_ROLES:
-		if frappe.db.exists(
-			"Custom DocPerm", {"parent": "Project", "role": role, "permlevel": _FINANCIAL_FIELD_PERMLEVEL, "read": 1}
-		):
-			continue
-		add_permission("Project", role, permlevel=_FINANCIAL_FIELD_PERMLEVEL, ptype="read")
+		existing = frappe.db.get_value(
+			"Custom DocPerm", {"parent": "Project", "role": role, "permlevel": _FINANCIAL_FIELD_PERMLEVEL}
+		)
+		if not existing:
+			existing = add_permission("Project", role, permlevel=_FINANCIAL_FIELD_PERMLEVEL, ptype="read")
+		# `add_permission` only ever sets ONE ptype per call, and (this matters on a site that's
+		# already run an earlier version of this function once) silently no-ops the moment a
+		# Custom DocPerm row for this (doctype, role, permlevel) already exists at all — a second
+		# `add_permission(..., ptype="write")` call would never actually reach the row. Read-only
+		# was never the intent here: without `write` too, nobody (not even a financial role) can
+		# ever edit `estimated_costing` and friends through the native Project form again, since no
+		# Hub-native replacement for editing them exists (`api/hub.py` only ever reads these
+		# fields) — a real regression a user actually hit, caught only by hand, not by the existing
+		# tests (which only ever asserted read reachability).
+		if not frappe.db.get_value("Custom DocPerm", existing, "write"):
+			frappe.db.set_value("Custom DocPerm", existing, "write", 1)
 
 
 #: ERPNext core ships `Project.max_attachments = 4` (erpnext/projects/doctype/project/project.json)

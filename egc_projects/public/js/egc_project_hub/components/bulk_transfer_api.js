@@ -23,13 +23,14 @@ function call(method, args) {
 	});
 }
 
-export function download_export_template(project, doctype, file_type, with_data) {
+export function download_export_template(project, doctype, file_type, with_data, names) {
 	open_url_post("/", {
 		cmd: `${BULK_TRANSFER_MODULE}.get_export_template`,
 		project,
 		doctype,
 		file_type,
 		with_data: with_data ? 1 : 0,
+		...(names && names.length ? { names: JSON.stringify(names) } : {}),
 	});
 }
 
@@ -41,4 +42,8 @@ export function import_records(project, doctype, file_url, update_existing, send
 		update_existing: update_existing ? 1 : 0,
 		send_email: send_email ? 1 : 0,
 	});
+}
+
+export function delete_records(project, doctype, names) {
+	return call("delete_records", { project, doctype, names: JSON.stringify(names) });
 }

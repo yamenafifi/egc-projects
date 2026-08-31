@@ -36,6 +36,7 @@ _NODE_FIELDS = (
 	"sequence",
 	"status",
 	"discipline",
+	"description",
 	"lft",
 	"rgt",
 )
@@ -155,6 +156,7 @@ def get_wbs_summary(project: str) -> list[dict]:
 				"sequence": node.sequence,
 				"status": node.status,
 				"discipline": node.discipline,
+				"description": node.description,
 				"activity_total": bucket["activity_total"],
 				"activity_completed": bucket["activity_completed"],
 				"activity_progress": (
@@ -217,7 +219,7 @@ def reorder_wbs_nodes(parent: str | None, ordered_names) -> None:
 
 # --- create_child_wbs_node ----------------------------------------------------------------------
 
-_CHILD_CREATE_FIELDS = ("wbs_code", "wbs_name", "is_group", "discipline")
+_CHILD_CREATE_FIELDS = ("wbs_code", "wbs_name", "is_group", "discipline", "description")
 
 
 @frappe.whitelist()

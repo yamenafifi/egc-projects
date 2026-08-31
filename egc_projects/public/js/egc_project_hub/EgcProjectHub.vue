@@ -230,6 +230,13 @@ watch(context, (ctx) => {
 	text-overflow: ellipsis;
 }
 
+/* Row-checkbox column — same fixed-width, no-wrap treatment in every table that has one. */
+.hub-table__check-col {
+	width: 34px;
+	padding-left: 14px !important;
+	padding-right: 0 !important;
+}
+
 /* Toolbar shared by filterable tabs */
 .hub-toolbar {
 	display: flex;

@@ -87,10 +87,87 @@ class TestBulkTransfer(IntegrationTestCase):
 		with self.assertRaises(frappe.PermissionError):
 			bulk_transfer.import_records(self.project, "EGC Activity", "/files/whatever.csv")
 
+	# -- real export (Frappe's own Exporter, not mocked) ----------------------------------------
+	#
+	# Regression coverage for a real bug that reached production: `download_template` requires an
+	# explicit `export_fields` map — `Exporter.__init__` unconditionally does
+	# `self.export_fields.items()`, so a missing one is `AttributeError: 'NoneType' object has no
+	# attribute 'items'`, not "export everything" (see `_all_export_fields`'s docstring). Every
+	# permission test above mocks past this call entirely, so it slipped through untested; these
+	# don't mock anything — they must produce real file bytes for every export-enabled doctype.
+
+	def test_export_produces_real_file_content_for_every_doctype(self):
+		frappe.set_user(self.manager_user)
+		for doctype in bulk_transfer.ALLOWED_TRANSFER_DOCTYPES:
+			with self.subTest(doctype=doctype):
+				frappe.local.response = frappe._dict()
+				bulk_transfer.get_export_template(self.project, doctype, "Excel", True)
+				self.assertEqual(frappe.response.get("type"), "binary")
+				self.assertTrue(frappe.response.get("filecontent"))
+
+	def test_export_blank_template_produces_real_csv_content(self):
+		frappe.set_user(self.manager_user)
+		frappe.local.response = frappe._dict()
+		bulk_transfer.get_export_template(self.project, "EGC Activity", "CSV", False)
+		self.assertEqual(frappe.response.get("type"), "csv")
+		self.assertIn("Activity Code", frappe.response.get("result"))
+
 	def test_export_denied_when_user_is_fenced_out_of_the_project(self):
 		frappe.set_user(self.project_denied_user)
 		with self.assertRaises(frappe.PermissionError):
 			bulk_transfer.get_export_template(self.project, "EGC Activity")
+
+	def test_export_with_explicit_names_only_includes_those_rows(self):
+		frappe.set_user(self.manager_user)
+		kept = _make_activity(self.project, "BULK-EXPORT-KEEP")
+		_make_activity(self.project, "BULK-EXPORT-DROP")
+
+		frappe.local.response = frappe._dict()
+		bulk_transfer.get_export_template(self.project, "EGC Activity", "CSV", names=[kept])
+		rows = frappe.response["result"].splitlines()[1:]
+		self.assertEqual(len(rows), 1)
+		self.assertIn(kept, rows[0])
+
+	# -- delete_records -------------------------------------------------------------------------
+
+	def test_delete_records_removes_the_rows(self):
+		frappe.set_user(self.manager_user)
+		a = _make_activity(self.project, "BULK-DEL-A")
+		b = _make_activity(self.project, "BULK-DEL-B")
+
+		result = bulk_transfer.delete_records(self.project, "EGC Activity", [a, b])
+
+		self.assertEqual(result["deleted_count"], 2)
+		self.assertEqual(result["failure_count"], 0)
+		self.assertFalse(frappe.db.exists("EGC Activity", a))
+		self.assertFalse(frappe.db.exists("EGC Activity", b))
+
+	def test_delete_records_rejects_a_row_from_a_different_project(self):
+		frappe.set_user(self.manager_user)
+		other_project = _make_project(self.company)
+		foreign = _make_activity(other_project, "BULK-DEL-FOREIGN")
+
+		result = bulk_transfer.delete_records(self.project, "EGC Activity", [foreign])
+
+		self.assertEqual(result["deleted_count"], 0)
+		self.assertEqual(result["failure_count"], 1)
+		self.assertTrue(frappe.db.exists("EGC Activity", foreign))
+
+	def test_delete_records_denied_without_delete_permission(self):
+		# EGC Project Viewer has no delete permission on EGC Activity at all.
+		frappe.set_user(self.doctype_denied_user)
+		activity = _make_activity(self.project, "BULK-DEL-DENIED")
+		with self.assertRaises(frappe.PermissionError):
+			bulk_transfer.delete_records(self.project, "EGC Activity", [activity])
+
+	def test_delete_records_denied_when_fenced_out_of_the_project(self):
+		frappe.set_user(self.project_denied_user)
+		with self.assertRaises(frappe.PermissionError):
+			bulk_transfer.delete_records(self.project, "EGC Activity", ["whatever"])
+
+	def test_delete_records_rejects_disallowed_doctype(self):
+		with self.assertRaises(frappe.ValidationError):
+			bulk_transfer.delete_records(self.project, "Project", [self.project])
 
 	# -- permission gating: doctype scope --------------------------------------------------------
 
@@ -244,6 +321,37 @@ class TestBulkTransfer(IntegrationTestCase):
 			frappe.flags[bulk_transfer.BULK_IMPORT_PROJECT_FLAG] = None
 
 		self.assertEqual(frappe.db.get_value("EGC Activity", doc.name, "project"), self.project)
+
+	# -- full round-trip: real export -> real file -> real Importer, nothing mocked -------------
+
+	def test_export_then_import_round_trip_creates_a_real_record(self):
+		frappe.set_user(self.manager_user)
+
+		frappe.local.response = frappe._dict()
+		bulk_transfer.get_export_template(self.project, "EGC WBS Node", "CSV", False)
+		header_row = frappe.response["result"].splitlines()[0]
+		columns = [c.strip('"') for c in header_row.split(",")]
+
+		values = {
+			"Project": self.project,
+			"WBS Code": "RT.01",
+			"WBS Name": "Round Trip Test Node",
+			"Sequence": "1",
+		}
+		data_row = ",".join(f'"{values.get(col, "")}"' for col in columns)
+		csv_content = f"{header_row}\n{data_row}\n"
+
+		file_doc = frappe.get_doc(
+			{"doctype": "File", "file_name": "roundtrip.csv", "is_private": 1, "content": csv_content.encode()}
+		).insert(ignore_permissions=True)
+
+		result = bulk_transfer.import_records(self.project, "EGC WBS Node", file_doc.file_url)
+
+		self.assertEqual(result["success_count"], 1)
+		self.assertEqual(result["failure_count"], 0)
+		self.assertTrue(
+			frappe.db.exists("EGC WBS Node", {"project": self.project, "wbs_code": "RT.01"})
+		)
 
 
 def _get_or_create_user(email, roles):

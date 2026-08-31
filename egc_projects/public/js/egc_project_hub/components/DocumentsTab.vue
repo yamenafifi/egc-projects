@@ -2,7 +2,9 @@
 import { computed, ref, watch, onMounted } from "vue";
 import { get_documents, create_document, create_document_revision, get_drawing_document_types } from "./documents_api";
 import { get_directory_person_emails, person_link_filter } from "./directory_helpers";
-import { openExportDialog, openImportDialog } from "./bulk_transfer_flow";
+import { openExportDialog, openImportDialog, confirmBulkDelete } from "./bulk_transfer_flow";
+import { useRowSelection } from "../composables/useRowSelection";
+import BulkActionsBar from "./BulkActionsBar.vue";
 import { useHubResource } from "../composables/useHubResource";
 import { consumeDrawingsApprovalIntent } from "../composables/useDrawingsIntent";
 import { consumeOpenDocumentIntent } from "../composables/useOpenDocumentIntent";
@@ -19,6 +21,13 @@ const props = defineProps({
 
 const { data, loading, error, reload } = useHubResource(() => get_documents(props.project));
 watch(() => props.project, reload, { immediate: true });
+
+// A client-side hint only, same discipline as every write action elsewhere in this Hub — matches
+// the roles actually granted `delete` on EGC Project Document (System Manager/Document
+// Controller/Project Manager, not Engineer). Only gates the bulk "Delete Selected" action; every
+// other write path in this file relies purely on the server-side check, unchanged.
+const DELETE_ROLES = ["System Manager", "EGC Document Controller", "EGC Project Manager"];
+const can_write = computed(() => (frappe.user_roles || []).some((role) => DELETE_ROLES.includes(role)));
 
 const documents_empty_state_description = __(
 	"Every controlled document on this project lives here — drawings and non-drawing documents alike. Not every document needs formal review; use Submit for Review on a document, or the Submittals tab, only for the ones that do."
@@ -97,6 +106,39 @@ const filtered = computed(() => {
 		return true;
 	});
 });
+
+const {
+	selected: selected_rows,
+	selected_count,
+	all_selected,
+	some_selected,
+	is_selected,
+	toggle,
+	toggle_all,
+	clear,
+} = useRowSelection(filtered, (row) => row.document);
+
+function open_bulk_export() {
+	openExportDialog({
+		project: props.project,
+		doctype: "EGC Project Document",
+		label: __("Documents"),
+		selectedNames: [...selected_rows.value],
+	});
+}
+
+function open_bulk_delete() {
+	confirmBulkDelete({
+		project: props.project,
+		doctype: "EGC Project Document",
+		label: __("Documents"),
+		selectedNames: [...selected_rows.value],
+		onDeleted: () => {
+			clear();
+			reload();
+		},
+	});
+}
 
 // A document Under Review shows who owes the next action right in the register (its governing
 // Submittal's ball_in_court/due date, batched server-side in api/documents.py.get_documents —
@@ -377,11 +419,29 @@ function toggle_drawing_fields(dialog) {
 				</button>
 			</div>
 
+			<BulkActionsBar
+				v-if="selected_count"
+				:selected-count="selected_count"
+				:can-delete="can_write"
+				@export="open_bulk_export"
+				@delete="open_bulk_delete"
+				@clear="clear"
+			/>
+
 			<EmptyState v-if="!filtered.length" :title="__('No documents match these filters')" />
 			<div v-else class="hub-table-wrap">
 				<table class="hub-table">
 					<thead>
 						<tr>
+							<th class="hub-table__check-col">
+								<input
+									type="checkbox"
+									:checked="all_selected"
+									:ref="(el) => el && (el.indeterminate = some_selected)"
+									:title="__('Select all')"
+									@click.stop="toggle_all"
+								/>
+							</th>
 							<th>{{ __("Document Number") }}</th>
 							<th>{{ __("Title") }}</th>
 							<th>{{ __("Document Type") }}</th>
@@ -403,6 +463,9 @@ function toggle_drawing_fields(dialog) {
 							class="hub-table__row--clickable"
 							@click="open_detail(row.document)"
 						>
+							<td class="hub-table__check-col" @click.stop>
+								<input type="checkbox" :checked="is_selected(row)" @change="toggle(row)" />
+							</td>
 							<td>{{ row.document_number }}</td>
 							<td class="hub-table__truncate" :title="row.title">{{ row.title }}</td>
 							<td>{{ row.document_type }}</td>
