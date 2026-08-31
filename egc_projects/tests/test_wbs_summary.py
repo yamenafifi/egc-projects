@@ -280,6 +280,36 @@ class TestWbsSummary(IntegrationTestCase):
 			)
 		self.assertFalse(frappe.db.exists("EGC WBS Node", {"project": self.project, "wbs_code": "BULK-OK"}))
 
+	# -- create_child_wbs_node --------------------------------------------------------------------
+
+	def test_create_child_wbs_node_turns_a_leaf_parent_into_a_group(self):
+		"""Regression: the Hub's "Add Child WBS Node" quick-add (`WbsTab.vue`'s `on_quick_add`,
+		reused by both the per-row "+" and the tree node's "..." menu) went through a bare
+		`frappe.client.insert`, which `validators.validate_tree_parent` always rejects on a
+		non-group parent — so it never actually worked on a fresh leaf WBS node."""
+		leaf = make_wbs_node(self.project, "CHILD-PARENT")
+		self.assertFalse(leaf.is_group)
+
+		result = wbs.create_child_wbs_node(leaf.name, self.project, wbs_code="CHILD-KID", wbs_name="Kid")
+
+		leaf.reload()
+		self.assertTrue(leaf.is_group)
+		self.assertTrue(frappe.db.exists("EGC WBS Node", result["name"]))
+		self.assertEqual(
+			frappe.db.get_value("EGC WBS Node", result["name"], "parent_egc_wbs_node"), leaf.name
+		)
+
+	def test_create_child_wbs_node_on_an_existing_group_leaves_it_alone(self):
+		group = make_wbs_node(self.project, "CHILD-GRP", is_group=1)
+		wbs.create_child_wbs_node(group.name, self.project, wbs_code="CHILD-GRP-KID", wbs_name="Kid")
+		group.reload()
+		self.assertTrue(group.is_group)
+
+	def test_create_child_wbs_node_requires_code_and_name(self):
+		leaf = make_wbs_node(self.project, "CHILD-BLANK")
+		with self.assertRaises(frappe.ValidationError):
+			wbs.create_child_wbs_node(leaf.name, self.project, wbs_name="Kid")
+
 	# -- project isolation ------------------------------------------------------------------------
 
 	def test_endpoints_reject_project_isolation_breach(self):

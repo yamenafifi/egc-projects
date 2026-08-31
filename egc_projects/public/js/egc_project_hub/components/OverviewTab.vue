@@ -5,6 +5,9 @@ import { useHubResource } from "../composables/useHubResource";
 import { useHubRoute } from "../composables/useHubRoute";
 import { overdueIntent } from "../composables/useOverdueIntent";
 import { drawingsIntent } from "../composables/useDrawingsIntent";
+import { openSubmittalIntent } from "../composables/useOpenSubmittalIntent";
+import { openDocumentIntent } from "../composables/useOpenDocumentIntent";
+import { openActivityIntent } from "../composables/useOpenActivityIntent";
 import LoadingState from "./LoadingState.vue";
 import ErrorState from "./ErrorState.vue";
 import EmptyState from "./EmptyState.vue";
@@ -95,8 +98,26 @@ function goto_health(key) {
 	setTab(HEALTH_TARGET_TAB[key] || key);
 }
 
+// Shared by My Tasks (open_item) and Recent Activity (open_route) — into the Hub's own
+// Submittals/Documents/Activities tab-and-detail view, not the raw native form, matching
+// SubmittalDetail.vue/DocumentDetail.vue's own cross-nav convention.
+function open_related(doctype, name) {
+	if (doctype === "EGC Submittal") {
+		openSubmittalIntent.submittal = name;
+		setTab("submittals");
+	} else if (doctype === "EGC Project Document") {
+		openDocumentIntent.document = name;
+		setTab("documents");
+	} else if (doctype === "EGC Activity") {
+		openActivityIntent.activity = name;
+		setTab("activities");
+	} else {
+		frappe.set_route("Form", doctype, name);
+	}
+}
+
 function open_item(item) {
-	frappe.set_route("Form", item.doctype, item.name);
+	open_related(item.doctype, item.name);
 }
 
 const has_any_data = computed(() => {
@@ -115,7 +136,30 @@ function goto_approved_drawings() {
 }
 
 function open_route(doctype, name) {
-	frappe.set_route("Form", doctype, name);
+	open_related(doctype, name);
+}
+
+// Hand-authored stroke icons, same visual language as HubTopBar.vue's own ICONS map (its
+// comment explains why: "a distinct icon set is part of what makes this feel like its own
+// product") — reused verbatim here rather than emoji, per direct user instruction. `documents`/
+// `submittals` are copied straight from that map so a document revision or a submittal response
+// reads as the same shape everywhere in the Hub; `activity` is new (a check-circle, for a
+// progress/status update) since HubTopBar's own `activities` glyph is a Gantt-bar shape that
+// doesn't read as "something changed" at this small a size.
+const ENTRY_ICON_PATHS = {
+	rev: '<path d="M7 3h7l4 4v13a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z"/><path d="M14 3v4h4"/><path d="M9 12h6M9 15.5h6M9 8.5h2"/>',
+	sub: '<path d="M21 3 3 10.5l7 2.5m11-10L14 21l-4-8m11-10L10 13"/>',
+	act: '<circle cx="12" cy="12" r="9"/><path d="m8.5 12.5 2.5 2.5 5-5"/>',
+};
+
+// Same icon set, for My Tasks' two item sources.
+const TASK_ICON_PATHS = {
+	activity_overdue: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/>',
+	submittal_review: '<path d="M21 3 3 10.5l7 2.5m11-10L14 21l-4-8m11-10L10 13"/>',
+};
+
+function task_icon(item) {
+	return item.source === "activity_overdue" ? TASK_ICON_PATHS.activity_overdue : TASK_ICON_PATHS.submittal_review;
 }
 
 const recent_entries = computed(() => {
@@ -124,25 +168,28 @@ const recent_entries = computed(() => {
 	const entries = [
 		...recent.document_revisions.map((row) => ({
 			key: "rev:" + row.name,
-			icon: "🗎",
+			type: "rev",
 			text: __("Revision {0} of {1}", [row.revision, row.document]),
 			sub: row.revision_status,
 			timestamp: row.modified,
-			doctype: "EGC Project Document Revision",
-			name: row.name,
+			// The revision itself has no Hub detail view of its own — open the parent Document,
+			// which shows every revision (including this one) in its own Revision Register.
+			doctype: "EGC Project Document",
+			name: row.document,
 		})),
 		...recent.submittal_responses.map((row) => ({
 			key: "sub:" + row.name,
-			icon: "📩",
+			type: "sub",
 			text: __("{0} responded {1} for {2}", [row.responded_by || __("Reviewer"), row.response, row.submittal]),
 			sub: row.revision_label,
 			timestamp: row.response_date,
-			doctype: "EGC Submittal Revision",
-			name: row.name,
+			// Same reasoning as document_revisions above — open the parent Submittal.
+			doctype: "EGC Submittal",
+			name: row.submittal,
 		})),
 		...recent.activity_updates.map((row) => ({
 			key: "act:" + row.name,
-			icon: "✓",
+			type: "act",
 			text: __("{0} — {1}", [row.activity_code, row.activity_name]),
 			sub: `${row.status} · ${Math.round(row.percent_complete || 0)}%`,
 			timestamp: row.modified,
@@ -212,7 +259,16 @@ const recent_entries = computed(() => {
 							class="hub-recent__item"
 							@click="open_item(item)"
 						>
-							<span class="hub-recent__icon">{{ item.source === "activity_overdue" ? "⏱" : "📩" }}</span>
+							<svg
+								class="hub-recent__icon"
+								viewBox="0 0 24 24"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="1.8"
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								v-html="task_icon(item)"
+							></svg>
 							<span class="hub-recent__text">{{ item.title }}</span>
 							<span class="hub-recent__sub">
 								{{ item.source === "activity_overdue" ? __("Overdue Activity") : __("Awaiting Your Review") }}
@@ -346,7 +402,16 @@ const recent_entries = computed(() => {
 						class="hub-recent__item"
 						@click="open_route(entry.doctype, entry.name)"
 					>
-						<span class="hub-recent__icon">{{ entry.icon }}</span>
+						<svg
+							class="hub-recent__icon"
+							viewBox="0 0 24 24"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="1.8"
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							v-html="ENTRY_ICON_PATHS[entry.type]"
+						></svg>
 						<span class="hub-recent__text">{{ entry.text }}</span>
 						<span class="hub-recent__sub">{{ entry.sub }}</span>
 						<span class="hub-recent__time" :title="frappe.datetime.str_to_user(entry.timestamp)">
@@ -561,11 +626,12 @@ const recent_entries = computed(() => {
 .hub-recent__item {
 	display: flex;
 	align-items: center;
-	gap: 10px;
-	padding: 8px 4px;
+	gap: 12px;
+	padding: 10px 6px;
 	border-bottom: 1px solid var(--border-color);
 	cursor: pointer;
 	font-size: var(--text-sm);
+	border-radius: var(--border-radius);
 }
 
 .hub-recent__item:last-child {
@@ -578,6 +644,13 @@ const recent_entries = computed(() => {
 
 .hub-recent__icon {
 	flex: 0 0 auto;
+	width: 28px;
+	height: 28px;
+	padding: 6px;
+	box-sizing: border-box;
+	border-radius: var(--border-radius-full);
+	background: var(--control-bg);
+	color: var(--text-muted);
 }
 
 .hub-recent__text {

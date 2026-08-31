@@ -6,8 +6,14 @@
      vanilla-JS file, which renders into a jQuery `frm.dashboard` section, a different layer. -->
 <script setup>
 import { link_activity_record, unlink_activity_record } from "./activities_api";
+import { useHubRoute } from "../composables/useHubRoute";
+import { openSubmittalIntent } from "../composables/useOpenSubmittalIntent";
+import { openDocumentIntent } from "../composables/useOpenDocumentIntent";
+import { LINK_PURPOSES } from "../../shared_constants";
 import EmptyState from "./EmptyState.vue";
 import StatusPill from "./StatusPill.vue";
+
+const { setTab } = useHubRoute();
 
 const props = defineProps({
 	activity: { type: String, required: true },
@@ -25,8 +31,6 @@ const props = defineProps({
 });
 const emit = defineEmits(["changed"]);
 
-const LINK_PURPOSES = ["Reference", "Requirement"];
-
 function row_number(row) {
 	return row.document_number || row.submittal_number || "";
 }
@@ -40,7 +44,18 @@ function row_status(row) {
 }
 
 function open_record(row) {
-	frappe.set_route("Form", props.linkDoctype, row.link_name);
+	// Into the Hub's own SubmittalsTab/SubmittalDetail or DocumentsTab/DocumentDetail, not the
+	// raw native form — same reasoning as SubmittalDetail.vue/DocumentDetail.vue's own
+	// open_document()/open_activity() cross-nav.
+	if (props.linkDoctype === "EGC Submittal") {
+		openSubmittalIntent.submittal = row.link_name;
+		setTab("submittals");
+	} else if (props.linkDoctype === "EGC Project Document") {
+		openDocumentIntent.document = row.link_name;
+		setTab("documents");
+	} else {
+		frappe.set_route("Form", props.linkDoctype, row.link_name);
+	}
 }
 
 function open_add_dialog() {

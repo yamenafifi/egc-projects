@@ -1,28 +1,8 @@
 // Thin wrapper around egc_projects.api.directory.* — mirrors activities_api.js's call pattern.
 
-const DIRECTORY_MODULE = "egc_projects.api.directory";
+import { extract_message } from "../composables/useFrappeCall";
 
-function extract_message(r) {
-	if (r && r._server_messages) {
-		try {
-			const messages = JSON.parse(r._server_messages);
-			const first = JSON.parse(messages[0]);
-			if (first && first.message) return first.message;
-		} catch (e) {
-			// fall through to other extraction strategies
-		}
-	}
-	if (r && r.exc) {
-		try {
-			const exc_list = JSON.parse(r.exc);
-			const last_line = exc_list[0].trim().split("\n").pop();
-			return last_line.replace(/^[\w.]+Error:\s*/, "");
-		} catch (e) {
-			// fall through
-		}
-	}
-	return __("Something went wrong. Please try again.");
-}
+const DIRECTORY_MODULE = "egc_projects.api.directory";
 
 function call(method, args) {
 	return new Promise((resolve, reject) => {

@@ -3,29 +3,9 @@
 // convention). Kept local rather than merged into the shared api.js, for the same
 // concurrent-edit reason documents_api.js documents.
 
-const WBS_MODULE = "egc_projects.api.wbs";
+import { extract_message } from "../composables/useFrappeCall";
 
-function extract_message(r) {
-	if (r && r._server_messages) {
-		try {
-			const messages = JSON.parse(r._server_messages);
-			const first = JSON.parse(messages[0]);
-			if (first && first.message) return first.message;
-		} catch (e) {
-			// fall through to other extraction strategies
-		}
-	}
-	if (r && r.exc) {
-		try {
-			const exc_list = JSON.parse(r.exc);
-			const last_line = exc_list[0].trim().split("\n").pop();
-			return last_line.replace(/^[\w.]+Error:\s*/, "");
-		} catch (e) {
-			// fall through
-		}
-	}
-	return __("Something went wrong. Please try again.");
-}
+const WBS_MODULE = "egc_projects.api.wbs";
 
 function call_wbs(method, args) {
 	return new Promise((resolve, reject) => {
@@ -53,6 +33,10 @@ export function copy_wbs_branch(source_node, target_parent, project) {
 
 export function bulk_create_wbs_nodes(parent, project, rows) {
 	return call_wbs("bulk_create_wbs_nodes", { parent, project, rows });
+}
+
+export function create_child_wbs_node(parent, project, values) {
+	return call_wbs("create_child_wbs_node", { parent, project, ...values });
 }
 
 // -- Everything below calls Frappe's own generic client API directly — api/wbs.py's documented

@@ -183,75 +183,83 @@ def get_project_context(project: str) -> dict:
 # --- get_overview ----------------------------------------------------------------------------
 
 
-def _activity_overview(project: str) -> dict:
-	by_status = {
-		row.status: row.count
-		for row in frappe.get_all(
-			"EGC Activity",
-			filters={"project": project},
-			fields=["status", {"COUNT": "name", "as": "count"}],
-			group_by="status",
-		)
-	}
-	overdue_rows = frappe.get_all(
+def _activity_rows(project: str) -> list[dict]:
+	"""Every Activity's status/planned_end_date/modified for this project — the one query shared
+	by `_activity_overview` (status tally + overdue count) and `_schedule_health` (overdue rows'
+	own `modified` dates), which used to each run their own separate, near-identical query even
+	though `get_overview()` always calls both in the same request."""
+	return frappe.get_all(
 		"EGC Activity",
-		filters=[
-			["project", "=", project],
-			# The "is set" guard is load-bearing. Frappe wraps a `<` filter on a nullable field
-			# as `IFNULL(field, '') < value` (it skips this only for `>`/`>=` on dates — see
-			# frappe/database/query.py `_should_apply_ifnull`), so an activity with no planned
-			# finish would compare `'' < today()` and be counted as overdue. That contradicts
-			# `egc_activity.is_overdue()`, which is the authority: no date means not overdue.
-			["planned_end_date", "is", "set"],
-			["planned_end_date", "<", today()],
-			["status", "not in", list(c.ACTIVITY_CLOSED_STATUSES)],
-		],
-		fields=[{"COUNT": "name", "as": "count"}],
+		filters={"project": project},
+		fields=["status", "planned_end_date", "modified"],
 	)
+
+
+def _is_activity_overdue(row, today_date) -> bool:
+	# Same rule as `egc_activity.is_overdue()`, evaluated in Python against an already-fetched
+	# row instead of a fresh DB filter — no date means not overdue, full stop.
+	return bool(
+		row.planned_end_date
+		and getdate(row.planned_end_date) < today_date
+		and row.status not in c.ACTIVITY_CLOSED_STATUSES
+	)
+
+
+def _activity_overview(rows: list[dict]) -> dict:
+	today_date = getdate(today())
+	by_status: dict[str, int] = {}
+	overdue = 0
+	for row in rows:
+		by_status[row.status] = by_status.get(row.status, 0) + 1
+		if _is_activity_overdue(row, today_date):
+			overdue += 1
 	return {
-		"total": sum(by_status.values()),
+		"total": len(rows),
 		"completed": by_status.get(c.ACTIVITY_COMPLETED, 0),
 		"in_progress": by_status.get(c.ACTIVITY_IN_PROGRESS, 0),
 		"not_started": by_status.get(c.ACTIVITY_NOT_STARTED, 0),
-		"overdue": overdue_rows[0]["count"] if overdue_rows else 0,
+		"overdue": overdue,
 	}
 
 
-def _submittal_overview(project: str) -> dict:
-	by_status = {
-		row.submittal_status: row.count
-		for row in frappe.get_all(
-			"EGC Submittal",
-			filters={"project": project},
-			fields=["submittal_status", {"COUNT": "name", "as": "count"}],
-			group_by="submittal_status",
-		)
-	}
-	overdue_rows = frappe.get_all(
+def _submittal_rows(project: str) -> list[dict]:
+	"""Every Submittal's submittal_status/current_due_date for this project — the one query
+	shared by `_submittal_overview` and `_submittals_health`, same reasoning as `_activity_rows`."""
+	return frappe.get_all(
 		"EGC Submittal",
-		filters=[
-			["project", "=", project],
-			# Same IFNULL trap as `_activity_overview`: a submittal with no review due date is
-			# not overdue, and `get_submittals`/the Submittal Log report both already say so.
-			["current_due_date", "is", "set"],
-			["current_due_date", "<", today()],
-			["submittal_status", "in", list(c.SUBMISSION_OPEN_STATUSES)],
-		],
-		fields=[{"COUNT": "name", "as": "count"}],
+		filters={"project": project},
+		fields=["submittal_status", "current_due_date"],
 	)
+
+
+def _is_submittal_overdue(row, today_date) -> bool:
+	return bool(
+		row.current_due_date
+		and getdate(row.current_due_date) < today_date
+		and row.submittal_status in c.SUBMISSION_OPEN_STATUSES
+	)
+
+
+def _submittal_overview(rows: list[dict]) -> dict:
+	today_date = getdate(today())
+	by_status: dict[str, int] = {}
+	overdue = 0
+	for row in rows:
+		by_status[row.submittal_status] = by_status.get(row.submittal_status, 0) + 1
+		if _is_submittal_overdue(row, today_date):
+			overdue += 1
 	return {
-		"total": sum(by_status.values()),
+		"total": len(rows),
 		"approved": by_status.get(c.RESPONSE_APPROVED, 0),
 		"approved_with_comments": by_status.get(c.RESPONSE_APPROVED_WITH_COMMENTS, 0),
 		"under_review": sum(by_status.get(status, 0) for status in c.SUBMISSION_OPEN_STATUSES),
 		"revise_resubmit": by_status.get(c.RESPONSE_REVISE_AND_RESUBMIT, 0),
 		"rejected": by_status.get(c.RESPONSE_REJECTED, 0),
-		"overdue": overdue_rows[0]["count"] if overdue_rows else 0,
+		"overdue": overdue,
 	}
 
 
-def _drawing_overview(project: str) -> dict:
-	types = get_drawing_document_types()
+def _drawing_overview(project: str, types: list[str]) -> dict:
 	if not types:
 		return {"total": 0, "issued": 0, "pending_review": 0, "approved": 0}
 
@@ -315,17 +323,9 @@ def _recent_activity(project: str) -> dict:
 # rules are defensible" is the brief's own instruction. Each returns "green"/"orange"/"red".
 
 
-def _schedule_health(project: str) -> str:
-	overdue_rows = frappe.get_all(
-		"EGC Activity",
-		filters=[
-			["project", "=", project],
-			["planned_end_date", "is", "set"],
-			["planned_end_date", "<", today()],
-			["status", "not in", list(c.ACTIVITY_CLOSED_STATUSES)],
-		],
-		fields=["modified"],
-	)
+def _schedule_health(rows: list[dict]) -> str:
+	today_date = getdate(today())
+	overdue_rows = [row for row in rows if _is_activity_overdue(row, today_date)]
 	if not overdue_rows:
 		return "green"
 	# "touched" = the Activity row itself was last modified within the window — a status change
@@ -335,54 +335,54 @@ def _schedule_health(project: str) -> str:
 	return "orange" if touched_recently else "red"
 
 
-def _submittals_health(project: str) -> str:
-	overdue = frappe.get_all(
-		"EGC Submittal",
-		filters=[
-			["project", "=", project],
-			["current_due_date", "is", "set"],
-			["current_due_date", "<", today()],
-			["submittal_status", "in", list(c.SUBMISSION_OPEN_STATUSES)],
-		],
-		limit=1,
-	)
-	if overdue:
+def _submittals_health(rows: list[dict]) -> str:
+	today_date = getdate(today())
+	if any(_is_submittal_overdue(row, today_date) for row in rows):
 		return "red"
 	# `submittal_status` already IS the current submission's response (see `_refresh_from_current`
 	# in submittal_control.py), so a Submittal sitting at Revise & Resubmit/Rejected has, by
 	# definition, not yet been resubmitted — a new cycle would move it off that status.
-	needs_resubmit = frappe.get_all(
-		"EGC Submittal",
-		filters={
-			"project": project,
-			"submittal_status": ("in", (c.RESPONSE_REVISE_AND_RESUBMIT, c.RESPONSE_REJECTED)),
-		},
-		limit=1,
+	needs_resubmit = any(
+		row.submittal_status in (c.RESPONSE_REVISE_AND_RESUBMIT, c.RESPONSE_REJECTED) for row in rows
 	)
 	return "orange" if needs_resubmit else "green"
 
 
-def _governing_submission_due_date(current_revision: str) -> str | None:
+def _governing_submission_due_dates(current_revisions: list[str]) -> dict[str, str | None]:
 	"""The due date of the SAME submission `document_control.get_approval_status` used to derive
-	this revision's `approval_status` — mirrors that function's own query exactly (latest
+	each revision's `approval_status` — mirrors that function's own query exactly (latest
 	non-cancelled submitted submission carrying this revision) rather than picking a different
-	submission and risking a health signal that disagrees with the status it is about."""
+	submission and risking a health signal that disagrees with the status it is about.
+
+	Batched across every at-risk revision in one query (`document_revision IN (...)`, then the
+	highest `submission_seq` per revision kept in Python) — `_drawings_health` used to call the
+	single-revision version of this once per at-risk drawing, an N+1 on the Hub's own landing tab.
+	"""
+	if not current_revisions:
+		return {}
 	rows = frappe.get_all(
 		"EGC Submittal Revision",
 		filters=[
 			["EGC Submittal Revision", "docstatus", "=", 1],
 			["EGC Submittal Revision", "submission_status", "!=", c.SUBMISSION_CANCELLED],
-			["EGC Submittal Document Item", "document_revision", "=", current_revision],
+			["EGC Submittal Document Item", "document_revision", "in", current_revisions],
 		],
-		fields=["due_date", "submission_seq"],
+		fields=[
+			"due_date",
+			"submission_seq",
+			"`tabEGC Submittal Document Item`.document_revision as document_revision",
+		],
 		order_by="submission_seq desc",
-		limit=1,
 	)
-	return rows[0].due_date if rows else None
+	result: dict[str, str | None] = {}
+	for row in rows:
+		# First occurrence per revision wins — rows are already ordered by submission_seq desc,
+		# so that's the highest-numbered (most recent) submission for that revision.
+		result.setdefault(row.document_revision, row.due_date)
+	return result
 
 
-def _drawings_health(project: str) -> str:
-	types = get_drawing_document_types()
+def _drawings_health(project: str, types: list[str]) -> str:
 	if not types:
 		return "green"
 
@@ -396,40 +396,57 @@ def _drawings_health(project: str) -> str:
 		],
 		fields=["current_revision"],
 	)
+	if not at_risk:
+		return "green"
+
+	due_dates = _governing_submission_due_dates([row.current_revision for row in at_risk])
 	today_date = getdate(today())
 	for row in at_risk:
-		due_date = _governing_submission_due_date(row.current_revision)
+		due_date = due_dates.get(row.current_revision)
 		if due_date and getdate(due_date) < today_date:
 			return "orange"
 	return "green"
 
 
-def _financials_health(project: str) -> str:
+def _financials_health(project: str) -> str | None:
 	# Deliberately the simplest possible rule — a fabricated "budget variance" indicator with no
 	# budget data behind it would violate the brief's own instruction not to fake a metric.
+	# `None` (the key is dropped entirely by `_project_health`) when the caller has no financial
+	# access — a red/green signal derived from `gross_margin` is itself a commercial figure, and
+	# `get_financials()` already refuses the same user outright via `_require_financial_access()`;
+	# this used to leak that exact figure's sign to anyone who could merely open the Overview tab.
+	if not _has_financial_access():
+		return None
 	gross_margin = frappe.db.get_value("Project", project, "gross_margin")
 	return "red" if gross_margin is not None and flt(gross_margin) < 0 else "green"
 
 
-def _project_health(project: str) -> dict:
-	return {
-		"schedule": _schedule_health(project),
-		"submittals": _submittals_health(project),
-		"documents": _drawings_health(project),
-		"financials": _financials_health(project),
+def _project_health(project: str, activity_rows: list[dict], submittal_rows: list[dict], drawing_types: list[str]) -> dict:
+	health = {
+		"schedule": _schedule_health(activity_rows),
+		"submittals": _submittals_health(submittal_rows),
+		"documents": _drawings_health(project, drawing_types),
 	}
+	financials = _financials_health(project)
+	if financials is not None:
+		health["financials"] = financials
+	return health
 
 
 @frappe.whitelist()
 def get_overview(project: str) -> dict:
 	validators.require_project_permission(project)
 
+	activity_rows = _activity_rows(project)
+	submittal_rows = _submittal_rows(project)
+	drawing_types = get_drawing_document_types()
+
 	return {
-		"activities": _activity_overview(project),
-		"submittals": _submittal_overview(project),
-		"drawings": _drawing_overview(project),
+		"activities": _activity_overview(activity_rows),
+		"submittals": _submittal_overview(submittal_rows),
+		"drawings": _drawing_overview(project, drawing_types),
 		"recent": _recent_activity(project),
-		"health": _project_health(project),
+		"health": _project_health(project, activity_rows, submittal_rows, drawing_types),
 	}
 
 
@@ -734,6 +751,16 @@ _FINANCIAL_PROJECT_FIELDS = (
 )
 
 
+def _expense_claims_or_none(project: str) -> float | None:
+	"""`Project.total_expense_claim` only exists when HRMS is installed — `None` (not `0`) when
+	it isn't, so `get_financials()` can show "—" rather than a misleading "$0.00" for a site that
+	never tracked expense claims at all. Shared by `get_financials()`/`get_cost_forecast()`,
+	which used to each run this exact `has_field` + `get_value` pair independently."""
+	if not frappe.get_meta("Project").has_field("total_expense_claim"):
+		return None
+	return frappe.db.get_value("Project", project, "total_expense_claim")
+
+
 @frappe.whitelist()
 def get_financials(project: str) -> dict:
 	validators.require_project_permission(project)
@@ -744,9 +771,7 @@ def get_financials(project: str) -> dict:
 	# would create a second, divergent source of truth. See docs/ARCHITECTURE.md §6.
 	row = frappe.db.get_value("Project", project, _FINANCIAL_PROJECT_FIELDS, as_dict=True)
 
-	expense_claims = None
-	if frappe.get_meta("Project").has_field("total_expense_claim"):
-		expense_claims = frappe.db.get_value("Project", project, "total_expense_claim")
+	expense_claims = _expense_claims_or_none(project)
 
 	currency = erpnext.get_company_currency(row.company) if row.company else None
 
@@ -804,9 +829,7 @@ def get_cost_forecast(project: str) -> dict:
 
 	row = frappe.db.get_value("Project", project, _COST_FORECAST_PROJECT_FIELDS, as_dict=True)
 
-	expense_claims = 0
-	if frappe.get_meta("Project").has_field("total_expense_claim"):
-		expense_claims = flt(frappe.db.get_value("Project", project, "total_expense_claim"))
+	expense_claims = flt(_expense_claims_or_none(project))
 
 	budget = flt(row.estimated_costing)
 	actual_cost = (

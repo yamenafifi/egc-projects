@@ -17,15 +17,25 @@ import {
 	add_dependency,
 	remove_dependency,
 	update_activity_progress,
-	create_activity,
+	create_child_activity,
 	update_activity_fields,
 	link_activity_record,
 	unlink_activity_record,
 } from "./activities_api";
 import { add_assignment, remove_assignment } from "./assignments_api";
 import { get_person_info } from "./project_profile_api";
+import {
+	get_directory_person_emails,
+	get_directory_organization_names,
+	person_link_filter,
+	organization_link_filter,
+} from "./directory_helpers";
 import { get_comments, add_comment } from "./comments_api";
 import { useHubResource } from "../composables/useHubResource";
+import { useHubRoute } from "../composables/useHubRoute";
+import { DEPENDENCY_TYPES } from "../../shared_constants";
+import { openSubmittalIntent } from "../composables/useOpenSubmittalIntent";
+import { openDocumentIntent } from "../composables/useOpenDocumentIntent";
 import LoadingState from "./LoadingState.vue";
 import ErrorState from "./ErrorState.vue";
 import EmptyState from "./EmptyState.vue";
@@ -37,6 +47,7 @@ const props = defineProps({
 	canWrite: { type: Boolean, default: false },
 });
 const emit = defineEmits(["close", "changed", "open-activity"]);
+const { setTab } = useHubRoute();
 
 const { data, loading, error, reload } = useHubResource(() => get_activity_detail(props.activity));
 watch(() => props.activity, reload, { immediate: true });
@@ -194,7 +205,13 @@ function open_edit_dialog() {
 
 const ASSIGNMENT_ROLES = ["Responsible", "Assignee", "Supervisor", "Consultant", "Reviewer", "Contractor", "Watcher"];
 
-function open_add_assignment_dialog() {
+async function open_add_assignment_dialog() {
+	// Direct user instruction (already applied to Documents/Submittals): every Link-to-User
+	// field in a creation form must offer ONLY people already on this project's own Directory.
+	const [directory_emails, directory_orgs] = await Promise.all([
+		get_directory_person_emails(props.project),
+		get_directory_organization_names(props.project),
+	]);
 	const dialog = new frappe.ui.Dialog({
 		title: __("Add Person"),
 		fields: [
@@ -203,7 +220,10 @@ function open_add_assignment_dialog() {
 				fieldtype: "Link",
 				label: __("Person"),
 				options: "User",
-				description: __("Leave blank to assign a whole Organization with no specific individual named."),
+				description: __(
+					"Must already be on this project's Directory. Leave blank to assign a whole Organization with no specific individual named."
+				),
+				get_query: person_link_filter(directory_emails),
 				onchange: async function () {
 					const person = this.value;
 					if (!person) return;
@@ -211,7 +231,14 @@ function open_add_assignment_dialog() {
 					if (info && info.organization) dialog.set_value("organization", info.organization);
 				},
 			},
-			{ fieldname: "organization", fieldtype: "Link", label: __("Organization"), options: "Customer", description: __("Defaults from the Person's own organization when one is picked above.") },
+			{
+				fieldname: "organization",
+				fieldtype: "Link",
+				label: __("Organization"),
+				options: "Customer",
+				description: __("Must already be on this project's Directory. Defaults from the Person's own organization when one is picked above."),
+				get_query: organization_link_filter(directory_orgs),
+			},
 			{ fieldname: "assignment_role", fieldtype: "Select", label: __("Role on this Activity"), options: ASSIGNMENT_ROLES, default: "Responsible", reqd: 1 },
 			{ fieldname: "is_primary", fieldtype: "Check", label: __("Primary") },
 			{ fieldname: "remarks", fieldtype: "Small Text", label: __("Remarks") },
@@ -253,7 +280,8 @@ function open_add_child_dialog() {
 		],
 		primary_action_label: __("Create"),
 		primary_action(values) {
-			create_activity({ ...values, project: props.project, parent_egc_activity: props.activity })
+			// Not create_activity — see ActivityDetail.vue's identical dialog for why.
+			create_child_activity(props.activity, values)
 				.then(() => {
 					dialog.hide();
 					notify_changed();
@@ -267,8 +295,6 @@ function open_add_child_dialog() {
 }
 
 // -- dependencies ------------------------------------------------------------------------------
-
-const DEPENDENCY_TYPES = ["Finish-to-Start", "Start-to-Start", "Finish-to-Finish", "Start-to-Finish"];
 
 function open_add_dependency_dialog() {
 	const dialog = new frappe.ui.Dialog({
@@ -319,11 +345,15 @@ function is_submittal_overdue(row) {
 }
 
 function open_submittal(row) {
-	frappe.set_route("Form", "EGC Submittal", row.link_name);
+	// Into the Hub's own SubmittalsTab/SubmittalDetail, not the raw native form.
+	openSubmittalIntent.submittal = row.link_name;
+	setTab("submittals");
 }
 
 function open_document(row) {
-	frappe.set_route("Form", "EGC Project Document", row.link_name);
+	// Into the Hub's own DocumentsTab/DocumentDetail, not the raw native form.
+	openDocumentIntent.document = row.link_name;
+	setTab("documents");
 }
 
 function open_add_submittal_dialog() {

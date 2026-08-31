@@ -54,6 +54,20 @@ def make_wbs_node(project: str, wbs_code: str, wbs_name: str | None = None, **kw
 	return doc
 
 
+def make_activity(project: str, activity_code: str, **kwargs) -> "frappe.Document":
+	doc = frappe.get_doc(
+		{
+			"doctype": "EGC Activity",
+			"project": project,
+			"activity_code": activity_code,
+			"activity_name": activity_code,
+			**kwargs,
+		}
+	)
+	doc.insert(ignore_permissions=True)
+	return doc
+
+
 class TestEGCWBSNode(IntegrationTestCase):
 	@classmethod
 	def setUpClass(cls) -> None:
@@ -161,3 +175,49 @@ class TestEGCWBSNode(IntegrationTestCase):
 		self.assertEqual(child_values, {f"{self.project_a.name}-GC-A-CHILD"})
 
 		self.assertRaises(frappe.ValidationError, get_children, doctype="EGC WBS Node", project=None)
+
+	# -- completion requires every linked Activity to be at 100% (direct user instruction) -------
+
+	def test_completed_blocked_when_an_activity_is_incomplete(self) -> None:
+		node = make_wbs_node(self.project_a.name, "DONE-BLOCK")
+		make_activity(self.project_a.name, "DONE-BLOCK-ACT", wbs_node=node.name, status="In Progress", percent_complete=50)
+
+		node.status = "Completed"
+		with self.assertRaises(frappe.ValidationError):
+			node.save(ignore_permissions=True)
+
+	def test_completed_allowed_when_every_activity_is_at_100(self) -> None:
+		node = make_wbs_node(self.project_a.name, "DONE-OK")
+		make_activity(self.project_a.name, "DONE-OK-ACT", wbs_node=node.name, status="Completed")
+
+		node.status = "Completed"
+		node.save(ignore_permissions=True)
+		self.assertEqual(frappe.db.get_value("EGC WBS Node", node.name, "status"), "Completed")
+
+	def test_completed_allowed_with_no_linked_activities(self) -> None:
+		"""Vacuous: nothing tagged against this node at all, so there is nothing to block on."""
+		node = make_wbs_node(self.project_a.name, "DONE-EMPTY")
+		node.status = "Completed"
+		node.save(ignore_permissions=True)
+
+	def test_completed_ignores_cancelled_activities(self) -> None:
+		node = make_wbs_node(self.project_a.name, "DONE-CANCEL")
+		make_activity(self.project_a.name, "DONE-CANCEL-ACT", wbs_node=node.name, status="Cancelled", percent_complete=0)
+
+		node.status = "Completed"
+		node.save(ignore_permissions=True)
+
+	def test_completed_check_is_subtree_wide_not_direct_children_only(self) -> None:
+		"""A group node typically has nothing tagged directly against it — its Activities sit on
+		a descendant instead (get_wbs_summary's own documented reasoning) — so the completion
+		gate must walk the whole subtree, not just this node's own direct wbs_node tags."""
+		parent = make_wbs_node(self.project_a.name, "DONE-SUB-PARENT", is_group=1)
+		child = make_wbs_node(self.project_a.name, "DONE-SUB-CHILD", parent_egc_wbs_node=parent.name)
+		make_activity(
+			self.project_a.name, "DONE-SUB-ACT", wbs_node=child.name, status="In Progress", percent_complete=10
+		)
+
+		parent.reload()
+		parent.status = "Completed"
+		with self.assertRaises(frappe.ValidationError):
+			parent.save(ignore_permissions=True)

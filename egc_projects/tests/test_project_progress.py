@@ -134,6 +134,37 @@ class TestProjectProgress(IntegrationTestCase):
 		doc.save()
 		self.assertEqual(frappe.db.get_value("Project", self.project, "percent_complete"), 50)
 
+	def test_root_weight_pct_actually_weights_the_mean(self):
+		"""Direct user instruction: root-level weight_pct must be functional, not a number every
+		dialog happily accepts and validate_weight() enforces a sibling-sum ceiling on, while
+		nothing downstream ever reads it. Mirrors activity_control._compute_rollup()'s own
+		weighted-mean formula one level up."""
+		_make_activity(
+			self.project, "PC-WROOT-1", percent_complete=100, status=ACTIVITY_COMPLETED, weight_pct=70
+		)
+		_make_activity(
+			self.project, "PC-WROOT-2", percent_complete=0, status="Not Started", weight_pct=30
+		)
+
+		doc = frappe.get_doc("Project", self.project)
+		doc.save()
+		# Weighted: 100*0.70 + 0*0.30 = 70 — the unweighted mean (50) would be wrong here.
+		self.assertEqual(frappe.db.get_value("Project", self.project, "percent_complete"), 70)
+
+	def test_root_weight_pct_under_allocation_is_not_invisible(self):
+		"""Normalises by a FIXED 100, not by total_weight — same correction
+		activity_control._compute_rollup() already documents one level up: only 70% of the
+		project's own top-level weight is allocated here, so it can never show more than 70%
+		complete even though the one weighted root is fully done."""
+		_make_activity(
+			self.project, "PC-WROOT-UNDER-1", percent_complete=100, status=ACTIVITY_COMPLETED, weight_pct=70
+		)
+		_make_activity(self.project, "PC-WROOT-UNDER-2", percent_complete=0, status="Not Started")
+
+		doc = frappe.get_doc("Project", self.project)
+		doc.save()
+		self.assertEqual(frappe.db.get_value("Project", self.project, "percent_complete"), 70)
+
 	# -- status auto-flip, mirroring core's own rule ----------------------------------------------
 
 	def test_status_flips_to_completed_at_100_percent(self):

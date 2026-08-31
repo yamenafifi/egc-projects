@@ -31,7 +31,6 @@ WBS_ON_HOLD = "On Hold"
 WBS_COMPLETED = "Completed"
 WBS_CANCELLED = "Cancelled"
 
-WBS_STATUSES = (WBS_ACTIVE, WBS_ON_HOLD, WBS_COMPLETED, WBS_CANCELLED)
 
 # --- EGC Project Document Revision ------------------------------------------------
 
@@ -40,21 +39,12 @@ REVISION_ISSUED = "Issued"
 REVISION_SUPERSEDED = "Superseded"
 REVISION_CANCELLED = "Cancelled"
 
-REVISION_STATUSES = (REVISION_DRAFT, REVISION_ISSUED, REVISION_SUPERSEDED, REVISION_CANCELLED)
-
 # --- EGC Project Document (derived) -----------------------------------------------
 
 DOCUMENT_NO_REVISION = "No Revision"
 DOCUMENT_DRAFT = "Draft"
 DOCUMENT_ISSUED = "Issued"
 DOCUMENT_CANCELLED = "Cancelled"
-
-DOCUMENT_STATUSES = (
-	DOCUMENT_NO_REVISION,
-	DOCUMENT_DRAFT,
-	DOCUMENT_ISSUED,
-	DOCUMENT_CANCELLED,
-)
 
 # --- Review responses (shared by Submittal + Document approval display) -----------
 
@@ -75,8 +65,6 @@ REVIEW_RESPONSES = (
 APPROVAL_NOT_SUBMITTED = "Not Submitted"
 APPROVAL_UNDER_REVIEW = "Under Review"
 
-DOCUMENT_APPROVAL_STATUSES = (APPROVAL_NOT_SUBMITTED, APPROVAL_UNDER_REVIEW, *REVIEW_RESPONSES)
-
 # --- EGC Submittal Revision --------------------------------------------------------
 
 SUBMISSION_DRAFT = "Draft"
@@ -85,25 +73,8 @@ SUBMISSION_UNDER_REVIEW = "Under Review"
 SUBMISSION_RESPONDED = "Responded"
 SUBMISSION_CANCELLED = "Cancelled"
 
-SUBMISSION_STATUSES = (
-	SUBMISSION_DRAFT,
-	SUBMISSION_SUBMITTED,
-	SUBMISSION_UNDER_REVIEW,
-	SUBMISSION_RESPONDED,
-	SUBMISSION_CANCELLED,
-)
-
 #: Submissions still awaiting a reviewer response.
 SUBMISSION_OPEN_STATUSES = (SUBMISSION_SUBMITTED, SUBMISSION_UNDER_REVIEW)
-
-# --- EGC Submittal (derived) --------------------------------------------------------
-
-SUBMITTAL_STATUSES = (
-	SUBMISSION_DRAFT,
-	SUBMISSION_SUBMITTED,
-	SUBMISSION_UNDER_REVIEW,
-	*REVIEW_RESPONSES,
-)
 
 # --- Relationship layer -------------------------------------------------------------
 
@@ -156,8 +127,6 @@ STEP_IN_REVIEW = "In Review"
 STEP_RESPONDED = "Responded"
 STEP_SKIPPED = "Skipped"
 
-STEP_STATUSES = (STEP_PENDING, STEP_IN_REVIEW, STEP_RESPONDED, STEP_SKIPPED)
-
 # --- v2: Activity Dependencies -------------------------------------------------------------
 
 DEPENDENCY_FS = "Finish-to-Start"
@@ -165,9 +134,12 @@ DEPENDENCY_SS = "Start-to-Start"
 DEPENDENCY_FF = "Finish-to-Finish"
 DEPENDENCY_SF = "Start-to-Finish"
 
-DEPENDENCY_TYPES = (DEPENDENCY_FS, DEPENDENCY_SS, DEPENDENCY_FF, DEPENDENCY_SF)
-
 # --- v2: Project Profile ---------------------------------------------------------------------
+#
+# Also the source of the literal Select `options` strings in `project_custom_fields.py`
+# (`custom_egc_project_stage`/`sector`/`delivery_method`/`contract_type`) — those used to hand-
+# type an independent copy of these same four lists, which is exactly the mistake this module's
+# own docstring warns against ("never re-type a literal status string").
 
 PROJECT_STAGES = ("Design", "Procurement", "Construction", "Commissioning", "Closeout", "Warranty")
 SECTORS = ("Healthcare", "Industrial", "Commercial", "Infrastructure", "Other")

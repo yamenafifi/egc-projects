@@ -1,29 +1,9 @@
 // Thin wrapper around egc_projects.api.hub.* (docs/ARCHITECTURE.md §5). The Hub never queries
 // DocTypes directly; every server round trip goes through here so error handling is uniform.
 
-const HUB_MODULE = "egc_projects.api.hub";
+import { extract_message } from "./composables/useFrappeCall";
 
-function extract_message(r) {
-	if (r && r._server_messages) {
-		try {
-			const messages = JSON.parse(r._server_messages);
-			const first = JSON.parse(messages[0]);
-			if (first && first.message) return first.message;
-		} catch (e) {
-			// fall through to other extraction strategies
-		}
-	}
-	if (r && r.exc) {
-		try {
-			const exc_list = JSON.parse(r.exc);
-			const last_line = exc_list[0].trim().split("\n").pop();
-			return last_line.replace(/^[\w.]+Error:\s*/, "");
-		} catch (e) {
-			// fall through
-		}
-	}
-	return __("Something went wrong. Please try again.");
-}
+const HUB_MODULE = "egc_projects.api.hub";
 
 function call_hub(method, args) {
 	return new Promise((resolve, reject) => {

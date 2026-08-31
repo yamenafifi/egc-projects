@@ -13,12 +13,19 @@ import {
 	add_dependency,
 	remove_dependency,
 	update_activity_progress,
-	create_activity,
+	create_child_activity,
 	update_activity_fields,
 } from "./activities_api";
 import { add_assignment, remove_assignment } from "./assignments_api";
 import { get_person_info } from "./project_profile_api";
+import {
+	get_directory_person_emails,
+	get_directory_organization_names,
+	person_link_filter,
+	organization_link_filter,
+} from "./directory_helpers";
 import { useHubResource } from "../composables/useHubResource";
+import { DEPENDENCY_TYPES } from "../../shared_constants";
 import LoadingState from "./LoadingState.vue";
 import ErrorState from "./ErrorState.vue";
 import EmptyState from "./EmptyState.vue";
@@ -131,7 +138,13 @@ function open_edit_dialog() {
 
 const ASSIGNMENT_ROLES = ["Responsible", "Assignee", "Supervisor", "Consultant", "Reviewer", "Contractor", "Watcher"];
 
-function open_add_assignment_dialog() {
+async function open_add_assignment_dialog() {
+	// Direct user instruction (already applied to Documents/Submittals): every Link-to-User
+	// field in a creation form must offer ONLY people already on this project's own Directory.
+	const [directory_emails, directory_orgs] = await Promise.all([
+		get_directory_person_emails(props.project),
+		get_directory_organization_names(props.project),
+	]);
 	const dialog = new frappe.ui.Dialog({
 		title: __("Add Person"),
 		fields: [
@@ -140,7 +153,10 @@ function open_add_assignment_dialog() {
 				fieldtype: "Link",
 				label: __("Person"),
 				options: "User",
-				description: __("Leave blank to assign a whole Organization with no specific individual named."),
+				description: __(
+					"Must already be on this project's Directory. Leave blank to assign a whole Organization with no specific individual named."
+				),
+				get_query: person_link_filter(directory_emails),
 				onchange: async function () {
 					const person = this.value;
 					if (!person) return;
@@ -153,7 +169,8 @@ function open_add_assignment_dialog() {
 				fieldtype: "Link",
 				label: __("Organization"),
 				options: "Customer",
-				description: __("Defaults from the Person's own organization when one is picked above."),
+				description: __("Must already be on this project's Directory. Defaults from the Person's own organization when one is picked above."),
+				get_query: organization_link_filter(directory_orgs),
 			},
 			{
 				fieldname: "assignment_role",
@@ -274,7 +291,10 @@ function open_add_child_dialog() {
 		],
 		primary_action_label: __("Create"),
 		primary_action(values) {
-			create_activity({ ...values, project: props.project, parent_egc_activity: props.activity })
+			// Not create_activity — that's a bare frappe.client.insert and this Activity may not
+			// be a group yet. create_child_activity makes it one first, which is exactly the
+			// "Adding a child will make this a group activity" promise made below.
+			create_child_activity(props.activity, values)
 				.then(() => {
 					dialog.hide();
 					notify_changed();
@@ -288,8 +308,6 @@ function open_add_child_dialog() {
 }
 
 // -- dependencies --------------------------------------------------------------------------------
-
-const DEPENDENCY_TYPES = ["Finish-to-Start", "Start-to-Start", "Finish-to-Finish", "Start-to-Finish"];
 
 function open_add_dependency_dialog() {
 	const dialog = new frappe.ui.Dialog({
@@ -359,7 +377,7 @@ function confirm_remove_dependency(name) {
 				</div>
 				<div class="activity-detail__header-actions">
 					<a v-if="canWrite && data" href="#" class="hub-link" @click.prevent="open_edit_dialog">{{ __("Edit") }}</a>
-					<a href="#" class="hub-link" @click.prevent="open_full_page">{{ __("Open full page ↗") }}</a>
+					<button type="button" class="btn btn-xs btn-default" @click="open_full_page">{{ __("Open Full Page ↗") }}</button>
 					<a href="#" class="hub-link hub-link--muted" @click.prevent="open_form">
 						{{ __("View raw record ↗") }}
 					</a>

@@ -2,6 +2,7 @@
 import { computed, ref, watch, onMounted } from "vue";
 import { get_documents, create_document, create_document_revision, get_drawing_document_types } from "./documents_api";
 import { get_directory_person_emails, person_link_filter } from "./directory_helpers";
+import { openExportDialog, openImportDialog } from "./bulk_transfer_flow";
 import { useHubResource } from "../composables/useHubResource";
 import { consumeDrawingsApprovalIntent } from "../composables/useDrawingsIntent";
 import { consumeOpenDocumentIntent } from "../composables/useOpenDocumentIntent";
@@ -119,6 +120,19 @@ function close_detail() {
 
 function on_changed() {
 	reload();
+}
+
+function open_export_dialog() {
+	openExportDialog({ project: props.project, doctype: "EGC Project Document", label: __("Documents") });
+}
+
+function open_import_dialog() {
+	openImportDialog({
+		project: props.project,
+		doctype: "EGC Project Document",
+		label: __("Documents"),
+		onImported: reload,
+	});
 }
 
 // Anchors the two Attach fields below at the Project record (which already exists) rather than
@@ -352,7 +366,13 @@ function toggle_drawing_fields(dialog) {
 						<option v-for="a in areas" :key="a" :value="a">{{ a }}</option>
 					</select>
 				</template>
-				<button type="button" class="btn btn-sm btn-primary hub-documents__new" @click="open_create_dialog">
+				<button type="button" class="btn btn-xs btn-default hub-documents__new" @click="open_export_dialog">
+					{{ __("Export") }}
+				</button>
+				<button type="button" class="btn btn-xs btn-default" @click="open_import_dialog">
+					{{ __("Import") }}
+				</button>
+				<button type="button" class="btn btn-sm btn-primary" @click="open_create_dialog">
 					{{ __("+ New Document") }}
 				</button>
 			</div>

@@ -3,8 +3,10 @@
 
 import frappe
 from frappe import _
+from frappe.utils import flt
 from frappe.utils.nestedset import NestedSet
 
+from egc_projects.egc_projects import constants as c
 from egc_projects.egc_projects.validators import (
 	require_project_permission,
 	validate_project_not_changed_with_children,
@@ -42,6 +44,56 @@ class EGCWBSNode(NestedSet):
 		validate_tree_parent(self, "parent_egc_wbs_node", "WBS Node")
 		validate_unique_in_project(self, "wbs_code", "WBS Code")
 		validate_project_not_changed_with_children(self, "parent_egc_wbs_node", "WBS Node")
+		self.validate_completion_requires_activities_done()
+
+	def validate_completion_requires_activities_done(self) -> None:
+		"""A WBS node can only be marked Completed once every Activity tagged anywhere in its
+		WHOLE SUBTREE is itself at 100% — direct user instruction. Subtree-wide, not
+		direct-children-only, for the exact reason `api/wbs.py`'s `get_wbs_summary` docstring
+		already gives: a group node like "Mechanical" typically has nothing tagged directly
+		against it at all (its Activities sit on a descendant like "HVAC" instead), so a
+		direct-only check would trivially pass with zero activities checked — the opposite of
+		this rule's intent. Cancelled activities are excluded from the check, mirroring
+		`activity_control._rollup_status`'s own exclusion: an abandoned line of work must not be
+		the one thing blocking a phase from closing out.
+
+		Skipped for a brand-new node (`is_new()`): nothing could already reference a node that
+		doesn't exist yet, so there is trivially nothing to check.
+		"""
+		if self.status != c.WBS_COMPLETED or self.is_new():
+			return
+
+		subtree_nodes = frappe.get_all(
+			"EGC WBS Node",
+			filters={"project": self.project, "lft": (">=", self.lft), "rgt": ("<=", self.rgt)},
+			pluck="name",
+		)
+		incomplete = frappe.get_all(
+			"EGC Activity",
+			filters={
+				"wbs_node": ("in", subtree_nodes),
+				"status": ("!=", c.ACTIVITY_CANCELLED),
+				"percent_complete": ("<", 100),
+			},
+			fields=["activity_code", "activity_name", "percent_complete"],
+			order_by="activity_code asc",
+			limit=1,
+		)
+		if incomplete:
+			activity = incomplete[0]
+			frappe.throw(
+				_(
+					"{0} cannot be marked Completed — {1}: {2} is only {3}% complete. Every"
+					" Activity under this WBS node must reach 100% first."
+				).format(
+					frappe.bold(self.wbs_code),
+					activity.activity_code,
+					activity.activity_name,
+					round(flt(activity.percent_complete)),
+				),
+				title=_("Not Allowed"),
+				exc=frappe.ValidationError,
+			)
 
 	# NestedSet.on_update() rebuilds lft/rgt via update_nsm() and does NOT call
 	# validate_one_root() itself — that call is opt-in per doctype (see ItemGroup.on_update).

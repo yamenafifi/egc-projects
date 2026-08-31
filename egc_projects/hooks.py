@@ -62,6 +62,24 @@ doc_events = {
 			"egc_projects.egc_projects.project_progress.sync_project_percent_complete",
 		],
 	},
+	# One extra `validate` handler each, on every doctype the Hub's own Export/Import feature
+	# covers (api/bulk_transfer.py) — a no-op outside of that feature's own controlled import
+	# window, and the ONLY thing standing between an uploaded spreadsheet and injecting/reassigning
+	# rows across a project boundary, since Frappe's own Importer has no concept of "Project" at
+	# all. Runs after each doctype's own controller `validate()`, same ordering guarantee `Project`
+	# above already relies on.
+	"EGC WBS Node": {
+		"validate": "egc_projects.api.bulk_transfer.enforce_bulk_import_project",
+	},
+	"EGC Activity": {
+		"validate": "egc_projects.api.bulk_transfer.enforce_bulk_import_project",
+	},
+	"EGC Submittal": {
+		"validate": "egc_projects.api.bulk_transfer.enforce_bulk_import_project",
+	},
+	"EGC Project Document": {
+		"validate": "egc_projects.api.bulk_transfer.enforce_bulk_import_project",
+	},
 }
 
 # Scheduled Tasks
@@ -72,6 +90,7 @@ doc_events = {
 scheduler_events = {
 	"daily": [
 		"egc_projects.egc_projects.notifications.send_due_date_reminders",
+		"egc_projects.egc_projects.notifications.send_activity_due_date_reminders",
 	],
 }
 

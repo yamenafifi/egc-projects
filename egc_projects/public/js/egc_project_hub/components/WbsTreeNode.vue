@@ -25,6 +25,9 @@ const children = computed(() => props.childrenByParent[props.node.name] || []);
 const has_children = computed(() => children.value.length > 0);
 const summary = computed(() => props.summaryByName[props.node.name] || null);
 
+// Deliberate escape hatch for the "⋯" menu only — the code label itself opens the in-Hub Edit
+// dialog (below), staying inside the Project Manager; this is for a System Manager/power user who
+// specifically wants the raw native form.
 function open_form() {
 	frappe.set_route("Form", "EGC WBS Node", props.node.name);
 }
@@ -68,7 +71,7 @@ onBeforeUnmount(() => document.removeEventListener("click", on_document_click));
 			>
 				<template v-if="has_children">{{ expanded ? "▾" : "▸" }}</template>
 			</span>
-			<span class="wbs-node__code hub-link" @click="open_form">{{ node.wbs_code }}</span>
+			<span class="wbs-node__code hub-link" @click="canWrite ? emit('edit', node) : open_form()">{{ node.wbs_code }}</span>
 			<span class="wbs-node__name">{{ node.wbs_name }}</span>
 			<span class="wbs-node__discipline">{{ node.discipline || "—" }}</span>
 
@@ -119,6 +122,9 @@ onBeforeUnmount(() => document.removeEventListener("click", on_document_click));
 						@click.stop="run(() => emit('move', node, 1))"
 					>
 						{{ __("Move Down") }}
+					</button>
+					<button type="button" role="menuitem" @click.stop="run(open_form)">
+						{{ __("View Raw Record ↗") }}
 					</button>
 				</div>
 			</span>

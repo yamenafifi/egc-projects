@@ -3,29 +3,9 @@
 // Kept local to the Activities/Schedule package rather than merged into the shared api.js, for
 // the same concurrent-edit reason documents_api.js documents.
 
-const ACTIVITIES_MODULE = "egc_projects.api.activities";
+import { extract_message } from "../composables/useFrappeCall";
 
-function extract_message(r) {
-	if (r && r._server_messages) {
-		try {
-			const messages = JSON.parse(r._server_messages);
-			const first = JSON.parse(messages[0]);
-			if (first && first.message) return first.message;
-		} catch (e) {
-			// fall through to other extraction strategies
-		}
-	}
-	if (r && r.exc) {
-		try {
-			const exc_list = JSON.parse(r.exc);
-			const last_line = exc_list[0].trim().split("\n").pop();
-			return last_line.replace(/^[\w.]+Error:\s*/, "");
-		} catch (e) {
-			// fall through
-		}
-	}
-	return __("Something went wrong. Please try again.");
-}
+const ACTIVITIES_MODULE = "egc_projects.api.activities";
 
 function call_activities(method, args) {
 	return new Promise((resolve, reject) => {
@@ -63,10 +43,17 @@ export function get_activity_history(activity) {
 	return call_activities("get_activity_history", { activity });
 }
 
+export function create_child_activity(parent, values) {
+	return call_activities("create_child_activity", { parent, ...values });
+}
+
 // -- Everything below calls Frappe's own generic client API, or the pre-existing (not owned by
 // this wave's Activities package) `relationships.py` module, directly — `api/activities.py`'s
-// documented contract has no create/field-edit/link endpoints, and this file is still the one
-// place the Hub's Activity views should reach through for every Activity-related round trip.
+// documented contract has no field-edit/link endpoints of its own beyond `create_child_activity`
+// above, and this file is still the one place the Hub's Activity views should reach through for
+// every Activity-related round trip. `create_activity` below is only ever for a ROOT Activity
+// (no parent to possibly flip into a group) — anything creating a CHILD must go through
+// `create_child_activity` instead, never this generic insert.
 
 function call_core(method, args) {
 	return new Promise((resolve, reject) => {

@@ -2,6 +2,7 @@
 import { computed, ref, watch, onMounted } from "vue";
 import { get_submittals } from "../api";
 import { openSubmitForReviewFlow } from "./submit_for_review_flow";
+import { openExportDialog, openImportDialog } from "./bulk_transfer_flow";
 import { useHubResource } from "../composables/useHubResource";
 import { consumeOverdueIntent } from "../composables/useOverdueIntent";
 import { consumeOpenSubmittalIntent } from "../composables/useOpenSubmittalIntent";
@@ -79,6 +80,19 @@ function on_detail_changed() {
 	reload();
 }
 
+function open_export_dialog() {
+	openExportDialog({ project: props.project, doctype: "EGC Submittal", label: __("Submittals") });
+}
+
+function open_import_dialog() {
+	openImportDialog({
+		project: props.project,
+		doctype: "EGC Submittal",
+		label: __("Submittals"),
+		onImported: reload,
+	});
+}
+
 function format_date(value) {
 	return value ? frappe.datetime.str_to_user(value) : "—";
 }
@@ -125,10 +139,16 @@ function days_overdue(row) {
 					<input v-model="overdue_only" type="checkbox" />
 					{{ __("Overdue only") }}
 				</label>
+				<button type="button" class="btn btn-xs btn-default hub-submittals__new" @click="open_export_dialog">
+					{{ __("Export") }}
+				</button>
+				<button v-if="can_write" type="button" class="btn btn-xs btn-default" @click="open_import_dialog">
+					{{ __("Import") }}
+				</button>
 				<button
 					v-if="can_write"
 					type="button"
-					class="btn btn-sm btn-primary hub-submittals__new"
+					class="btn btn-sm btn-primary"
 					@click="open_create_dialog"
 				>
 					{{ __("+ New Submittal") }}

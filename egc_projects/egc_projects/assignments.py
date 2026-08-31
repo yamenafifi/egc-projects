@@ -170,6 +170,7 @@ def add_assignment(
 	)
 	doc.insert()
 	_refresh_ball_in_court_if_relevant(parent_doctype, parent_name)
+	_notify_activity_assignment_if_relevant(parent_doctype, parent_name, person, assignment_role)
 	return doc.name
 
 
@@ -177,9 +178,36 @@ def add_assignment(
 def remove_assignment(name: str) -> None:
 	doc = frappe.get_doc("EGC Assignment", name)
 	frappe.has_permission(doc.parent_doctype, "write", doc=doc.parent_name, throw=True)
-	parent_doctype, parent_name = doc.parent_doctype, doc.parent_name
+	parent_doctype, parent_name, person = doc.parent_doctype, doc.parent_name, doc.person
 	frappe.delete_doc("EGC Assignment", name)
 	_refresh_ball_in_court_if_relevant(parent_doctype, parent_name)
+	_close_activity_assignment_task_if_relevant(parent_doctype, parent_name, person)
+
+
+def _notify_activity_assignment_if_relevant(
+	parent_doctype: str, parent_name: str, person: str | None, assignment_role: str
+) -> None:
+	"""Real ToDo for an Activity's own team, closing a genuine gap: unlike Submittals (whose
+	formal reviewers already get one via `_assign_step`), nothing notified an Activity's assignee
+	at all before this. Scoped to `EGC Activity` only — a Submittal's `EGC Assignment` rows are a
+	Team roster, not its formal review workflow (that's `EGC Submittal Review Step`, already
+	covered), so this must not fire a second, redundant task for that case."""
+	if parent_doctype != "EGC Activity" or not person:
+		return
+	from egc_projects.egc_projects import notifications
+
+	notifications.notify_activity_assigned(parent_name, person, assignment_role)
+
+
+def _close_activity_assignment_task_if_relevant(parent_doctype: str, parent_name: str, person: str | None) -> None:
+	if parent_doctype != "EGC Activity" or not person:
+		return
+	from frappe.desk.form.assign_to import _remove as assign_remove
+
+	try:
+		assign_remove("EGC Activity", parent_name, person)
+	except frappe.DoesNotExistError:
+		pass
 
 
 def _refresh_ball_in_court_if_relevant(parent_doctype: str, parent_name: str) -> None:

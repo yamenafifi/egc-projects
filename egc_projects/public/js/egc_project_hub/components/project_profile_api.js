@@ -3,29 +3,9 @@
 // since it lives there on the server); get_person_info is the one read here because it lives in
 // this same Python module, used to preview a Person's directory info live in a dialog.
 
-const PROFILE_MODULE = "egc_projects.egc_projects.project_profile";
+import { extract_message } from "../composables/useFrappeCall";
 
-function extract_message(r) {
-	if (r && r._server_messages) {
-		try {
-			const messages = JSON.parse(r._server_messages);
-			const first = JSON.parse(messages[0]);
-			if (first && first.message) return first.message;
-		} catch (e) {
-			// fall through to other extraction strategies
-		}
-	}
-	if (r && r.exc) {
-		try {
-			const exc_list = JSON.parse(r.exc);
-			const last_line = exc_list[0].trim().split("\n").pop();
-			return last_line.replace(/^[\w.]+Error:\s*/, "");
-		} catch (e) {
-			// fall through
-		}
-	}
-	return __("Something went wrong. Please try again.");
-}
+const PROFILE_MODULE = "egc_projects.egc_projects.project_profile";
 
 function call(method, args) {
 	return new Promise((resolve, reject) => {

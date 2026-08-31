@@ -65,11 +65,34 @@ def get_directory(project: str) -> list[dict]:
 	customer_names = _display_names("Customer", "customer_name", rows)
 	supplier_names = _display_names("Supplier", "supplier_name", rows)
 
+	# Both used to run once PER ROW (`_has_portal_access` + `frappe.get_roles`) — a real N+1 on
+	# every Directory-tab load. Batched here: one query each for the whole page of stakeholders.
+	persons = list({row.person for row in rows if row.person})
+	portal_access_users = (
+		set(
+			frappe.get_all(
+				"User Permission",
+				filters={"user": ("in", persons), "allow": "Project", "for_value": project},
+				pluck="user",
+			)
+		)
+		if persons
+		else set()
+	)
+	portal_roles_by_person: dict[str, list[str]] = {}
+	if persons:
+		for row in frappe.get_all(
+			"Has Role",
+			filters={"parent": ("in", persons), "role": ("in", list(c.EGC_ROLES))},
+			fields=["parent", "role"],
+		):
+			portal_roles_by_person.setdefault(row.parent, []).append(row.role)
+
 	for row in rows:
 		row["is_egc_internal"] = bool(internal_by_role.get(row.role))
 		# `person` links directly to a User now — no separate identity record to resolve through.
-		row["has_portal_access"] = _has_portal_access(row.person, project)
-		row["portal_roles"] = [r for r in frappe.get_roles(row.person) if r in c.EGC_ROLES] if row.person else []
+		row["has_portal_access"] = row.person in portal_access_users
+		row["portal_roles"] = portal_roles_by_person.get(row.person, [])
 		if row.organization_type == "Supplier":
 			row["organization_name"] = supplier_names.get(row.organization)
 		else:

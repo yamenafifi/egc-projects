@@ -1,4 +1,4 @@
-"""Submittal notifications (docs/ARCHITECTURE_V2.md §7).
+"""Submittal and Activity notifications (docs/ARCHITECTURE_V2.md §7).
 
 Ball-in-court delivery is `frappe.desk.form.assign_to` — see `submittal_control.py`'s
 `_assign_step`/`_close_step_assignment`, and this module's own `_assign_task` below, which
@@ -6,8 +6,14 @@ mirrors it for the submittal_manager/originator roles: submission received, resp
 new revision submitted all create a real ToDo, not just a bell — a passive Notification Log
 alone is easy to miss and does not read as an actual task. Assigning a ToDo already creates a
 `Notification Log` entry for free, so `_assign_task` events are never ALSO passed through
-`_notify`. `send_due_date_reminders` is the one event-family left on plain `_notify` — an
-in-app-only reminder ping, not a new actionable task each time it fires.
+`_notify`. `send_due_date_reminders`/`send_activity_due_date_reminders` are the one event-family
+left on plain `_notify` — an in-app-only reminder ping, not a new actionable task each time it
+fires (the actual task was already created once, at assignment time).
+
+Activities were a real gap until now: `assignments.py` had no notification of any kind for being
+added to (or removed from) an Activity's team, and no scheduled job ever reminded anyone an
+Activity was overdue — `notify_activity_assigned`/`send_activity_due_date_reminders` close that
+gap, mirroring the Submittal pattern exactly.
 
 **Email** (`send_ball_in_court_email`/`send_directory_welcome_email` below) is a separate,
 additive channel on top of all of the above — the in-app Notification Log stays exactly as it
@@ -96,6 +102,23 @@ def notify_new_revision(submittal_name: str, new_submission: str, notify_users: 
 	)
 
 
+def notify_activity_assigned(activity: str, person: str, assignment_role: str) -> None:
+	"""A real ToDo when someone is added to an Activity's team — called from
+	`assignments.add_assignment` whenever `parent_doctype == "EGC Activity"` and a `person` (not
+	just a bare organization) is named. Mirrors `notify_submission_received`'s parity fix exactly:
+	being assigned to a real piece of work is a task, not just a bell."""
+	if not person:
+		return
+	activity_doc = frappe.db.get_value("EGC Activity", activity, ["activity_code", "activity_name"], as_dict=True)
+	label = f"{activity_doc.activity_code}: {activity_doc.activity_name}" if activity_doc else activity
+	_assign_task(
+		[person],
+		"EGC Activity",
+		activity,
+		frappe._("Assigned to {0} as {1}").format(label, assignment_role),
+	)
+
+
 def send_due_date_reminders() -> None:
 	"""Daily scheduled task (see hooks.py `scheduler_events`), mirroring `egc_hr`'s own
 	`alert_expiring_documents` pattern. Reminds each reviewer with an open review step due soon
@@ -145,6 +168,62 @@ def send_due_date_reminders() -> None:
 		_notify(
 			[row.reviewer_user],
 			"EGC Submittal Review Step",
+			row.name,
+			subject,
+			dedupe_on=["document_type", "document_name", "subject"],
+		)
+
+
+def send_activity_due_date_reminders() -> None:
+	"""Daily scheduled task (see hooks.py `scheduler_events`) — the Activity-side counterpart of
+	`send_due_date_reminders` above. Reminds every person assigned to an Activity approaching or
+	past its `planned_end_date`, once per day, same dedupe strategy (today's date baked into the
+	subject). This is a reminder ONLY: the actual "you're responsible for this" task was already
+	created once, at assignment time, by `notify_activity_assigned` — this just nudges it as the
+	date approaches or passes, exactly like the Submittal reminder nudges an already-assigned
+	review step rather than creating a second one."""
+	from egc_projects.egc_projects import constants as c
+	from egc_projects.egc_projects.doctype.egc_activity.egc_activity import is_overdue
+
+	today_date = getdate(today())
+	warn_from = add_days(today_date, 2)
+
+	# Groups are included deliberately, not just leaves — a group's `planned_end_date` is rollup-
+	# derived (activity_control.py), but that doesn't make it any less real: someone can genuinely
+	# be "Responsible" for a whole phase, and this only reads current state, not reacting to a
+	# specific edit event, so there's no engine-authority concern the way a direct write would have.
+	activities = frappe.get_all(
+		"EGC Activity",
+		filters={"status": ("not in", c.ACTIVITY_CLOSED_STATUSES), "planned_end_date": ("is", "set")},
+		fields=["name", "activity_code", "activity_name", "status", "planned_end_date"],
+	)
+	due_soon = [row for row in activities if getdate(row.planned_end_date) <= warn_from]
+	if not due_soon:
+		return
+
+	assignments = frappe.get_all(
+		"EGC Assignment",
+		filters={"parent_doctype": "EGC Activity", "parent_name": ("in", [row.name for row in due_soon]), "person": ("is", "set")},
+		fields=["parent_name", "person"],
+	)
+	people_by_activity: dict[str, list[str]] = {}
+	for row in assignments:
+		people_by_activity.setdefault(row.parent_name, []).append(row.person)
+
+	for row in due_soon:
+		people = people_by_activity.get(row.name)
+		if not people:
+			continue
+
+		label = (
+			frappe._("Overdue since {0}").format(frappe.format(row.planned_end_date, {"fieldtype": "Date"}))
+			if is_overdue(row.status, row.planned_end_date)
+			else frappe._("Due {0}").format(frappe.format(row.planned_end_date, {"fieldtype": "Date"}))
+		)
+		subject = frappe._("{0} — {1}: {2} ({3})").format(label, row.activity_code, row.activity_name, today_date)
+		_notify(
+			people,
+			"EGC Activity",
 			row.name,
 			subject,
 			dedupe_on=["document_type", "document_name", "subject"],

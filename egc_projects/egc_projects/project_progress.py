@@ -52,25 +52,31 @@ def _should_sync(project: str, percent_complete_method: str | None) -> bool:
 
 
 def compute_percent_complete(project: str) -> float | None:
-	"""Unweighted mean of ROOT EGC Activities' own (already-recursive, already weight-aware)
-	percent_complete.
+	"""Mean of ROOT EGC Activities' own (already-recursive, already weight-aware) percent_complete
+	— weighted by each root's own `weight_pct` once any root carries one, exactly mirroring
+	`activity_control._compute_rollup()` one level up (same fixed-100 normalisation, same
+	unweighted-mean fallback for a project whose roots haven't been weighted yet). Direct user
+	instruction: root-level `weight_pct` must actually do something, not sit in every dialog as a
+	number `validate_weight()` happily accepts and enforces a ≤100% ceiling on while nothing ever
+	reads it.
 
 	A root's stored percent_complete is already a correct, fully-recursive rollup — computed
-	bottom-up by `activity_control.refresh_activity_rollup()`/`refresh_ancestors()`, weighted by
-	each level's own `weight_pct` where set — so this reads it directly, exactly like
-	`_compute_rollup()` does one level up. Multiple roots are combined with an unweighted mean
-	(weight is a within-one-parent allocation concept; nothing establishes a relative weight
-	between a project's own top-level phases). `None` (not 0) if the project has no root
+	bottom-up by `activity_control.refresh_activity_rollup()`/`refresh_ancestors()` — so this reads
+	it directly, same as `_compute_rollup()` does. `None` (not 0) if the project has no root
 	Activities yet — nothing to derive from, matching `refresh_activity_rollup()`'s own "empty
 	group keeps its current value" rule.
 	"""
 	roots = frappe.get_all(
 		"EGC Activity",
 		filters={"project": project, "parent_egc_activity": ("in", ("", None))},
-		fields=["percent_complete"],
+		fields=["percent_complete", "weight_pct"],
 	)
 	if not roots:
 		return None
+
+	total_weight = sum(flt(r.weight_pct) for r in roots)
+	if total_weight > 0:
+		return flt(sum(flt(r.percent_complete) * flt(r.weight_pct) for r in roots) / 100, 2)
 	return flt(sum(flt(r.percent_complete) for r in roots) / len(roots), 2)
 
 

@@ -154,6 +154,46 @@ def _dependency_rows(activity: str) -> dict:
 	}
 
 
+# --- create_child_activity -------------------------------------------------------------------
+
+_CHILD_CREATE_FIELDS = ("activity_code", "activity_name", "is_group", "wbs_node", "discipline")
+
+
+@frappe.whitelist()
+def create_child_activity(parent: str, **kwargs) -> dict:
+	"""Creates a new Activity under `parent`, flipping `parent.is_group` to 1 first if it isn't
+	already — every Hub dialog that offers "Add Child Activity" tells the user this will turn the
+	parent into a group (docs/ARCHITECTURE_V2.md's own Activity detail copy), but until this
+	function existed nothing actually did that: the child insert went straight through
+	`frappe.client.insert`, and `validators.validate_tree_parent` rejects any child whose parent
+	isn't already a group — so every "Add Child" on a leaf Activity failed outright.
+
+	`frappe.db.set_value` (not a full `parent_doc.save()`) mirrors `activity_control.py`'s own
+	engine-write convention — it never re-enters `validate()`, so a parent that already held
+	leaf-only values (e.g. a hand-entered `percent_complete`) isn't blocked by
+	`assert_group_fields_not_hand_edited`. Those now-stale rollup fields are corrected for free
+	immediately after: the child's own `insert()` fires `on_update` -> `activity_control.
+	refresh_ancestors`, which recomputes the parent from its (now real) children."""
+	if not parent or not frappe.db.exists("EGC Activity", parent):
+		frappe.throw(_("Activity {0} not found.").format(parent), exc=frappe.DoesNotExistError)
+
+	project = validators.get_project_of("EGC Activity", parent)
+	validators.require_project_permission(project, "write")
+	frappe.has_permission("EGC Activity", "create", throw=True)
+
+	values = {field: kwargs.get(field) for field in _CHILD_CREATE_FIELDS if kwargs.get(field) not in (None, "")}
+	for required in ("activity_code", "activity_name"):
+		if not values.get(required):
+			frappe.throw(_("{0} is required.").format(required), exc=frappe.ValidationError)
+
+	if not frappe.db.get_value("EGC Activity", parent, "is_group"):
+		frappe.db.set_value("EGC Activity", parent, "is_group", 1, update_modified=False)
+
+	child = frappe.get_doc({"doctype": "EGC Activity", "project": project, "parent_egc_activity": parent, **values})
+	child.insert()
+	return _activity_dict(child.name)
+
+
 @frappe.whitelist()
 def get_activity_detail(activity: str) -> dict:
 	if not activity or not frappe.db.exists("EGC Activity", activity):

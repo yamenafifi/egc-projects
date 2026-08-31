@@ -5,30 +5,10 @@
 // this one file, since the Hub's Submittal views should reach through a single place for every
 // Submittal-related round trip, matching documents_api.js/activities_api.js's convention.
 
+import { extract_message } from "../composables/useFrappeCall";
+
 const SUBMITTALS_MODULE = "egc_projects.api.submittals";
 const SUBMITTAL_CONTROL_MODULE = "egc_projects.egc_projects.submittal_control";
-
-function extract_message(r) {
-	if (r && r._server_messages) {
-		try {
-			const messages = JSON.parse(r._server_messages);
-			const first = JSON.parse(messages[0]);
-			if (first && first.message) return first.message;
-		} catch (e) {
-			// fall through to other extraction strategies
-		}
-	}
-	if (r && r.exc) {
-		try {
-			const exc_list = JSON.parse(r.exc);
-			const last_line = exc_list[0].trim().split("\n").pop();
-			return last_line.replace(/^[\w.]+Error:\s*/, "");
-		} catch (e) {
-			// fall through
-		}
-	}
-	return __("Something went wrong. Please try again.");
-}
 
 function call(method, args) {
 	return new Promise((resolve, reject) => {

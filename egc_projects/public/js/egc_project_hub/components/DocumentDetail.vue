@@ -32,6 +32,7 @@ import { get_comments, add_comment } from "./comments_api";
 import { openSubmitForReviewFlow } from "./submit_for_review_flow";
 import { useHubRoute } from "../composables/useHubRoute";
 import { openSubmittalIntent } from "../composables/useOpenSubmittalIntent";
+import { openActivityIntent } from "../composables/useOpenActivityIntent";
 import { useHubResource } from "../composables/useHubResource";
 import LoadingState from "./LoadingState.vue";
 import ErrorState from "./ErrorState.vue";
@@ -57,11 +58,14 @@ function open_form() {
 	frappe.set_route("Form", "EGC Project Document", props.document);
 }
 
-function open_activity(row) {
-	frappe.set_route("Form", "EGC Activity", row.activity);
-}
-
 const { setTab } = useHubRoute();
+
+function open_activity(row) {
+	// Into the Hub's own ActivitiesTab/ActivityFullPage, not the raw native form — same reasoning
+	// as open_submittal() just below.
+	openActivityIntent.activity = row.activity;
+	setTab("activities");
+}
 
 function open_submittal(row) {
 	// Into the Hub's own SubmittalsTab/SubmittalDetail, not the raw native form — see

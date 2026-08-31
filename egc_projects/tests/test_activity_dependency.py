@@ -164,6 +164,40 @@ class TestActivityDependency(IntegrationTestCase):
 		self.assertEqual(result["percent_complete"], 75)
 		self.assertEqual(result["status"], c.ACTIVITY_IN_PROGRESS)
 
+	# -- create_child_activity -------------------------------------------------------------------
+
+	def test_create_child_activity_turns_a_leaf_parent_into_a_group(self):
+		"""Regression: every Hub "Add Child Activity" dialog promised this ("Adding a child will
+		make this a group activity") but went through a bare `frappe.client.insert`, which
+		`validators.validate_tree_parent` always rejected on a non-group parent — so the button
+		never actually worked on a fresh leaf Activity."""
+		leaf = make_activity(self.project, "CHILD-PARENT", "Parent", percent_complete=40)
+		self.assertFalse(leaf.is_group)
+
+		frappe.set_user(self.manager_user)
+		child = activities.create_child_activity(leaf.name, activity_code="CHILD-KID", activity_name="Kid")
+
+		leaf.reload()
+		self.assertTrue(leaf.is_group)
+		self.assertEqual(child["activity_code"], "CHILD-KID")
+		self.assertEqual(child["parent_egc_activity"], leaf.name)
+		# The parent's stale hand-entered percent_complete must be corrected by the rollup engine
+		# once it's a real group with a real child, not left at its old leaf-era value.
+		self.assertEqual(leaf.percent_complete, 0)
+
+	def test_create_child_activity_on_an_existing_group_leaves_it_alone(self):
+		group = make_activity(self.project, "CHILD-GRP", "Group", is_group=1)
+		frappe.set_user(self.manager_user)
+		activities.create_child_activity(group.name, activity_code="CHILD-GRP-KID", activity_name="Kid")
+		group.reload()
+		self.assertTrue(group.is_group)
+
+	def test_create_child_activity_requires_activity_code_and_name(self):
+		leaf = make_activity(self.project, "CHILD-BLANK", "Parent")
+		frappe.set_user(self.manager_user)
+		with self.assertRaises(frappe.ValidationError):
+			activities.create_child_activity(leaf.name, activity_name="Kid")
+
 	def test_get_activity_detail_includes_dependencies_and_links(self):
 		a = make_activity(self.project, "DETAIL-A", "A")
 		b = make_activity(self.project, "DETAIL-B", "B")

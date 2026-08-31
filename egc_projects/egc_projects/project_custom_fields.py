@@ -38,7 +38,7 @@ import frappe
 from frappe import _
 from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
 
-from egc_projects.egc_projects import validators
+from egc_projects.egc_projects import constants as c, validators
 
 #: Custom Fields once used to build a dedicated "EGC Project Info" tab (Tab Break) with a
 #: "Commercial" section (Contract Value) inside it — both superseded, per this module's own
@@ -80,6 +80,13 @@ _RETIRED_FIELDS = (
 	"custom_egc_site_contact_email",
 )
 
+
+def _select_options(values: tuple[str, ...]) -> str:
+	"""Leading blank line: an untouched Select must stay unset, never silently default to the
+	first option (frappe/model/create_new.py's `get_new_doc()` rule)."""
+	return "\n" + "\n".join(values)
+
+
 CUSTOM_FIELDS = {
 	"Project": [
 		# -- bridging anchors (see module docstring) --------------------------------------------
@@ -110,9 +117,7 @@ CUSTOM_FIELDS = {
 			"fieldname": "custom_egc_project_stage",
 			"label": "Project Stage",
 			"fieldtype": "Select",
-			# Leading blank line: an untouched Select must stay unset, never silently default to
-			# the first option (frappe/model/create_new.py's `get_new_doc()` rule).
-			"options": "\nDesign\nProcurement\nConstruction\nCommissioning\nCloseout\nWarranty",
+			"options": _select_options(c.PROJECT_STAGES),
 			"insert_after": "custom_egc_classification_section",
 		},
 		{
@@ -124,21 +129,21 @@ CUSTOM_FIELDS = {
 			"fieldname": "custom_egc_sector",
 			"label": "Sector",
 			"fieldtype": "Select",
-			"options": "\nHealthcare\nIndustrial\nCommercial\nInfrastructure\nOther",
+			"options": _select_options(c.SECTORS),
 			"insert_after": "custom_egc_classification_col",
 		},
 		{
 			"fieldname": "custom_egc_delivery_method",
 			"label": "Delivery Method",
 			"fieldtype": "Select",
-			"options": "\nDesign-Bid-Build\nDesign-Build\nEPC\nTurnkey\nOther",
+			"options": _select_options(c.DELIVERY_METHODS),
 			"insert_after": "custom_egc_sector",
 		},
 		{
 			"fieldname": "custom_egc_contract_type",
 			"label": "Contract Type",
 			"fieldtype": "Select",
-			"options": "\nLump Sum\nUnit Price\nCost Plus\nTime & Material\nOther",
+			"options": _select_options(c.CONTRACT_TYPES),
 			"insert_after": "custom_egc_delivery_method",
 		},
 		# -- Details tab: Description ---------------------------------------------------------

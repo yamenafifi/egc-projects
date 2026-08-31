@@ -215,6 +215,40 @@ def reorder_wbs_nodes(parent: str | None, ordered_names) -> None:
 		frappe.db.set_value("EGC WBS Node", name, "sequence", index, update_modified=False)
 
 
+# --- create_child_wbs_node ----------------------------------------------------------------------
+
+_CHILD_CREATE_FIELDS = ("wbs_code", "wbs_name", "is_group", "discipline")
+
+
+@frappe.whitelist()
+def create_child_wbs_node(parent: str, project: str, **kwargs) -> dict:
+	"""Creates a new WBS Node under `parent`, flipping `parent.is_group` to 1 first if it isn't
+	already — mirrors `api/activities.py`'s `create_child_activity` exactly, and for the same
+	reason: `validators.validate_tree_parent` rejects any child whose parent isn't already a
+	group, but the Hub's "Add Child WBS Node" quick-add (`WbsTab.vue`'s `on_quick_add`) went
+	straight through `frappe.client.insert`, so adding a child to a leaf WBS node failed outright
+	every time."""
+	if not parent or not frappe.db.exists("EGC WBS Node", parent):
+		frappe.throw(_("WBS Node {0} not found.").format(parent), exc=frappe.DoesNotExistError)
+
+	validators.require_project_permission(project, "write")
+	frappe.has_permission("EGC WBS Node", "create", throw=True)
+
+	values = {field: kwargs.get(field) for field in _CHILD_CREATE_FIELDS if kwargs.get(field) not in (None, "")}
+	for required in ("wbs_code", "wbs_name"):
+		if not values.get(required):
+			frappe.throw(_("{0} is required.").format(required), exc=frappe.ValidationError)
+
+	if not frappe.db.get_value("EGC WBS Node", parent, "is_group"):
+		frappe.db.set_value("EGC WBS Node", parent, "is_group", 1, update_modified=False)
+
+	child = frappe.get_doc(
+		{"doctype": "EGC WBS Node", "project": project, "parent_egc_wbs_node": parent, **values}
+	)
+	child.insert()
+	return {"name": child.name}
+
+
 # --- copy_wbs_branch --------------------------------------------------------------------------
 
 

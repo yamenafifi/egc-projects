@@ -15,6 +15,8 @@
 // `EGC Submittal` may not exist yet (built concurrently by another work package); every call
 // that touches it is guarded by `frappe.db.exists("DocType", ...)` so this degrades gracefully.
 
+import { LINK_PURPOSES } from "./shared_constants";
+
 frappe.provide("egc_projects");
 
 (function () {
@@ -27,8 +29,6 @@ frappe.provide("egc_projects");
 		"EGC Project Document": { label: __("Project Document") },
 		"EGC Submittal": { label: __("Submittal") },
 	};
-
-	const LINK_PURPOSES = ["Reference", "Requirement"];
 
 	const METHODS = {
 		get_links_for_activity: "egc_projects.egc_projects.relationships.get_links_for_activity",

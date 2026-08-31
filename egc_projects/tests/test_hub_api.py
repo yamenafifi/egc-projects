@@ -349,12 +349,17 @@ class TestHubAPI(IntegrationTestCase):
 		with self.assertRaises(frappe.PermissionError):
 			hub.get_financials(self.project)
 		# The project gate alone must still let this user through to non-financial data.
-		hub.get_overview(self.project)
+		overview = hub.get_overview(self.project)
 		self.assertFalse(hub.get_project_context(self.project)["permissions"]["financials"])
+		# Regression: get_overview()'s own "financials" health dot used to leak a red/green
+		# signal derived from gross_margin — a commercial figure — to anyone who could merely
+		# open the Overview tab, even though get_financials() itself correctly refuses them.
+		self.assertNotIn("financials", overview["health"])
 
 		frappe.set_user(self.manager_user)
 		hub.get_financials(self.project)  # must not raise
 		self.assertTrue(hub.get_project_context(self.project)["permissions"]["financials"])
+		self.assertIn("financials", hub.get_overview(self.project)["health"])
 
 	# -- 4. Project isolation via the API ------------------------------------------------------
 
@@ -551,6 +556,36 @@ class TestHubAPI(IntegrationTestCase):
 		# approval_status doesn't change, only whether it is now considered late.
 		frappe.db.set_value("EGC Submittal Revision", future_submission.name, "due_date", add_days(today(), -3))
 		self.assertEqual(hub.get_overview(self.project)["health"]["documents"], "orange")
+
+	def test_drawings_health_batches_across_multiple_at_risk_drawings_correctly(self):
+		"""Regression: `_governing_submission_due_dates` fetches every at-risk drawing's governing
+		due date in ONE batched query, grouped by `document_revision` — this pins that the
+		grouping never mixes up one drawing's due date with another's. Two at-risk drawings, only
+		one genuinely overdue: overall health must still read "orange" (not "green", which a
+		broken grouping that only kept the wrong revision's date could produce), and flipping the
+		overdue one back to green must be independently detectable."""
+		on_time_drawing = self._make_document("HLT-DRW-BATCH-1", document_type=self.drawing_type)
+		on_time_rev = self._make_issued_revision(on_time_drawing.name, "00")
+		on_time_submittal = self._make_submittal("HLT-DRW-BATCH-SUB-1")
+		on_time_submission = self._make_submission(
+			on_time_submittal.name, "00", document_revisions=[on_time_rev.name], due_date=add_days(today(), 10)
+		)
+		on_time_submission.submit()
+
+		late_drawing = self._make_document("HLT-DRW-BATCH-2", document_type=self.drawing_type)
+		late_rev = self._make_issued_revision(late_drawing.name, "00")
+		late_submittal = self._make_submittal("HLT-DRW-BATCH-SUB-2")
+		late_submission = self._make_submission(
+			late_submittal.name, "00", document_revisions=[late_rev.name], due_date=add_days(today(), -3)
+		)
+		late_submission.submit()
+
+		self.assertEqual(hub.get_overview(self.project)["health"]["documents"], "orange")
+
+		# Bringing the late one current again must flip the overall signal back to green — proof
+		# the two drawings' due dates were never conflated with each other.
+		frappe.db.set_value("EGC Submittal Revision", late_submission.name, "due_date", add_days(today(), 10))
+		self.assertEqual(hub.get_overview(self.project)["health"]["documents"], "green")
 
 	def test_financials_health_red_when_gross_margin_negative(self):
 		frappe.db.set_value("Project", self.project, "gross_margin", -500)

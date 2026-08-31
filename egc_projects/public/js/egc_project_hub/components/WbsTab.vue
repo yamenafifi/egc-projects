@@ -6,9 +6,11 @@ import {
 	copy_wbs_branch,
 	bulk_create_wbs_nodes,
 	create_wbs_node,
+	create_child_wbs_node,
 	update_wbs_node,
 } from "./wbs_api";
 import { useHubResource } from "../composables/useHubResource";
+import { openExportDialog, openImportDialog } from "./bulk_transfer_flow";
 import LoadingState from "./LoadingState.vue";
 import ErrorState from "./ErrorState.vue";
 import EmptyState from "./EmptyState.vue";
@@ -49,6 +51,19 @@ const roots = computed(() => children_by_parent.value[""] || []);
 
 function open_tree_view() {
 	frappe.set_route("Tree", "EGC WBS Node", { project: props.project });
+}
+
+function open_export_dialog() {
+	openExportDialog({ project: props.project, doctype: "EGC WBS Node", label: __("WBS Nodes") });
+}
+
+function open_import_dialog() {
+	openImportDialog({
+		project: props.project,
+		doctype: "EGC WBS Node",
+		label: __("WBS Nodes"),
+		onImported: reload,
+	});
 }
 
 function create_root() {
@@ -109,7 +124,10 @@ function on_quick_add(node) {
 		],
 		primary_action_label: __("Create"),
 		primary_action(values) {
-			create_wbs_node({ ...values, project: props.project, parent_egc_wbs_node: node.name })
+			// Not create_wbs_node — that's a bare frappe.client.insert and this node may not be
+			// a group yet. create_child_wbs_node makes it one first, same as create_child_activity
+			// does for Activities: "Add Child" always implies the parent becomes a group.
+			create_child_wbs_node(node.name, props.project, values)
 				.then(() => {
 					dialog.hide();
 					reload();
@@ -265,6 +283,12 @@ function open_bulk_dialog() {
 				</button>
 				<button v-if="can_write" type="button" class="btn btn-xs btn-default" @click="open_bulk_dialog">
 					{{ __("Bulk Add") }}
+				</button>
+				<button type="button" class="btn btn-xs btn-default" @click="open_export_dialog">
+					{{ __("Export") }}
+				</button>
+				<button v-if="can_write" type="button" class="btn btn-xs btn-default" @click="open_import_dialog">
+					{{ __("Import") }}
 				</button>
 				<button v-if="can_write" type="button" class="btn btn-sm btn-primary" @click="create_root">
 					{{ __("+ New WBS Node") }}

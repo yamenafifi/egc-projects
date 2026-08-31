@@ -1,15 +1,19 @@
 <script setup>
 import { computed, ref, watch, onMounted } from "vue";
 import { get_activities } from "../api";
-import { create_activity as create_activity_record } from "./activities_api";
+import { create_activity as create_activity_record, create_child_activity } from "./activities_api";
 import { useHubResource } from "../composables/useHubResource";
+import { useHubRoute } from "../composables/useHubRoute";
+import { openExportDialog, openImportDialog } from "./bulk_transfer_flow";
 import { consumeOverdueIntent } from "../composables/useOverdueIntent";
+import { consumeOpenActivityIntent } from "../composables/useOpenActivityIntent";
 import LoadingState from "./LoadingState.vue";
 import ErrorState from "./ErrorState.vue";
 import EmptyState from "./EmptyState.vue";
 import StatusPill from "./StatusPill.vue";
 import ActivityDetail from "./ActivityDetail.vue";
 import ActivityFullPage from "./ActivityFullPage.vue";
+import ActivityExpandPanel from "./ActivityExpandPanel.vue";
 import ActivityGanttView from "./ActivityGanttView.vue";
 import ActivityOutlineView from "./ActivityOutlineView.vue";
 
@@ -28,8 +32,22 @@ watch(() => props.project, reload, { immediate: true });
 const WRITE_ROLES = ["EGC Project Manager", "EGC Project Engineer", "System Manager"];
 const can_write = computed(() => (frappe.user_roles || []).some((role) => WRITE_ROLES.includes(role)));
 
+const { setTab } = useHubRoute();
+
+// The WBS tree has no per-node detail page of its own (a NestedSet, not a flat register) to
+// deep-link into the way Documents/Submittals/Activities do — switching to the WBS tab is the
+// correct, in-Hub destination this app actually has, even without scrolling to/highlighting the
+// specific node.
+function open_wbs() {
+	setTab("wbs");
+}
+
 const selected_activity = ref(null);
 const full_page_activity = ref(null);
+// The table row's own inline "drop down and showcase what's underneath" panel
+// (ActivityExpandPanel.vue) — distinct from both the side-panel drawer and the full page. Row
+// click toggles this; the activity code hyperlink is the only way to the full page.
+const expanded = ref(new Set());
 
 function open_detail(name) {
 	selected_activity.value = name;
@@ -52,6 +70,26 @@ function on_detail_changed() {
 	reload();
 }
 
+function open_export_dialog() {
+	openExportDialog({ project: props.project, doctype: "EGC Activity", label: __("Activities") });
+}
+
+function open_import_dialog() {
+	openImportDialog({
+		project: props.project,
+		doctype: "EGC Activity",
+		label: __("Activities"),
+		onImported: reload,
+	});
+}
+
+function toggle_expand(name) {
+	const next = new Set(expanded.value);
+	if (next.has(name)) next.delete(name);
+	else next.add(name);
+	expanded.value = next;
+}
+
 const status_filter = ref("");
 const discipline_filter = ref("");
 const overdue_only = ref(false);
@@ -63,7 +101,14 @@ const active_view = ref("Table");
 
 onMounted(() => {
 	if (consumeOverdueIntent("activities")) overdue_only.value = true;
+	// Cross-nav from Documents/Submittals/Overview — open straight into this specific Activity's
+	// full page instead of just landing on the unfiltered register.
+	const open_activity_intent = consumeOpenActivityIntent();
+	if (open_activity_intent) full_page_activity.value = open_activity_intent;
 });
+
+// Toggle column + the 12 data columns, + 1 more when the trailing "+" quick-add column is shown.
+const column_count = computed(() => 13 + (can_write.value ? 1 : 0));
 
 const statuses = computed(() => [...new Set((data.value || []).map((r) => r.status).filter(Boolean))].sort());
 const disciplines = computed(() =>
@@ -165,7 +210,10 @@ function open_quick_add(row) {
 		],
 		primary_action_label: __("Create"),
 		primary_action(values) {
-			create_activity_record({ ...values, project: props.project, parent_egc_activity: row.name })
+			// Not create_activity_record — that's a bare frappe.client.insert and `row` may not
+			// be a group yet. create_child_activity makes it one first (see ActivityDetail.vue's
+			// identical dialog for the full reasoning).
+			create_child_activity(row.name, values)
 				.then(() => {
 					dialog.hide();
 					reload();
@@ -230,6 +278,12 @@ function open_quick_add(row) {
 					{{ __("Overdue only") }}
 				</label>
 				<div class="hub-toolbar__spacer" />
+				<button type="button" class="btn btn-xs btn-default" @click="open_export_dialog">
+					{{ __("Export") }}
+				</button>
+				<button v-if="can_write" type="button" class="btn btn-xs btn-default" @click="open_import_dialog">
+					{{ __("Import") }}
+				</button>
 				<button v-if="can_write" type="button" class="btn btn-sm btn-primary" @click="create_activity">
 					{{ __("+ New Activity") }}
 				</button>
@@ -249,6 +303,7 @@ function open_quick_add(row) {
 				<table class="hub-table">
 					<thead>
 						<tr>
+							<th class="hub-activities__toggle-col"></th>
 							<th>{{ __("Code") }}</th>
 							<th>{{ __("Name") }}</th>
 							<th>{{ __("WBS") }}</th>
@@ -266,10 +321,21 @@ function open_quick_add(row) {
 					</thead>
 					<tbody>
 						<template v-for="row in filtered" :key="row.name">
-							<tr class="hub-table__row--clickable" @click="open_full_page(row.name)">
+							<tr class="hub-table__row--clickable" @click="toggle_expand(row.name)">
+								<td class="hub-activities__toggle-col">
+									<button
+										type="button"
+										class="hub-activities__toggle"
+										:class="{ 'hub-activities__toggle--open': expanded.has(row.name) }"
+										:title="__('Show linked records')"
+										@click.stop="toggle_expand(row.name)"
+									>
+										▶
+									</button>
+								</td>
 								<td>
 									<span class="hub-activities__indent" :style="{ width: (row.indent || 0) * 18 + 'px' }" />
-									<a href="#" class="hub-link" @click.stop.prevent="open_detail(row.name)">{{ row.activity_code }}</a>
+									<a href="#" class="hub-link" @click.stop.prevent="open_full_page(row.name)">{{ row.activity_code }}</a>
 								</td>
 								<td class="hub-table__truncate" :title="row.activity_name">
 									{{ row.activity_name }}
@@ -286,13 +352,9 @@ function open_quick_add(row) {
 									</span>
 								</td>
 								<td>
-									<a
-										v-if="row.wbs_node"
-										:href="`/app/egc-wbs-node/${encodeURIComponent(row.wbs_node)}`"
-										:title="row.wbs_node"
-										@click.stop
-										>{{ row.wbs_label || row.wbs_node }}</a
-									>
+									<a v-if="row.wbs_node" href="#" :title="row.wbs_node" @click.stop.prevent="open_wbs">
+										{{ row.wbs_label || row.wbs_node }}
+									</a>
 									<span v-else>—</span>
 								</td>
 								<td>{{ row.discipline || "—" }}</td>
@@ -340,6 +402,18 @@ function open_quick_add(row) {
 									</button>
 								</td>
 							</tr>
+							<tr v-if="expanded.has(row.name)" class="hub-activities__expand-row">
+								<td :colspan="column_count">
+									<ActivityExpandPanel
+										:activity="row.name"
+										:project="project"
+										:can-write="can_write"
+										:link-counts="row.link_counts || {}"
+										@open-detail="open_full_page"
+										@changed="reload"
+									/>
+								</td>
+							</tr>
 						</template>
 					</tbody>
 				</table>
@@ -362,6 +436,34 @@ function open_quick_add(row) {
 </template>
 
 <style scoped>
+.hub-activities__toggle-col {
+	width: 28px;
+}
+
+.hub-activities__toggle {
+	appearance: none;
+	border: none;
+	background: none;
+	padding: 0;
+	width: 20px;
+	height: 20px;
+	color: var(--text-muted);
+	font-size: 10px;
+	cursor: pointer;
+	transition: transform 0.15s ease;
+}
+
+.hub-activities__toggle--open {
+	transform: rotate(90deg);
+	color: var(--text-color);
+}
+
+.hub-activities__expand-row td {
+	padding: 0;
+	background: var(--subtle-fg, var(--fg-color));
+	border-bottom: 1px solid var(--border-color);
+}
+
 .hub-activities__indent {
 	display: inline-block;
 	vertical-align: middle;

@@ -8,6 +8,8 @@ Portal User mechanism on `Customer`, and the generic `EGC Assignment` engine (as
 that replaced EGC Activity's single `responsible_user`/`responsible_supplier` fields.
 """
 
+from unittest.mock import patch
+
 import frappe
 from frappe.tests import IntegrationTestCase
 
@@ -184,3 +186,38 @@ class TestEGCAssignment(IntegrationTestCase):
 
 	def test_get_assignments_for_empty_when_none(self):
 		self.assertEqual(assignments.get_assignments_for("EGC Activity", self.activity), [])
+
+	# -- Activity assignment notifications (regression: this used to be a total gap) -------------
+
+	@patch("frappe.desk.form.assign_to._add")
+	def test_add_assignment_on_activity_creates_a_real_todo(self, mock_assign):
+		person = _make_person()
+		assignments.add_assignment("EGC Activity", self.activity, "Responsible", person=person)
+
+		mock_assign.assert_called_once()
+		(args,), _ = mock_assign.call_args
+		self.assertEqual(args["doctype"], "EGC Activity")
+		self.assertEqual(args["name"], self.activity)
+		self.assertEqual(args["assign_to"], [person])
+
+	@patch("frappe.desk.form.assign_to._add")
+	def test_add_assignment_with_only_organization_creates_no_todo(self, mock_assign):
+		org = _make_organization()
+		assignments.add_assignment("EGC Activity", self.activity, "Contractor", organization=org)
+		mock_assign.assert_not_called()
+
+	@patch("frappe.desk.form.assign_to._add")
+	def test_add_assignment_on_submittal_creates_no_todo(self, mock_assign):
+		# EGC Assignment on a Submittal is a Team roster, not its formal review workflow (that's
+		# EGC Submittal Review Step, already covered by _assign_step) — must not double up.
+		submittal = _make_submittal(self.project, "DIR-SUB-TODO")
+		assignments.add_assignment("EGC Submittal", submittal, "Responsible", person=_make_person())
+		mock_assign.assert_not_called()
+
+	@patch("frappe.desk.form.assign_to._remove")
+	def test_remove_assignment_on_activity_closes_the_todo(self, mock_remove):
+		person = _make_person()
+		name = assignments.add_assignment("EGC Activity", self.activity, "Watcher", person=person)
+		assignments.remove_assignment(name)
+
+		mock_remove.assert_called_once_with("EGC Activity", self.activity, person)
