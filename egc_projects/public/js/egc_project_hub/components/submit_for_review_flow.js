@@ -37,6 +37,8 @@ import {
 	person_link_filter,
 	organization_link_filter,
 } from "./directory_helpers";
+import { suggest_submittal_code } from "./code_naming_api";
+import { apply_suggested_code } from "./code_naming_helpers";
 
 //: everything `api/submittals.py.create_submittal`'s own `_CREATE_FIELDS` allow-list accepts
 //: beyond identity (submittal_number/title/submittal_type/discipline) — kept in an optional,
@@ -145,7 +147,11 @@ export async function openSubmitForReviewFlow({
 				fieldtype: "Data",
 				label: __("Submittal Number"),
 				reqd: 1,
+				read_only: 1,
 				default: defaults.submittal_number,
+				description: __(
+					"Generated automatically from Type + Discipline — pick Discipline below; Type can be left blank to detect it from the document's own type."
+				),
 			},
 			{ fieldname: "title", fieldtype: "Data", label: __("Title"), reqd: 1, default: defaults.title },
 			{ fieldtype: "Column Break" },
@@ -156,6 +162,7 @@ export async function openSubmitForReviewFlow({
 				label: __("Type"),
 				default: defaults.submittal_type,
 				description: __("Detected from the document's own type when left blank."),
+				onchange: () => suggest_submittal_number(dialog, project),
 			},
 			{
 				fieldname: "discipline",
@@ -163,6 +170,8 @@ export async function openSubmitForReviewFlow({
 				options: "EGC Discipline",
 				label: __("Discipline"),
 				default: defaults.discipline,
+				reqd: 1,
+				onchange: () => suggest_submittal_number(dialog, project),
 			},
 			{ fieldtype: "Section Break", label: __("Additional Details"), collapsible: 1 },
 			{
@@ -331,5 +340,16 @@ export async function openSubmitForReviewFlow({
 			}
 		},
 	});
+	// discipline/submittal_type may already be defaulted above — onchange never fires for a
+	// default, so fire the same suggestion once, immediately, before the dialog is shown.
+	if (!existingSubmittal) suggest_submittal_number(dialog, project);
 	dialog.show();
+}
+
+async function suggest_submittal_number(dialog, project) {
+	const discipline = dialog.get_value("discipline");
+	const submittal_type = dialog.get_value("submittal_type");
+	if (!discipline || !submittal_type) return;
+	const suggestion = await suggest_submittal_code(project, discipline, submittal_type).catch(() => "");
+	apply_suggested_code(dialog, "submittal_number", suggestion);
 }

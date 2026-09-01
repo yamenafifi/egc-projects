@@ -36,6 +36,12 @@ frappe.ui.form.on("EGC Activity", {
 				frappe.set_route("Tree", "EGC Activity", { project: frm.doc.project });
 			});
 		}
+
+		// Discipline is the one input activity_code is generated from — required in the UI on
+		// a new Activity so nobody gets stuck at a blank, read-only, "mandatory" code field with
+		// no visible reason. Not a schema-level change (an existing Activity predating this
+		// feature may well have no Discipline), so left alone once already saved.
+		if (frm.is_new()) frm.set_df_property("discipline", "reqd", 1);
 	},
 
 	show_overdue_indicator(frm) {
@@ -55,5 +61,21 @@ frappe.ui.form.on("EGC Activity", {
 
 	planned_end_date(frm) {
 		frm.trigger("show_overdue_indicator");
+	},
+
+	// Native-form parity with the Hub's own "New Activity"/"Add Child Activity" dialogs
+	// (code_naming.py) — activity_code is `read_only` (see egc_activity.json): this is a live
+	// preview of what Discipline will produce, not something the user could type over anyway.
+	// Only previewed for a NEW, still-unsaved Activity — editing an already-saved Activity's
+	// Discipline never rewrites its (already server-assigned, final) code.
+	discipline(frm) {
+		if (!frm.is_new() || !frm.doc.discipline) return;
+		frappe.call({
+			method: "egc_projects.egc_projects.code_naming.suggest_activity_code",
+			args: { project: frm.doc.project, discipline: frm.doc.discipline },
+			callback(r) {
+				frm.set_value("activity_code", r.message || "");
+			},
+		});
 	},
 });

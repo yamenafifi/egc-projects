@@ -250,7 +250,7 @@ function open_record_response_dialog(step) {
 				fieldtype: "Attach",
 				label: __("Attachment"),
 				description: __("Optional — a marked-up file you're returning with your response (e.g. an annotated drawing)."),
-				options: { doctype: "EGC Submittal Review Step", docname: step.name, fieldname: "response_attachment" },
+				options: { doctype: "EGC Submittal Review Step", docname: step.name, fieldname: "response_attachment", folder: `Home/Projects/${props.project}/Submittals` },
 			},
 		],
 		primary_action_label: __("Record"),

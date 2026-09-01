@@ -9,9 +9,39 @@ frappe.ui.form.on("EGC Submittal", {
 
 		if (!frm.is_new()) {
 			render_submission_history(frm);
+		} else {
+			// Discipline is one of the two inputs submittal_number is generated from — required
+			// in the UI on a new Submittal so nobody gets stuck at a blank, read-only,
+			// "mandatory" code field with no visible reason. Type stays optional here (it can be
+			// inferred from the submittal's own documents elsewhere) and isn't a schema-level
+			// change either, since an existing Submittal predating this feature may have neither.
+			frm.set_df_property("discipline", "reqd", 1);
 		}
 	},
+
+	// Native-form parity with the Hub's own "New Submittal" dialog (code_naming.py) —
+	// submittal_number is `read_only` (see egc_submittal.json): this is a live preview of what
+	// Discipline + Type will produce, not something the user could type over anyway. Only
+	// previewed for a NEW, still-unsaved Submittal — editing an already-saved Submittal's
+	// Discipline/Type never rewrites its (already server-assigned, final) code.
+	discipline(frm) {
+		suggest_submittal_number(frm);
+	},
+	submittal_type(frm) {
+		suggest_submittal_number(frm);
+	},
 });
+
+function suggest_submittal_number(frm) {
+	if (!frm.is_new() || !frm.doc.discipline || !frm.doc.submittal_type) return;
+	frappe.call({
+		method: "egc_projects.egc_projects.code_naming.suggest_submittal_code",
+		args: { project: frm.doc.project, discipline: frm.doc.discipline, submittal_type: frm.doc.submittal_type },
+		callback(r) {
+			frm.set_value("submittal_number", r.message || "");
+		},
+	});
+}
 
 function render_submission_history(frm) {
 	frappe.call({

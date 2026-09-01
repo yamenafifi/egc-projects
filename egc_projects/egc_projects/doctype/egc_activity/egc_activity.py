@@ -18,7 +18,7 @@ from frappe.desk.treeview import make_tree_args
 from frappe.utils import date_diff, flt, getdate, sbool, today
 from frappe.utils.nestedset import NestedSet
 
-from egc_projects.egc_projects import activity_control, project_progress, schedule_engine
+from egc_projects.egc_projects import activity_control, code_naming, project_progress, schedule_engine
 from egc_projects.egc_projects.constants import (
 	ACTIVITY_CLOSED_STATUSES,
 	ACTIVITY_COMPLETED,
@@ -76,6 +76,15 @@ class EGCActivity(NestedSet):
 	# end: auto-generated types
 
 	nsm_parent_field = "parent_egc_activity"
+
+	def before_insert(self):
+		# Only when blank — a bulk-imported row's own pre-existing code (e.g. a client's real
+		# legacy numbering) is never overwritten; only genuinely new, code-less rows get one
+		# assigned. See code_naming.py's module docstring.
+		if not self.activity_code:
+			code = code_naming.assign_activity_code(self.project, self.discipline)
+			if code:
+				self.activity_code = code
 
 	def validate(self):
 		validate_tree_parent(self, "parent_egc_activity", "Activity")

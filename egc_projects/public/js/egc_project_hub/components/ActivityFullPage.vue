@@ -24,6 +24,8 @@ import {
 } from "./activities_api";
 import { add_assignment, remove_assignment } from "./assignments_api";
 import { get_person_info } from "./project_profile_api";
+import { suggest_activity_code } from "./code_naming_api";
+import { apply_suggested_code } from "./code_naming_helpers";
 import {
 	get_directory_person_emails,
 	get_directory_organization_names,
@@ -269,14 +271,36 @@ function confirm_remove_assignment(row) {
 // -- children (group activities only) -------------------------------------------------------------
 
 function open_add_child_dialog() {
+	async function suggest_code(dialog) {
+		const discipline = dialog.get_value("discipline");
+		if (!discipline) return;
+		const suggestion = await suggest_activity_code(props.project, discipline).catch(() => "");
+		apply_suggested_code(dialog, "activity_code", suggestion);
+	}
+
 	const dialog = new frappe.ui.Dialog({
 		title: __("Add Child Activity"),
 		fields: [
-			{ fieldname: "activity_code", fieldtype: "Data", label: __("Activity Code"), reqd: 1 },
+			{
+				fieldname: "activity_code",
+				fieldtype: "Data",
+				label: __("Activity Code"),
+				reqd: 1,
+				read_only: 1,
+				description: __("Generated automatically from Discipline — pick one below."),
+			},
 			{ fieldname: "activity_name", fieldtype: "Data", label: __("Activity Name"), reqd: 1 },
 			{ fieldname: "is_group", fieldtype: "Check", label: __("Is Group") },
 			{ fieldname: "wbs_node", fieldtype: "Link", label: __("WBS Node"), options: "EGC WBS Node", default: data.value?.activity?.wbs_node, get_query: () => ({ filters: { project: props.project } }) },
-			{ fieldname: "discipline", fieldtype: "Link", label: __("Discipline"), options: "EGC Discipline", default: data.value?.activity?.discipline },
+			{
+				fieldname: "discipline",
+				fieldtype: "Link",
+				label: __("Discipline"),
+				options: "EGC Discipline",
+				default: data.value?.activity?.discipline,
+				reqd: 1,
+				onchange: () => suggest_code(dialog),
+			},
 		],
 		primary_action_label: __("Create"),
 		primary_action(values) {
@@ -291,6 +315,9 @@ function open_add_child_dialog() {
 				});
 		},
 	});
+	// discipline is prefilled above — onchange never fires for a default, so fire the same
+	// suggestion once, immediately, before the dialog is shown.
+	suggest_code(dialog);
 	dialog.show();
 }
 

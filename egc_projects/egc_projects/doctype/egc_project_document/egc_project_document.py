@@ -5,7 +5,7 @@ import frappe
 from frappe import _
 from frappe.model.document import Document
 
-from egc_projects.egc_projects import document_control, validators
+from egc_projects.egc_projects import code_naming, document_control, validators
 
 
 class EGCProjectDocument(Document):
@@ -45,6 +45,15 @@ class EGCProjectDocument(Document):
 		title: DF.Data
 		wbs_node: DF.Link | None
 	# end: auto-generated types
+
+	def before_insert(self):
+		# Only when blank — a bulk-imported row's own pre-existing code (e.g. a client's real
+		# legacy numbering) is never overwritten; only genuinely new, code-less rows get one
+		# assigned. See code_naming.py's module docstring.
+		if not self.document_number:
+			code = code_naming.assign_document_code(self.project, self.discipline, self.document_type)
+			if code:
+				self.document_number = code
 
 	def validate(self):
 		validators.validate_unique_in_project(self, "document_number", _("Document"))

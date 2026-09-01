@@ -2,6 +2,8 @@
 import { computed, ref, watch, onMounted } from "vue";
 import { get_documents, create_document, create_document_revision, get_drawing_document_types } from "./documents_api";
 import { get_directory_person_emails, person_link_filter } from "./directory_helpers";
+import { suggest_document_code } from "./code_naming_api";
+import { apply_suggested_code } from "./code_naming_helpers";
 import { openExportDialog, openImportDialog, confirmBulkDelete } from "./bulk_transfer_flow";
 import { useRowSelection } from "../composables/useRowSelection";
 import BulkActionsBar from "./BulkActionsBar.vue";
@@ -198,11 +200,26 @@ async function open_create_dialog() {
 	// field's own get_query filter is final from the first render, not patched in later.
 	const directory_emails = await get_directory_person_emails(props.project);
 
+	async function suggest_document_number(dialog) {
+		const discipline = dialog.get_value("discipline");
+		const document_type = dialog.get_value("document_type");
+		if (!discipline || !document_type) return;
+		const suggestion = await suggest_document_code(props.project, discipline, document_type).catch(() => "");
+		apply_suggested_code(dialog, "document_number", suggestion);
+	}
+
 	const dialog = new frappe.ui.Dialog({
 		title: __("New Document"),
 		size: "large",
 		fields: [
-			{ fieldname: "document_number", fieldtype: "Data", label: __("Document Number"), reqd: 1 },
+			{
+				fieldname: "document_number",
+				fieldtype: "Data",
+				label: __("Document Number"),
+				reqd: 1,
+				read_only: 1,
+				description: __("Generated automatically from Document Type + Discipline — pick both below."),
+			},
 			{ fieldname: "title", fieldtype: "Data", label: __("Title"), reqd: 1 },
 			{ fieldtype: "Column Break" },
 			{
@@ -215,9 +232,19 @@ async function open_create_dialog() {
 				// fields (and the Native File attachment below) only ever appear once the picked
 				// type is actually a drawing type — never a "(optional, only meaningful if...)"
 				// section shown regardless and left to the user to ignore correctly.
-				onchange: () => toggle_drawing_fields(dialog),
+				onchange: () => {
+					toggle_drawing_fields(dialog);
+					suggest_document_number(dialog);
+				},
 			},
-			{ fieldname: "discipline", fieldtype: "Link", label: __("Discipline"), options: "EGC Discipline" },
+			{
+				fieldname: "discipline",
+				fieldtype: "Link",
+				label: __("Discipline"),
+				options: "EGC Discipline",
+				reqd: 1,
+				onchange: () => suggest_document_number(dialog),
+			},
 
 			{ fieldtype: "Section Break" },
 			{
@@ -278,7 +305,9 @@ async function open_create_dialog() {
 				fieldtype: "Attach",
 				label: __("File"),
 				reqd: 1,
-				options: file_anchor(),
+				// Defaults to Documents until a Document Type is picked — toggle_drawing_fields()
+				// (the document_type onchange) corrects it to Drawings when applicable.
+				options: { ...file_anchor(), folder: `Home/Projects/${props.project}/Documents` },
 			},
 			{
 				fieldname: "native_file",
@@ -286,7 +315,7 @@ async function open_create_dialog() {
 				label: __("Native File (e.g. .dwg)"),
 				hidden: 1,
 				description: __("Optional — the native authoring file, alongside File above. Same revision, two attachments."),
-				options: file_anchor(),
+				options: { ...file_anchor(), folder: `Home/Projects/${props.project}/Documents` },
 			},
 		],
 		primary_action_label: __("Create Document"),
@@ -351,6 +380,14 @@ function toggle_drawing_fields(dialog) {
 	const is_drawing = drawing_types.value.includes(dialog.get_value("document_type"));
 	for (const fieldname of ["drawing_section", "drawing_set", "drawing_area", "drawing_date", "received_date", "native_file"]) {
 		dialog.set_df_property(fieldname, "hidden", !is_drawing);
+	}
+	// Routes the upload into Home/Projects/<project>/Drawings vs .../Documents — see
+	// project_files.py. `set_df_property` mutates the field's own `options` object, which
+	// ControlAttach reads fresh at upload time (not at field-construction time), so this takes
+	// effect even though the dialog was already built with an empty document_type.
+	const folder = `Home/Projects/${props.project}/${is_drawing ? "Drawings" : "Documents"}`;
+	for (const fieldname of ["file", "native_file"]) {
+		dialog.set_df_property(fieldname, "options", { ...file_anchor(), folder });
 	}
 }
 </script>

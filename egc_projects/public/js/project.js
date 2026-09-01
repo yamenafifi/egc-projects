@@ -7,6 +7,15 @@ frappe.ui.form.on("Project", {
 	refresh(frm) {
 		if (frm.is_new()) return;
 
+		// Routes the project photo into Home/Projects/<project>/Photos instead of the default
+		// Home/Attachments bucket — see project_files.py. Native-form parity with the Hub's own
+		// Project Info tab, which sets the same option on its own Attach Image dialog field.
+		if (frm.get_field("custom_egc_project_image")) {
+			frm.set_df_property("custom_egc_project_image", "options", {
+				folder: `Home/Projects/${frm.doc.name}/Photos`,
+			});
+		}
+
 		// The one way into the Hub from here — WBS/Activities/Drawing Register/Submittal Log
 		// used to also get their own shortcuts in a second "EGC Projects" dropdown, redundant
 		// now that the Hub itself has a tab for every one of them (and a Directory tab besides);

@@ -116,6 +116,12 @@ const READINESS_VALUES = ["Uploaded", "Reviewed", "Ready to Publish"];
 
 function open_new_revision_dialog() {
 	const is_drawing = data.value.document.is_drawing;
+	// Every attachment uploaded through the Hub lands in a real per-project folder
+	// (Home/Projects/<project>/{Documents,Drawings,...}) instead of the default flat
+	// Home/Attachments bucket — see project_files.py. The path is deterministic string
+	// interpolation once `ensure_project_folders()` has run for the project (Project's own
+	// `after_insert` hook, or the install-time backfill for pre-existing projects).
+	const folder = `Home/Projects/${data.value.document.project}/${is_drawing ? "Drawings" : "Documents"}`;
 	const dialog = new frappe.ui.Dialog({
 		title: __("New Revision"),
 		fields: [
@@ -132,7 +138,7 @@ function open_new_revision_dialog() {
 				// at upload time, so the file is attached to the parent Document's own
 				// `current_file` field instead — the field this same URL will end up holding
 				// once the revision is issued.
-				options: { doctype: "EGC Project Document", docname: props.document, fieldname: "current_file" },
+				options: { doctype: "EGC Project Document", docname: props.document, fieldname: "current_file", folder },
 			},
 			...(is_drawing
 				? [
@@ -141,7 +147,7 @@ function open_new_revision_dialog() {
 							fieldtype: "Attach",
 							label: __("Native File (e.g. .dwg)"),
 							description: __("Optional — the native authoring file, same revision as File above."),
-							options: { doctype: "EGC Project Document", docname: props.document, fieldname: "current_file" },
+							options: { doctype: "EGC Project Document", docname: props.document, fieldname: "current_file", folder },
 						},
 					]
 				: []),

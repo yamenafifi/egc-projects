@@ -5,7 +5,7 @@ import frappe
 from frappe import _
 from frappe.model.document import Document
 
-from egc_projects.egc_projects import submittal_control, validators
+from egc_projects.egc_projects import code_naming, submittal_control, validators
 
 
 class EGCSubmittal(Document):
@@ -43,6 +43,17 @@ class EGCSubmittal(Document):
 		title: DF.Data
 		wbs_node: DF.Link | None
 	# end: auto-generated types
+
+	def before_insert(self):
+		# Only when blank — a bulk-imported row's own pre-existing code (e.g. a client's real
+		# legacy numbering) is never overwritten; only genuinely new, code-less rows get one
+		# assigned. By the time this runs, submit_for_review_flow.js has already resolved
+		# submittal_type (picked or inferred from the chosen documents), so inference and
+		# auto-numbering compose correctly. See code_naming.py's module docstring.
+		if not self.submittal_number:
+			code = code_naming.assign_submittal_code(self.project, self.discipline, self.submittal_type)
+			if code:
+				self.submittal_number = code
 
 	def validate(self):
 		validators.validate_unique_in_project(self, "submittal_number", _("Submittal"))

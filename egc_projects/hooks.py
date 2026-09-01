@@ -61,6 +61,7 @@ doc_events = {
 			"egc_projects.egc_projects.project_custom_fields.validate_project",
 			"egc_projects.egc_projects.project_progress.sync_project_percent_complete",
 		],
+		"after_insert": ["egc_projects.egc_projects.project_files.provision_project_folders"],
 	},
 	# One extra `validate` handler each, on every doctype the Hub's own Export/Import feature
 	# covers (api/bulk_transfer.py) — a no-op outside of that feature's own controlled import

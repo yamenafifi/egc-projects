@@ -145,7 +145,12 @@ function open_edit_details_dialog() {
 				fieldtype: "Attach Image",
 				label: __("Project Image"),
 				default: info.project_image,
-				options: { doctype: "Project", docname: props.project, fieldname: "custom_egc_project_image" },
+				options: {
+					doctype: "Project",
+					docname: props.project,
+					fieldname: "custom_egc_project_image",
+					folder: `Home/Projects/${props.project}/Photos`,
+				},
 			},
 			{ fieldtype: "Section Break", label: __("Address") },
 			{

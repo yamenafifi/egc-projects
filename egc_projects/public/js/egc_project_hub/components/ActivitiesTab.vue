@@ -2,6 +2,8 @@
 import { computed, ref, watch, onMounted } from "vue";
 import { get_activities } from "../api";
 import { create_activity as create_activity_record, create_child_activity } from "./activities_api";
+import { suggest_activity_code } from "./code_naming_api";
+import { apply_suggested_code } from "./code_naming_helpers";
 import { useHubResource } from "../composables/useHubResource";
 import { useHubRoute } from "../composables/useHubRoute";
 import { openExportDialog, openImportDialog, confirmBulkDelete } from "./bulk_transfer_flow";
@@ -158,10 +160,24 @@ function create_activity() {
 	// below), just without a parent. A persistent toolbar action, not just the empty-state's
 	// one-time affordance: a project with activities already in it still needs a way to add a
 	// new top-level phase without leaving the Hub for the native form.
+	async function suggest_code(dialog) {
+		const discipline = dialog.get_value("discipline");
+		if (!discipline) return;
+		const suggestion = await suggest_activity_code(props.project, discipline).catch(() => "");
+		apply_suggested_code(dialog, "activity_code", suggestion);
+	}
+
 	const dialog = new frappe.ui.Dialog({
 		title: __("New Activity"),
 		fields: [
-			{ fieldname: "activity_code", fieldtype: "Data", label: __("Activity Code"), reqd: 1 },
+			{
+				fieldname: "activity_code",
+				fieldtype: "Data",
+				label: __("Activity Code"),
+				reqd: 1,
+				read_only: 1,
+				description: __("Generated automatically from Discipline — pick one below."),
+			},
 			{ fieldname: "activity_name", fieldtype: "Data", label: __("Activity Name"), reqd: 1 },
 			{ fieldname: "is_group", fieldtype: "Check", label: __("Is Group") },
 			{
@@ -171,7 +187,14 @@ function create_activity() {
 				options: "EGC WBS Node",
 				get_query: () => ({ filters: { project: props.project } }),
 			},
-			{ fieldname: "discipline", fieldtype: "Link", label: __("Discipline"), options: "EGC Discipline" },
+			{
+				fieldname: "discipline",
+				fieldtype: "Link",
+				label: __("Discipline"),
+				options: "EGC Discipline",
+				reqd: 1,
+				onchange: () => suggest_code(dialog),
+			},
 		],
 		primary_action_label: __("Create"),
 		primary_action(values) {
@@ -213,10 +236,24 @@ function link_badge(row, link_doctype) {
 }
 
 function open_quick_add(row) {
+	async function suggest_code(dialog) {
+		const discipline = dialog.get_value("discipline");
+		if (!discipline) return;
+		const suggestion = await suggest_activity_code(props.project, discipline).catch(() => "");
+		apply_suggested_code(dialog, "activity_code", suggestion);
+	}
+
 	const dialog = new frappe.ui.Dialog({
 		title: __("Add Child Activity"),
 		fields: [
-			{ fieldname: "activity_code", fieldtype: "Data", label: __("Activity Code"), reqd: 1 },
+			{
+				fieldname: "activity_code",
+				fieldtype: "Data",
+				label: __("Activity Code"),
+				reqd: 1,
+				read_only: 1,
+				description: __("Generated automatically from Discipline — pick one below."),
+			},
 			{ fieldname: "activity_name", fieldtype: "Data", label: __("Activity Name"), reqd: 1 },
 			{ fieldname: "is_group", fieldtype: "Check", label: __("Is Group") },
 			{
@@ -233,6 +270,8 @@ function open_quick_add(row) {
 				label: __("Discipline"),
 				options: "EGC Discipline",
 				default: row.discipline,
+				reqd: 1,
+				onchange: () => suggest_code(dialog),
 			},
 		],
 		primary_action_label: __("Create"),
@@ -250,6 +289,10 @@ function open_quick_add(row) {
 				});
 		},
 	});
+	// discipline is prefilled from the parent row's own default above — `onchange` never fires
+	// for a `default`, so this fires the same suggestion once, immediately, before the dialog is
+	// shown.
+	suggest_code(dialog);
 	dialog.show();
 }
 </script>

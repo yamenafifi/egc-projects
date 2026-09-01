@@ -143,6 +143,7 @@ def setup() -> None:
 	restrict_financial_field_permlevel()
 	raise_project_attachment_limit()
 	remove_admin_project_overscoping()
+	provision_all_project_folders()
 	frappe.db.commit()
 
 
@@ -167,6 +168,17 @@ def remove_admin_project_overscoping() -> None:
 	)
 	for name in stale:
 		frappe.delete_doc("User Permission", name, ignore_permissions=True, force=True)
+
+
+def provision_all_project_folders() -> None:
+	"""Gives every already-existing Project (created before the per-project folder feature
+	landed) its `Home/Projects/<project>/{Documents,Drawings,Submittals,Photos}` skeleton, on
+	every migrate. New Projects get this from `Project.after_insert` (hooks.py) instead —
+	this is purely the backfill for what that hook couldn't have caught retroactively."""
+	from egc_projects.egc_projects.project_files import ensure_project_folders
+
+	for project in frappe.get_all("Project", pluck="name"):
+		ensure_project_folders(project)
 
 
 def create_project_custom_fields() -> None:
