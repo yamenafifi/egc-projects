@@ -2,19 +2,19 @@
      Toolbox tool-switcher dropdown, left to right in one bar), not a left icon rail (HubSidebar.vue,
      removed). Styling stays ERPNext-native (Frappe's own CSS variables, no black/orange Procore
      skin) — it's the STRUCTURE being matched, per an explicit annotated Procore reference, not the
-     brand. Desk's own navbar (above this) already carries notifications/help/avatar, so this bar
-     doesn't duplicate any of that — only what's specific to being inside a project. -->
+     brand. Desk's own navbar is hidden for this page (egc_project_hub.js), so notifications/theme/
+     profile are reproduced here using Frappe's own actual widgets (frappe.ui.Notifications,
+     frappe.ui.ThemeSwitcher, frappe.avatar + frappe.ui.create_menu) instead of being reinvented —
+     project status/progress used to live here too but has moved down into HubHeader.vue. -->
 <script setup>
 import { ref } from "vue";
 import ProjectLinkControl from "./ProjectLinkControl.vue";
-import StatusPill from "./StatusPill.vue";
 
 const props = defineProps({
 	project: { type: String, required: true },
 	projectName: { type: String, default: "" },
 	tabs: { type: Array, required: true },
 	active: { type: String, required: true },
-	context: { type: Object, default: null },
 });
 const emit = defineEmits(["select", "switch-project"]);
 
@@ -55,8 +55,50 @@ function on_document_click(e) {
 }
 
 import { onBeforeUnmount, onMounted, computed } from "vue";
-onMounted(() => document.addEventListener("click", on_document_click));
-onBeforeUnmount(() => document.removeEventListener("click", on_document_click));
+
+// -- notifications / theme / profile — Frappe's own widgets, reused as-is since Desk's native
+// navbar is hidden behind this page. Mirrors frappe/desk/page/desktop/desktop.js's own
+// setup_notifications()/setup_avatar(), trimmed to what makes sense embedded in a project page. --
+const notif_wrapper = ref(null);
+const avatar_wrapper = ref(null);
+const is_dark = ref(frappe.ui.get_current_theme() === "dark");
+let theme_observer = null;
+
+function open_theme_switcher() {
+	new frappe.ui.ThemeSwitcher().show();
+}
+
+onMounted(() => {
+	document.addEventListener("click", on_document_click);
+
+	new frappe.ui.Notifications({ wrapper: $(notif_wrapper.value), full_height: false });
+
+	$(avatar_wrapper.value).html(frappe.avatar(frappe.session.user, "avatar-medium"));
+	frappe.ui.create_menu({
+		parent: $(avatar_wrapper.value),
+		menu_items: [
+			{
+				icon: "edit",
+				label: __("Edit Profile"),
+				onClick: () => frappe.set_route("Form", "User", frappe.session.user),
+			},
+			{ icon: "log-out", label: __("Logout"), onClick: () => frappe.app.logout() },
+		],
+		open_on_left: !frappe.utils.is_rtl(),
+	});
+
+	// frappe.ui.set_theme flips the `data-theme` attribute with no accompanying JS event, so the
+	// sun/moon icon has to watch the DOM directly to stay in sync with the ThemeSwitcher dialog.
+	theme_observer = new MutationObserver(() => {
+		is_dark.value = frappe.ui.get_current_theme() === "dark";
+	});
+	theme_observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+});
+
+onBeforeUnmount(() => {
+	document.removeEventListener("click", on_document_click);
+	theme_observer && theme_observer.disconnect();
+});
 
 const active_tab = computed(() => props.tabs.find((t) => t.key === props.active));
 
@@ -160,17 +202,41 @@ const ICONS = {
 
 		<div class="egc-topbar2__spacer" />
 
-		<div v-if="context" class="egc-topbar2__status">
-			<StatusPill :status="context.status" />
-			<div
-				v-if="context.percent_complete !== null && context.percent_complete !== undefined"
-				class="egc-topbar2__complete"
-			>
-				<div class="egc-topbar2__progress">
-					<div class="egc-topbar2__progress-bar" :style="{ width: (context.percent_complete || 0) + '%' }" />
+		<div class="egc-topbar2__utility">
+			<div ref="notif_wrapper" class="egc-topbar2__notif">
+				<div class="dropdown dropdown-notifications">
+					<button
+						type="button"
+						class="btn-reset egc-topbar2__icon-btn"
+						data-toggle="dropdown"
+						aria-haspopup="true"
+						:aria-label="__('Notifications')"
+						v-html="frappe.utils.icon('bell', 'md')"
+					></button>
+					<div style="top: unset" class="dropdown-menu dropdown-menu-right notifications-list" role="menu">
+						<div class="notification-list-header">
+							<div class="header-items"></div>
+							<div class="header-actions"></div>
+						</div>
+						<div class="notification-list-body">
+							<div class="panel-notifications"></div>
+							<div class="panel-events"></div>
+							<div class="panel-changelog-feed"></div>
+						</div>
+					</div>
 				</div>
-				<span class="egc-topbar2__complete-value">{{ Math.round(context.percent_complete || 0) }}%</span>
 			</div>
+
+			<button
+				type="button"
+				class="btn-reset egc-topbar2__icon-btn"
+				:title="__('Toggle Theme')"
+				:aria-label="__('Toggle Theme')"
+				@click="open_theme_switcher"
+				v-html="frappe.utils.icon(is_dark ? 'sun' : 'moon', 'md')"
+			></button>
+
+			<div ref="avatar_wrapper" class="egc-topbar2__avatar"></div>
 		</div>
 	</div>
 </template>
@@ -352,7 +418,7 @@ const ICONS = {
 
 .egc-topbar2__menu-item--active {
 	background: var(--bg-light-blue, var(--control-bg));
-	color: var(--primary, var(--text-color));
+	color: var(--text-on-light-blue, var(--text-color));
 }
 
 .egc-topbar2__menu-icon {
@@ -365,39 +431,40 @@ const ICONS = {
 	flex: 1 1 auto;
 }
 
-.egc-topbar2__status {
+.egc-topbar2__utility {
 	display: flex;
 	align-items: center;
-	gap: 12px;
+	gap: 4px;
 	flex: 0 0 auto;
-	padding: 4px 8px;
 }
 
-.egc-topbar2__complete {
+.egc-topbar2__icon-btn {
 	display: flex;
 	align-items: center;
-	gap: 6px;
-	width: 120px;
-}
-
-.egc-topbar2__progress {
-	flex: 1;
-	height: 6px;
-	border-radius: var(--border-radius-full);
-	background: var(--control-bg);
-	overflow: hidden;
-}
-
-.egc-topbar2__progress-bar {
-	height: 100%;
-	background: var(--dark-green-500, var(--green-500));
-	border-radius: var(--border-radius-full);
-}
-
-.egc-topbar2__complete-value {
-	font-size: var(--text-xs);
+	justify-content: center;
+	width: 32px;
+	height: 32px;
+	padding: 0;
+	border: none;
+	border-radius: var(--border-radius);
+	background: none;
 	color: var(--text-muted);
-	width: 30px;
-	text-align: right;
+	cursor: pointer;
+}
+
+.egc-topbar2__icon-btn:hover {
+	background: var(--control-bg);
+	color: var(--text-color);
+}
+
+.egc-topbar2__icon-btn :deep(svg) {
+	width: 18px;
+	height: 18px;
+}
+
+.egc-topbar2__avatar {
+	display: flex;
+	align-items: center;
+	margin-left: 4px;
 }
 </style>

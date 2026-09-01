@@ -111,7 +111,6 @@ watch(context, (ctx) => {
 				:project-name="context ? context.project_name : ''"
 				:tabs="tab_defs"
 				:active="route.tab"
-				:context="context"
 				@select="setTab"
 				@switch-project="setProject"
 			/>

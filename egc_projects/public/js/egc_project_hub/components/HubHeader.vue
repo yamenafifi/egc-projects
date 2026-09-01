@@ -1,30 +1,33 @@
 <!-- Tool header row — Procore's "gear icon + TOOL NAME" position, directly below the top bar.
-     Project identity (name/status/progress) and navigation (project switcher, Toolbox) both live
-     in HubTopBar.vue now; this row is purely "what tool am I in, what can I do with it." -->
+     Navigation (project switcher, Toolbox) lives in HubTopBar.vue; this row carries "what tool am
+     I in" plus the project's own status/progress (moved down from HubTopBar.vue — the standalone
+     "Project Details" button that used to sit here was dropped since Project Details is already
+     one of the Toolbox tabs). -->
 <script setup>
-import { useHubRoute } from "../composables/useHubRoute";
+import StatusPill from "./StatusPill.vue";
 
 defineProps({
 	label: { type: String, required: true },
 	project: { type: String, required: true },
 	context: { type: Object, default: null },
 });
-
-const { setTab } = useHubRoute();
-
-function goto_project_info() {
-	setTab("project-info");
-}
 </script>
 
 <template>
 	<div class="egc-toolheader">
 		<h2 class="egc-toolheader__title">{{ label }}</h2>
 
-		<div class="egc-toolheader__actions">
-			<button type="button" class="btn btn-sm btn-default" @click="goto_project_info">
-				{{ __("Project Details") }}
-			</button>
+		<div v-if="context" class="egc-toolheader__status">
+			<StatusPill :status="context.status" />
+			<div
+				v-if="context.percent_complete !== null && context.percent_complete !== undefined"
+				class="egc-toolheader__complete"
+			>
+				<div class="egc-toolheader__progress">
+					<div class="egc-toolheader__progress-bar" :style="{ width: (context.percent_complete || 0) + '%' }" />
+				</div>
+				<span class="egc-toolheader__complete-value">{{ Math.round(context.percent_complete || 0) }}%</span>
+			</div>
 		</div>
 	</div>
 </template>
@@ -48,10 +51,38 @@ function goto_project_info() {
 	margin: 0;
 }
 
-.egc-toolheader__actions {
+.egc-toolheader__status {
 	display: flex;
 	align-items: center;
-	gap: 8px;
+	gap: 12px;
 	flex: 0 0 auto;
+}
+
+.egc-toolheader__complete {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	width: 120px;
+}
+
+.egc-toolheader__progress {
+	flex: 1;
+	height: 6px;
+	border-radius: var(--border-radius-full);
+	background: var(--control-bg);
+	overflow: hidden;
+}
+
+.egc-toolheader__progress-bar {
+	height: 100%;
+	background: var(--dark-green-500, var(--green-500));
+	border-radius: var(--border-radius-full);
+}
+
+.egc-toolheader__complete-value {
+	font-size: var(--text-xs);
+	color: var(--text-muted);
+	width: 30px;
+	text-align: right;
 }
 </style>

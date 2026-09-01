@@ -7,6 +7,8 @@ import { ref, onMounted, onBeforeUnmount } from "vue";
 const props = defineProps({
 	selectedCount: { type: Number, required: true },
 	canDelete: { type: Boolean, default: false },
+	showExport: { type: Boolean, default: true },
+	deleteLabel: { type: String, default: () => __("Delete Selected") },
 });
 const emit = defineEmits(["export", "delete", "clear"]);
 
@@ -38,7 +40,7 @@ function run(action) {
 				{{ __("Actions") }} ▾
 			</button>
 			<div v-if="menu_open" class="hub-bulk-bar__dropdown" role="menu">
-				<button type="button" role="menuitem" @click.stop="run(() => emit('export'))">
+				<button v-if="showExport" type="button" role="menuitem" @click.stop="run(() => emit('export'))">
 					{{ __("Export Selected") }}
 				</button>
 				<button
@@ -48,7 +50,7 @@ function run(action) {
 					class="hub-bulk-bar__danger"
 					@click.stop="run(() => emit('delete'))"
 				>
-					{{ __("Delete Selected") }}
+					{{ deleteLabel }}
 				</button>
 			</div>
 		</span>

@@ -13,9 +13,11 @@ import { computed, ref, watch } from "vue";
 import { get_directory, grant_portal_access, revoke_portal_access, update_stakeholder_role } from "./directory_api";
 import { add_stakeholder, remove_stakeholder, get_person_info } from "./project_profile_api";
 import { useHubResource } from "../composables/useHubResource";
+import { useRowSelection } from "../composables/useRowSelection";
 import LoadingState from "./LoadingState.vue";
 import ErrorState from "./ErrorState.vue";
 import EmptyState from "./EmptyState.vue";
+import BulkActionsBar from "./BulkActionsBar.vue";
 
 const props = defineProps({
 	project: { type: String, required: true },
@@ -67,6 +69,41 @@ const grouped = computed(() => {
 		rows,
 	}));
 });
+
+const { selected, selected_count, all_selected, some_selected, is_selected, toggle, toggle_all, clear } =
+	useRowSelection(filtered);
+
+// Collapsed organizations, by group name — collapsing is purely a display toggle; selection
+// state is independent, so a person selected inside a collapsed group stays selected.
+const collapsed_groups = ref(new Set());
+function toggle_group(name) {
+	const next = new Set(collapsed_groups.value);
+	if (next.has(name)) next.delete(name);
+	else next.add(name);
+	collapsed_groups.value = next;
+}
+
+function confirm_remove_selected() {
+	const rows = filtered.value.filter((row) => selected.value.has(row.name));
+	frappe.confirm(
+		__("Remove {0} selected {1} from the Directory?", [rows.length, rows.length === 1 ? __("person") : __("people")]),
+		async () => {
+			const results = await Promise.allSettled(rows.map((row) => remove_stakeholder(props.project, row.name)));
+			const failures = results.filter((r) => r.status === "rejected");
+			clear();
+			reload();
+			if (!failures.length) {
+				frappe.show_alert({ message: __("{0} removed.", [rows.length]), indicator: "green" });
+			} else {
+				frappe.msgprint({
+					title: __("Some Removals Failed"),
+					message: __("{0} removed, {1} failed.", [rows.length - failures.length, failures.length]),
+					indicator: "orange",
+				});
+			}
+		}
+	);
+}
 
 function report_error(title, e) {
 	frappe.msgprint({ title, message: e.message, indicator: "red" });
@@ -126,8 +163,20 @@ function open_add_dialog() {
 			},
 			{
 				fieldname: "organization_label",
-				fieldtype: "Data",
+				fieldtype: "Autocomplete",
 				label: __("Organization"),
+				// Suggests every ad-hoc organization name already used in this project's Directory.
+				// ControlAutocomplete's own validate() silently blanks anything not already in
+				// `options` — ignore_validation is required or a genuinely new name (e.g. "test")
+				// would be dropped on submit instead of being accepted as free text.
+				ignore_validation: 1,
+				options: [
+					...new Set(
+						(data.value || [])
+							.filter((r) => r.organization_type === "Other" && r.organization_label)
+							.map((r) => r.organization_label)
+					),
+				],
 				depends_on: 'eval:doc.organization_type == "Other"',
 				description: __("A one-off organization name — not a Customer/Supplier record."),
 			},
@@ -272,11 +321,30 @@ function confirm_revoke_access(row) {
 				</button>
 			</div>
 
+			<BulkActionsBar
+				v-if="selected_count"
+				:selected-count="selected_count"
+				:can-delete="can_write"
+				:show-export="false"
+				:delete-label="__('Remove Selected')"
+				@delete="confirm_remove_selected"
+				@clear="clear"
+			/>
+
 			<EmptyState v-if="!filtered.length" :title="__('No one matches these filters')" />
 			<div v-else class="hub-table-wrap">
 				<table class="hub-table">
 					<thead>
 						<tr>
+							<th class="hub-table__check-col">
+								<input
+									type="checkbox"
+									:checked="all_selected"
+									:ref="(el) => el && (el.indeterminate = some_selected)"
+									:title="__('Select all')"
+									@click.stop="toggle_all"
+								/>
+							</th>
 							<th>{{ __("Name") }}</th>
 							<th>{{ __("Role") }}</th>
 							<th>{{ __("Contact") }}</th>
@@ -286,15 +354,22 @@ function confirm_revoke_access(row) {
 					</thead>
 					<template v-for="group in grouped" :key="group.name">
 						<tbody class="hub-directory__group">
-							<tr class="hub-directory__group-header">
-								<td :colspan="can_write ? 5 : 4">
+							<tr class="hub-directory__group-header" @click="toggle_group(group.name)">
+								<td :colspan="can_write ? 6 : 5">
+									<span
+										class="hub-directory__group-toggle"
+										:class="{ 'hub-directory__group-toggle--collapsed': collapsed_groups.has(group.name) }"
+									>▾</span>
 									{{ group.name }}
 									<span class="hub-directory__group-count">{{ __("{0} people", [group.rows.length]) }}</span>
 								</td>
 							</tr>
 						</tbody>
-						<tbody>
+						<tbody v-if="!collapsed_groups.has(group.name)">
 						<tr v-for="row in group.rows" :key="row.name" :class="{ 'hub-table__row--clickable': row.person }" @click="open_record(row)">
+							<td class="hub-table__check-col" @click.stop>
+								<input type="checkbox" :checked="is_selected(row)" @change="toggle(row)" />
+							</td>
 							<td>
 								{{ row.party_name }}
 								<span v-if="row.is_primary" class="indicator-pill blue">{{ __("Primary") }}</span>
@@ -346,12 +421,31 @@ function confirm_revoke_access(row) {
 </template>
 
 <style scoped>
+.hub-directory__group-header {
+	cursor: pointer;
+}
+
 .hub-directory__group-header td {
 	background: var(--control-bg);
 	font-weight: 600;
 	font-size: var(--text-sm);
 	color: var(--text-color);
 	padding: 6px 14px;
+}
+
+.hub-directory__group-header:hover td {
+	background: var(--fg-hover-color, var(--control-bg));
+}
+
+.hub-directory__group-toggle {
+	display: inline-block;
+	width: 14px;
+	color: var(--text-muted);
+	transition: transform 0.1s ease;
+}
+
+.hub-directory__group-toggle--collapsed {
+	transform: rotate(-90deg);
 }
 
 .hub-directory__group-count {
