@@ -10,6 +10,7 @@
   "party_name",
   "organization_type",
   "organization",
+  "organization_label",
   "email",
   "phone",
   "is_primary"
@@ -43,16 +44,24 @@
    "fieldname": "organization_type",
    "fieldtype": "Select",
    "label": "Organization Type",
-   "options": "\nCustomer\nSupplier",
+   "options": "\nCustomer\nSupplier\nOther",
    "hidden": 1,
-   "description": "Dynamic Link validates `organization` against this BEFORE the row's own validate() runs (same ordering as `party_name`'s reqd check) — a field-level default, not a controller default, is the only thing early enough. `fetch_from_person()` overwrites it once `person` resolves to an actual Customer/Supplier/neither."
+   "description": "Dynamic Link validates `organization` against this BEFORE the row's own validate() runs (same ordering as `party_name`'s reqd check) — a field-level default, not a controller default, is the only thing early enough. `fetch_from_person()` overwrites it once `person` resolves to an actual Customer/Supplier/neither. \"Other\" is a deliberately ad-hoc, non-Customer/Supplier organization — `organization_label` (plain text) is used instead of `organization`/the Dynamic Link in that case, and is never fetched from `person`."
   },
   {
    "fieldname": "organization",
    "fieldtype": "Dynamic Link",
    "in_list_view": 1,
    "label": "Organization",
-   "options": "organization_type"
+   "options": "organization_type",
+   "depends_on": "eval:doc.organization_type != \"Other\""
+  },
+  {
+   "fieldname": "organization_label",
+   "fieldtype": "Data",
+   "label": "Organization",
+   "depends_on": "eval:doc.organization_type == \"Other\"",
+   "description": "A free-text organization name for a party that isn't (and shouldn't become) a Customer/Supplier record — e.g. a one-off consultant firm you don't want in your Sales/Purchase master data."
   },
   {
    "fieldname": "email",

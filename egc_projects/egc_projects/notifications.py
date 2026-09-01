@@ -275,7 +275,7 @@ def send_ball_in_court_email(reviewer_user: str, submission: str) -> None:
 	if not revision:
 		return
 	label = revision.revision_label or submission
-	url = f"{get_url()}/app/egc-project-hub/{revision.project}/submittals"
+	url = f"{get_url()}/app/project-manager/{revision.project}/submittals"
 	_send_email(
 		reviewer_user,
 		frappe._("Review requested: {0}").format(label),
@@ -290,7 +290,7 @@ def send_directory_welcome_email(user: str, project: str) -> None:
 	"""Sent once, from `grant_portal_access` (api/directory.py), the moment a Directory entry is
 	first given Portal Access — not on every later change to their access."""
 	project_name = frappe.db.get_value("Project", project, "project_name") or project
-	url = f"{get_url()}/app/egc-project-hub/{project}"
+	url = f"{get_url()}/app/project-manager/{project}"
 	_send_email(
 		user,
 		frappe._("You've been added to {0}").format(project_name),

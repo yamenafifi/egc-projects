@@ -183,3 +183,58 @@ class TestRaiseProjectAttachmentLimit(IntegrationTestCase):
 			"Property Setter", filters={"doc_type": "Project", "property": "max_attachments"}, fields=["name"]
 		)
 		self.assertEqual(len(rows), 1)
+
+
+class TestRemoveAdminProjectOverscoping(IntegrationTestCase):
+	"""Regression coverage for a real bug: `grant_portal_access` used to scope an admin (System
+	Manager/Projects Manager) with a `Project` User Permission just like anyone else — but Frappe's
+	own User Permission enforcement has no role-based bypass, so even one such row cost that admin
+	visibility of every OTHER project, regardless of role. This is what repairs an
+	already-affected account on the next `bench migrate`, not just prevents new ones."""
+
+	def _make_project(self):
+		company = frappe.db.get_value("Company", {}, "name") or frappe.get_all("Company", limit=1, pluck="name")[0]
+		return frappe.get_doc(
+			{"doctype": "Project", "project_name": f"EGC-Overscope-Test-{frappe.generate_hash(length=8)}", "company": company}
+		).insert(ignore_permissions=True).name
+
+	def _make_user(self, email, roles):
+		if frappe.db.exists("User", email):
+			user = frappe.get_doc("User", email)
+		else:
+			user = frappe.get_doc(
+				{"doctype": "User", "email": email, "first_name": email.split("@")[0], "send_welcome_email": 0}
+			).insert(ignore_permissions=True)
+		user.add_roles(*roles)
+		return user.name
+
+	def tearDown(self):
+		names = frappe.get_all(
+			"User Permission", filters={"allow": "Project", "user": ("like", "overscope-test-%")}, pluck="name"
+		)
+		for name in names:
+			frappe.delete_doc("User Permission", name, ignore_permissions=True, force=True)
+
+	def test_removes_a_stale_grant_for_a_bypass_role_holder(self):
+		project = self._make_project()
+		admin = self._make_user("overscope-test-admin@example.com", ["System Manager"])
+		frappe.get_doc(
+			{"doctype": "User Permission", "user": admin, "allow": "Project", "for_value": project}
+		).insert(ignore_permissions=True)
+
+		install.remove_admin_project_overscoping()
+
+		self.assertFalse(frappe.db.exists("User Permission", {"user": admin, "allow": "Project"}))
+
+	def test_leaves_a_legitimately_scoped_non_admin_user_alone(self):
+		project = self._make_project()
+		viewer = self._make_user("overscope-test-viewer@example.com", ["Projects User"])
+		frappe.get_doc(
+			{"doctype": "User Permission", "user": viewer, "allow": "Project", "for_value": project}
+		).insert(ignore_permissions=True)
+
+		install.remove_admin_project_overscoping()
+
+		self.assertTrue(
+			frappe.db.exists("User Permission", {"user": viewer, "allow": "Project", "for_value": project})
+		)

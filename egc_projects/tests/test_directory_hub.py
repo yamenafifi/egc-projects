@@ -27,11 +27,16 @@ def _make_project(company):
 	return doc.name
 
 
-def _get_or_create_role(role_name, is_egc_internal=0):
+def _get_or_create_role(role_name, is_egc_internal=0, default_roles=()):
 	if frappe.db.exists("EGC Stakeholder Role", role_name):
 		return role_name
 	frappe.get_doc(
-		{"doctype": "EGC Stakeholder Role", "role_name": role_name, "is_egc_internal": is_egc_internal}
+		{
+			"doctype": "EGC Stakeholder Role",
+			"role_name": role_name,
+			"is_egc_internal": is_egc_internal,
+			"default_roles": [{"role": role} for role in default_roles],
+		}
 	).insert(ignore_permissions=True)
 	return role_name
 
@@ -59,8 +64,15 @@ class TestDirectoryHub(IntegrationTestCase):
 		# account.
 		frappe.flags.mute_emails = True
 		cls.manager_user = _get_or_create_user("egc-dh-manager@example.com", ["Projects User", c.ROLE_PROJECT_MANAGER])
-		cls.role_internal = _get_or_create_role("EGC-DH-Internal Role", is_egc_internal=1)
-		cls.role_external = _get_or_create_role("EGC-DH-External Role", is_egc_internal=0)
+		cls.role_internal = _get_or_create_role(
+			"EGC-DH-Internal Role", is_egc_internal=1, default_roles=(c.ROLE_PROJECT_VIEWER,)
+		)
+		cls.role_external = _get_or_create_role(
+			"EGC-DH-External Role", is_egc_internal=0, default_roles=(c.ROLE_EXTERNAL_VIEWER,)
+		)
+		#: A Stakeholder Role with NO default_roles template — for asserting grant_portal_access
+		#: applies nothing beyond project visibility when there's nothing to apply.
+		cls.role_no_template = _get_or_create_role("EGC-DH-No-Template Role", is_egc_internal=0)
 
 	@classmethod
 	def tearDownClass(cls):
@@ -128,9 +140,7 @@ class TestDirectoryHub(IntegrationTestCase):
 		row_name = self._add_stakeholder(self.role_external, "Client Rep")
 
 		frappe.set_user(self.manager_user)
-		result = directory.grant_portal_access(
-			self.project, row_name, c.ROLE_EXTERNAL_VIEWER, email="egc-dh-newclient@example.com"
-		)
+		result = directory.grant_portal_access(self.project, row_name, email="egc-dh-newclient@example.com")
 		user = result["user"]
 
 		self.assertTrue(frappe.db.exists("User", user))
@@ -150,9 +160,7 @@ class TestDirectoryHub(IntegrationTestCase):
 		row_name = self._add_stakeholder(self.role_internal, "Reuses Existing")
 
 		frappe.set_user(self.manager_user)
-		result = directory.grant_portal_access(
-			self.project, row_name, c.ROLE_PROJECT_ENGINEER, email="egc-dh-existing@example.com"
-		)
+		result = directory.grant_portal_access(self.project, row_name, email="egc-dh-existing@example.com")
 		self.assertEqual(result["user"], existing)
 
 	def test_grant_portal_access_reuses_the_row_s_own_person_when_already_a_user(self):
@@ -180,7 +188,7 @@ class TestDirectoryHub(IntegrationTestCase):
 		row_name = project_profile.add_stakeholder(self.project, {"role": self.role_external, "person": person.name})
 		frappe.set_user(self.manager_user)
 
-		result = directory.grant_portal_access(self.project, row_name, c.ROLE_EXTERNAL_VIEWER)
+		result = directory.grant_portal_access(self.project, row_name)
 
 		self.assertEqual(result["user"], person.name)
 
@@ -189,14 +197,34 @@ class TestDirectoryHub(IntegrationTestCase):
 
 		frappe.set_user(self.manager_user)
 		with self.assertRaises(frappe.ValidationError):
-			directory.grant_portal_access(self.project, row_name, c.ROLE_EXTERNAL_VIEWER)
+			directory.grant_portal_access(self.project, row_name)
 
-	def test_grant_portal_access_rejects_ungrantable_role(self):
-		row_name = self._add_stakeholder(self.role_external, "Bad Role Target")
+	def test_grant_portal_access_applies_nothing_when_stakeholder_role_has_no_template(self):
+		# A Stakeholder Role with an empty default_roles template (most real-world titles —
+		# Architect, Client, Site Contact) grants project visibility only, no extra Frappe Role.
+		row_name = self._add_stakeholder(self.role_no_template, "No Template Target")
 
 		frappe.set_user(self.manager_user)
-		with self.assertRaises(frappe.ValidationError):
-			directory.grant_portal_access(self.project, row_name, "System Manager", email="egc-dh-x@example.com")
+		result = directory.grant_portal_access(self.project, row_name, email="egc-dh-notemplate@example.com")
+		user = result["user"]
+
+		self.assertTrue(
+			frappe.db.exists("User Permission", {"user": user, "allow": "Project", "for_value": self.project})
+		)
+		self.assertEqual(set(frappe.get_roles(user)) & set(c.EGC_ROLES), set())
+
+	def test_grant_portal_access_never_touches_an_unrelated_role(self):
+		# Direct user instruction: applying a Stakeholder Role's template must be additive only —
+		# an unrelated role (e.g. Accounts User) a person already holds must never be stripped.
+		row_name = self._add_stakeholder(self.role_external, "Keeps Accounting Role")
+		email = "egc-dh-accounting@example.com"
+		_get_or_create_user(email, ["Accounts User"])
+
+		frappe.set_user(self.manager_user)
+		result = directory.grant_portal_access(self.project, row_name, email=email)
+
+		self.assertIn("Accounts User", frappe.get_roles(result["user"]))
+		self.assertIn(c.ROLE_EXTERNAL_VIEWER, frappe.get_roles(result["user"]))
 
 	def test_grant_portal_access_rejects_row_from_another_project(self):
 		other_project = _make_project(_make_company())
@@ -204,40 +232,53 @@ class TestDirectoryHub(IntegrationTestCase):
 		other_row = project_profile.add_stakeholder(other_project, {"role": self.role_external, "party_name": "Elsewhere"})
 
 		with self.assertRaises(frappe.PermissionError):
-			directory.grant_portal_access(self.project, other_row, c.ROLE_EXTERNAL_VIEWER, email="egc-dh-y@example.com")
+			directory.grant_portal_access(self.project, other_row, email="egc-dh-y@example.com")
 
 	def test_grant_portal_access_sends_one_welcome_email_on_first_grant(self):
 		row_name = self._add_stakeholder(self.role_external, "Welcome Email Target")
 		frappe.set_user(self.manager_user)
 
 		before = frappe.db.count("Email Queue")
-		directory.grant_portal_access(
-			self.project, row_name, c.ROLE_EXTERNAL_VIEWER, email="egc-dh-welcome@example.com"
-		)
+		directory.grant_portal_access(self.project, row_name, email="egc-dh-welcome@example.com")
 		self.assertEqual(frappe.db.count("Email Queue"), before + 1)
 
 	def test_grant_portal_access_does_not_resend_while_access_is_still_active(self):
-		# Granting a SECOND role to someone who already has active access (no revoke in between)
-		# is not a fresh onboarding — is_first_grant is keyed on current User Permission
+		# Granting access a SECOND time to someone who already has active access (no revoke in
+		# between) is not a fresh onboarding — is_first_grant is keyed on current User Permission
 		# existence, so this must not queue a second welcome email.
 		row_name = self._add_stakeholder(self.role_external, "No Duplicate Welcome Target")
 		frappe.set_user(self.manager_user)
-		directory.grant_portal_access(
-			self.project, row_name, c.ROLE_EXTERNAL_VIEWER, email="egc-dh-noresend@example.com"
-		)
+		directory.grant_portal_access(self.project, row_name, email="egc-dh-noresend@example.com")
 
 		before = frappe.db.count("Email Queue")
-		directory.grant_portal_access(self.project, row_name, c.ROLE_PROJECT_VIEWER, email="egc-dh-noresend@example.com")
+		directory.grant_portal_access(self.project, row_name)
 		self.assertEqual(frappe.db.count("Email Queue"), before)
+
+	def test_grant_portal_access_skips_user_permission_for_a_bypass_role_holder(self):
+		# The actual regression this app hit: an admin (System Manager) granted Directory access
+		# must NEVER end up with a scoping User Permission — Frappe's own User Permission
+		# enforcement has no role-based bypass, so even one such row would cost them visibility of
+		# every OTHER project regardless of their roles.
+		admin = _get_or_create_user("egc-dh-admin@example.com", ["System Manager"])
+		row_name = self._add_stakeholder(self.role_external, "Admin Target", person=admin)
+
+		frappe.set_user(self.manager_user)
+		directory.grant_portal_access(self.project, row_name)
+
+		self.assertFalse(
+			frappe.db.exists("User Permission", {"user": admin, "allow": "Project", "for_value": self.project})
+		)
+		rows = directory.get_directory(self.project)
+		row = next(r for r in rows if r["name"] == row_name)
+		self.assertTrue(row["is_admin_bypass"])
+		self.assertTrue(row["has_portal_access"])
 
 	# -- revoke_portal_access ----------------------------------------------------------------------
 
 	def test_revoke_portal_access_removes_user_permission_but_keeps_user(self):
 		row_name = self._add_stakeholder(self.role_external, "Revoke Me")
 		frappe.set_user(self.manager_user)
-		result = directory.grant_portal_access(
-			self.project, row_name, c.ROLE_EXTERNAL_VIEWER, email="egc-dh-revoke@example.com"
-		)
+		result = directory.grant_portal_access(self.project, row_name, email="egc-dh-revoke@example.com")
 		user = result["user"]
 
 		directory.revoke_portal_access(self.project, user)
@@ -255,9 +296,7 @@ class TestDirectoryHub(IntegrationTestCase):
 		# project" to "sees every project" the moment revoke runs. The role must go with it.
 		row_name = self._add_stakeholder(self.role_external, "Last Scope Revoke")
 		frappe.set_user(self.manager_user)
-		result = directory.grant_portal_access(
-			self.project, row_name, c.ROLE_EXTERNAL_VIEWER, email="egc-dh-lastscope@example.com"
-		)
+		result = directory.grant_portal_access(self.project, row_name, email="egc-dh-lastscope@example.com")
 		user = result["user"]
 		self.assertIn(c.ROLE_EXTERNAL_VIEWER, frappe.get_roles(user))
 
@@ -274,9 +313,7 @@ class TestDirectoryHub(IntegrationTestCase):
 		other_project = _make_project(_make_company())
 		row_name = self._add_stakeholder(self.role_external, "Multi Project Person")
 		frappe.set_user(self.manager_user)
-		result = directory.grant_portal_access(
-			self.project, row_name, c.ROLE_EXTERNAL_VIEWER, email="egc-dh-multiproj@example.com"
-		)
+		result = directory.grant_portal_access(self.project, row_name, email="egc-dh-multiproj@example.com")
 		user = result["user"]
 		add_user_permission("Project", other_project, user, ignore_permissions=True)
 
@@ -314,6 +351,6 @@ class TestDirectoryHub(IntegrationTestCase):
 		with self.assertRaises(frappe.PermissionError):
 			directory.get_directory(self.project)
 		with self.assertRaises(frappe.PermissionError):
-			directory.grant_portal_access(self.project, row_name, c.ROLE_EXTERNAL_VIEWER, email="egc-dh-z@example.com")
+			directory.grant_portal_access(self.project, row_name, email="egc-dh-z@example.com")
 		with self.assertRaises(frappe.PermissionError):
 			directory.update_stakeholder_role(self.project, row_name, self.role_internal)

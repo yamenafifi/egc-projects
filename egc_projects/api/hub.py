@@ -144,6 +144,22 @@ def _project_profile_summary(project: str) -> dict:
 
 
 @frappe.whitelist()
+def get_my_projects() -> list[dict]:
+	"""Every project the CALLING user can currently see — the Hub's own landing page
+	(`ProjectPicker.vue`, at the bare `/app/project-manager` route) reads this to show a
+	browsable list instead of a bare search box.
+
+	Deliberately `frappe.get_list` (permission-respecting), never `frappe.get_all` — this is the
+	whole payoff of fixing `grant_portal_access`'s admin-bypass bug (api/directory.py): a bypass
+	role holder (System Manager/Projects Manager) now carries zero restrictive `Project` User
+	Permission rows, so `get_list` naturally returns every project for them; everyone else
+	naturally gets only their scoped project(s). No bypass logic needed here at all."""
+	return frappe.get_list(
+		"Project", fields=["name", "project_name", "status"], order_by="modified desc"
+	)
+
+
+@frappe.whitelist()
 def get_project_context(project: str) -> dict:
 	validators.require_project_permission(project)
 

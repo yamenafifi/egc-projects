@@ -20,8 +20,8 @@ export function get_directory(project) {
 	return call(`${DIRECTORY_MODULE}.get_directory`, { project });
 }
 
-export function grant_portal_access(project, row_name, role, email) {
-	return call(`${DIRECTORY_MODULE}.grant_portal_access`, { project, row_name, role, email });
+export function grant_portal_access(project, row_name, email) {
+	return call(`${DIRECTORY_MODULE}.grant_portal_access`, { project, row_name, email });
 }
 
 export function revoke_portal_access(project, user) {

@@ -28,17 +28,6 @@ watch(() => props.project, reload, { immediate: true });
 const WRITE_ROLES = ["EGC Project Manager", "EGC Project Engineer", "EGC Document Controller", "System Manager"];
 const can_write = computed(() => (frappe.user_roles || []).some((role) => WRITE_ROLES.includes(role)));
 
-const GRANTABLE_ROLES = [
-	{ value: "EGC Project Manager", label: __("Project Manager — internal, full access") },
-	{ value: "EGC Project Engineer", label: __("Project Engineer — internal, engineering access") },
-	{ value: "EGC Document Controller", label: __("Document Controller — internal, document control access") },
-	{ value: "EGC Project Viewer", label: __("Project Viewer — internal, read-only") },
-	{
-		value: "EGC External Viewer",
-		label: __("External Viewer — external, read-only + can respond to assigned Submittal steps"),
-	},
-];
-
 const scope_filter = ref("all");
 const search = ref("");
 
@@ -53,6 +42,30 @@ const filtered = computed(() => {
 		}
 		return true;
 	});
+});
+
+//: Directory is browsed organization-first — group the already-filtered/searched list by
+// resolved organization name (Customer/Supplier's real name, or an ad-hoc "Other" label — see
+// api/directory.py's own organization_name resolution), preserving each group's original row
+// order. People with no organization at all get one shared "No Organization" bucket, always
+// last so a project's real organizations read first.
+const NO_ORGANIZATION = "__no_organization__";
+const grouped = computed(() => {
+	const groups = new Map();
+	for (const row of filtered.value) {
+		const key = row.organization_name || NO_ORGANIZATION;
+		if (!groups.has(key)) groups.set(key, []);
+		groups.get(key).push(row);
+	}
+	const entries = [...groups.entries()].sort((a, b) => {
+		if (a[0] === NO_ORGANIZATION) return 1;
+		if (b[0] === NO_ORGANIZATION) return -1;
+		return a[0].localeCompare(b[0]);
+	});
+	return entries.map(([name, rows]) => ({
+		name: name === NO_ORGANIZATION ? __("No Organization") : name,
+		rows,
+	}));
 });
 
 function report_error(title, e) {
@@ -86,13 +99,38 @@ function open_add_dialog() {
 					const info = await get_person_info(person).catch(() => null);
 					if (!info) return;
 					dialog.set_value("party_name", info.party_name || "");
+					dialog.set_value("organization_type", info.organization_type || "Customer");
 					dialog.set_value("organization", info.organization || "");
 					dialog.set_value("email", info.email || "");
 					dialog.set_value("phone", info.phone || "");
 				},
 			},
 			{ fieldname: "party_name", fieldtype: "Data", label: __("Party Name") },
-			{ fieldname: "organization", fieldtype: "Link", label: __("Organization"), options: "Customer" },
+			{
+				fieldname: "organization_type",
+				fieldtype: "Select",
+				label: __("Organization Type"),
+				options: ["Customer", "Supplier", "Other"],
+				default: "Customer",
+				onchange: function () {
+					dialog.set_value("organization", "");
+					dialog.set_value("organization_label", "");
+				},
+			},
+			{
+				fieldname: "organization",
+				fieldtype: "Dynamic Link",
+				label: __("Organization"),
+				options: "organization_type",
+				depends_on: 'eval:doc.organization_type != "Other"',
+			},
+			{
+				fieldname: "organization_label",
+				fieldtype: "Data",
+				label: __("Organization"),
+				depends_on: 'eval:doc.organization_type == "Other"',
+				description: __("A one-off organization name — not a Customer/Supplier record."),
+			},
 			{ fieldname: "email", fieldtype: "Data", label: __("Email") },
 			{ fieldname: "phone", fieldtype: "Data", label: __("Phone") },
 			{ fieldname: "is_primary", fieldtype: "Check", label: __("Primary") },
@@ -148,35 +186,40 @@ function open_change_role_dialog(row) {
 
 // -- portal access -----------------------------------------------------------------------------
 
+// Grant Access does exactly one thing: gives this person visibility into the project. It never
+// asks which permission Role to apply — that's derived automatically from the row's own
+// Stakeholder Role template (EGC Stakeholder Role.default_roles, applied server-side). When the
+// row already has a login, there's nothing left to ask, so this is a plain confirm; a login-less
+// row still needs an email to create one.
 function open_grant_access_dialog(row) {
-	const fields = [
-		{
-			fieldname: "role",
-			fieldtype: "Select",
-			label: __("Grant Role"),
-			options: GRANTABLE_ROLES.map((r) => r.value),
-			default: row.is_egc_internal ? "EGC Project Engineer" : "EGC External Viewer",
-			reqd: 1,
-			description: GRANTABLE_ROLES.map((r) => `${r.value}: ${r.label}`).join(" · "),
-		},
-	];
-	if (!row.person) {
-		fields.push({
-			fieldname: "email",
-			fieldtype: "Data",
-			label: __("Email"),
-			options: "Email",
-			default: row.email,
-			reqd: 1,
-			description: __("A login is created for this address if one doesn't already exist."),
-		});
+	if (row.person) {
+		frappe.confirm(
+			__("Grant {0} access to this project?", [row.party_name]),
+			() => {
+				grant_portal_access(props.project, row.name)
+					.then(reload)
+					.catch((e) => report_error(__("Could Not Grant Access"), e));
+			}
+		);
+		return;
 	}
+
 	const dialog = new frappe.ui.Dialog({
 		title: __("Grant Portal Access — {0}", [row.party_name]),
-		fields,
+		fields: [
+			{
+				fieldname: "email",
+				fieldtype: "Data",
+				label: __("Email"),
+				options: "Email",
+				default: row.email,
+				reqd: 1,
+				description: __("A login is created for this address since none exists yet."),
+			},
+		],
 		primary_action_label: __("Grant Access"),
 		primary_action(values) {
-			grant_portal_access(props.project, row.name, values.role, values.email)
+			grant_portal_access(props.project, row.name, values.email)
 				.then(() => {
 					dialog.hide();
 					reload();
@@ -235,20 +278,27 @@ function confirm_revoke_access(row) {
 					<thead>
 						<tr>
 							<th>{{ __("Name") }}</th>
-							<th>{{ __("Organization") }}</th>
 							<th>{{ __("Role") }}</th>
 							<th>{{ __("Contact") }}</th>
 							<th>{{ __("Portal Access") }}</th>
 							<th v-if="can_write"></th>
 						</tr>
 					</thead>
-					<tbody>
-						<tr v-for="row in filtered" :key="row.name" :class="{ 'hub-table__row--clickable': row.person }" @click="open_record(row)">
+					<template v-for="group in grouped" :key="group.name">
+						<tbody class="hub-directory__group">
+							<tr class="hub-directory__group-header">
+								<td :colspan="can_write ? 5 : 4">
+									{{ group.name }}
+									<span class="hub-directory__group-count">{{ __("{0} people", [group.rows.length]) }}</span>
+								</td>
+							</tr>
+						</tbody>
+						<tbody>
+						<tr v-for="row in group.rows" :key="row.name" :class="{ 'hub-table__row--clickable': row.person }" @click="open_record(row)">
 							<td>
 								{{ row.party_name }}
 								<span v-if="row.is_primary" class="indicator-pill blue">{{ __("Primary") }}</span>
 							</td>
-							<td>{{ row.organization_name || "—" }}</td>
 							<td>
 								{{ row.role }}
 								<span class="hub-directory__scope-tag" :class="{ 'hub-directory__scope-tag--internal': row.is_egc_internal }">
@@ -259,7 +309,10 @@ function confirm_revoke_access(row) {
 								{{ [row.email, row.phone].filter(Boolean).join(" · ") || "—" }}
 							</td>
 							<td>
-								<span v-if="row.has_portal_access" class="indicator-pill green" :title="row.portal_roles.join(', ')">
+								<span v-if="row.is_admin_bypass" class="indicator-pill blue" :title="row.portal_roles.join(', ')">
+									{{ __("Admin — sees all projects") }}
+								</span>
+								<span v-else-if="row.has_portal_access" class="indicator-pill green" :title="row.portal_roles.join(', ')">
 									{{ __("Access granted") }}
 								</span>
 								<span v-else class="hub-directory__no-access">{{ __("No login") }}</span>
@@ -269,14 +322,14 @@ function confirm_revoke_access(row) {
 									{{ __("Change Role") }}
 								</button>
 								<button
-									v-if="row.has_portal_access"
+									v-if="row.has_portal_access && !row.is_admin_bypass"
 									type="button"
 									class="btn btn-xs btn-default"
 									@click.stop="confirm_revoke_access(row)"
 								>
 									{{ __("Revoke Access") }}
 								</button>
-								<button v-else type="button" class="btn btn-xs btn-default" @click.stop="open_grant_access_dialog(row)">
+								<button v-else-if="!row.has_portal_access" type="button" class="btn btn-xs btn-default" @click.stop="open_grant_access_dialog(row)">
 									{{ __("Grant Access") }}
 								</button>
 								<button type="button" class="btn btn-xs btn-default" @click.stop="confirm_remove(row)">
@@ -284,7 +337,8 @@ function confirm_revoke_access(row) {
 								</button>
 							</td>
 						</tr>
-					</tbody>
+						</tbody>
+					</template>
 				</table>
 			</div>
 		</template>
@@ -292,6 +346,21 @@ function confirm_revoke_access(row) {
 </template>
 
 <style scoped>
+.hub-directory__group-header td {
+	background: var(--control-bg);
+	font-weight: 600;
+	font-size: var(--text-sm);
+	color: var(--text-color);
+	padding: 6px 14px;
+}
+
+.hub-directory__group-count {
+	margin-left: 8px;
+	font-weight: 400;
+	font-size: var(--text-xs);
+	color: var(--text-muted);
+}
+
 .hub-view-switch {
 	display: flex;
 	border: 1px solid var(--border-color);

@@ -17,6 +17,10 @@ function call_hub(method, args) {
 	});
 }
 
+export function get_my_projects() {
+	return call_hub("get_my_projects", {});
+}
+
 export function get_project_context(project) {
 	return call_hub("get_project_context", { project });
 }

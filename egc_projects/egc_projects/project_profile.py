@@ -51,6 +51,7 @@ STAKEHOLDER_ROW_FIELDS = (
 	"party_name",
 	"organization_type",
 	"organization",
+	"organization_label",
 	"email",
 	"phone",
 	"is_primary",
@@ -73,6 +74,33 @@ EQUIPMENT_ROW_FIELDS = (
 
 def _require_profile_edit_access(project: str) -> None:
 	validators.require_project_permission(project, "write")
+
+
+def sync_roles_from_stakeholder_role(user: str | None, stakeholder_role: str | None) -> None:
+	"""Applies whatever Frappe Roles `stakeholder_role`'s own `default_roles` template lists to
+	`user`'s real User account — additive only (`append_roles`, never a full role-list replace),
+	so a role a person already holds for an unrelated reason (e.g. Accounts User) is never
+	touched. A no-op whenever there's no user yet to apply anything to, or the stakeholder role
+	carries no template roles at all — most real-world titles (Architect, Client, Site Contact)
+	legitimately have none.
+
+	Called from every path that can newly connect a person to a role: `add_stakeholder` (below,
+	when `person` is already known), `directory.update_stakeholder_role` (the role just changed),
+	and `directory.grant_portal_access` (the moment a login-less row finally gets a User)."""
+	if not user or user == "Administrator" or not stakeholder_role:
+		return
+	role_names = frappe.get_all(
+		"EGC Stakeholder Role Grant", filters={"parent": stakeholder_role}, pluck="role"
+	)
+	if not role_names:
+		return
+	# Same reasoning `directory.py`'s grant/revoke functions already document for their own
+	# `append_roles`/`ignore_permissions=True` calls: authorization already happened at the
+	# caller's own project-permission gate, so writing the User's roles here doesn't also demand
+	# the caller independently hold write permission on the core User doctype.
+	user_doc = frappe.get_doc("User", user)
+	user_doc.append_roles(*role_names)
+	user_doc.save(ignore_permissions=True)
 
 
 @frappe.whitelist()
@@ -156,6 +184,7 @@ def add_stakeholder(project: str, values: dict | str) -> str:
 	doc = frappe.get_doc("Project", project)
 	row = doc.append("custom_egc_stakeholders", row_values)
 	doc.save()
+	sync_roles_from_stakeholder_role(row_values.get("person"), row_values.get("role"))
 	return row.name
 
 

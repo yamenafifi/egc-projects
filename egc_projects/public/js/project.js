@@ -13,7 +13,7 @@ frappe.ui.form.on("Project", {
 		// removed rather than left as a second, easy-to-miss path to the same places.
 		frm.add_custom_button(
 			__("Open in Project Manager"),
-			() => frappe.set_route("egc-project-hub", frm.doc.name),
+			() => frappe.set_route("project-manager", frm.doc.name),
 			null
 		);
 

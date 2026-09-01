@@ -7,7 +7,7 @@ without a patch.
 
 import frappe
 
-from egc_projects.egc_projects.constants import EGC_ROLES, FINANCIAL_ROLES
+from egc_projects.egc_projects.constants import EGC_ROLES, FINANCIAL_ROLES, PROJECT_VISIBILITY_BYPASS_ROLES
 
 DISCIPLINES = (
 	("ARCH", "Architectural"),
@@ -54,6 +54,37 @@ STAKEHOLDER_ROLES = (
 	("Commercial", 1),
 	("Quantity Surveyor", 1),
 )
+
+#: role_name -> the real Frappe Role(s) that Stakeholder Role's own `default_roles` template
+#: seeds, applied to a person's User account the moment they hold this Stakeholder Role and have
+#: a login (`project_profile.sync_roles_from_stakeholder_role`). The three that name-match an EGC
+#: permission role get that same role; every other internal title gets read-only
+#: `EGC Project Viewer`; every external title gets `EGC External Viewer` — mirroring exactly the
+#: smart-default the Hub's own Grant Access dialog used to compute client-side
+#: (`is_egc_internal ? Engineer : External Viewer`), now baked into data instead. Adjustable
+#: afterward by a System Manager on the native `EGC Stakeholder Role` form.
+STAKEHOLDER_DEFAULT_ROLES = {
+	"EGC Project Manager": ("EGC Project Manager",),
+	"Document Controller": ("EGC Document Controller",),
+	"Project Engineer": ("EGC Project Engineer",),
+	"EGC Site Manager": ("EGC Project Viewer",),
+	"Project Superintendent": ("EGC Project Viewer",),
+	"Office Engineer": ("EGC Project Viewer",),
+	"QA/QC": ("EGC Project Viewer",),
+	"HSE": ("EGC Project Viewer",),
+	"Commercial": ("EGC Project Viewer",),
+	"Quantity Surveyor": ("EGC Project Viewer",),
+	"Client": ("EGC External Viewer",),
+	"Client Representative": ("EGC External Viewer",),
+	"Site Contact": ("EGC External Viewer",),
+	"Main Contractor": ("EGC External Viewer",),
+	"Consultant": ("EGC External Viewer",),
+	"Architect": ("EGC External Viewer",),
+	"OEM": ("EGC External Viewer",),
+	"OEM Engineer": ("EGC External Viewer",),
+	"Subcontractor Engineer": ("EGC External Viewer",),
+	"Supplier Representative": ("EGC External Viewer",),
+}
 
 MODALITIES = (
 	"MRI",
@@ -111,7 +142,31 @@ def setup() -> None:
 	hide_unused_project_fields()
 	restrict_financial_field_permlevel()
 	raise_project_attachment_limit()
+	remove_admin_project_overscoping()
 	frappe.db.commit()
+
+
+def remove_admin_project_overscoping() -> None:
+	"""Fixes a real regression already hit in practice: `grant_portal_access` used to add a
+	`Project` User Permission unconditionally, including for an admin (System Manager/Projects
+	Manager) — but Frappe's own User Permission enforcement has no role-based bypass, so the
+	moment even one such row exists, that user is restricted to only the allowed project(s),
+	regardless of role. `grant_portal_access` itself is now fixed to never create these rows for a
+	bypass-role holder going forward (api/directory.py); this removes any that already exist from
+	before that fix, on every migrate, so an already-affected account is repaired automatically
+	rather than needing a one-off manual cleanup."""
+	bypass_users = frappe.get_all(
+		"Has Role", filters={"role": ("in", PROJECT_VISIBILITY_BYPASS_ROLES)}, pluck="parent", distinct=True
+	)
+	if not bypass_users:
+		return
+	stale = frappe.get_all(
+		"User Permission",
+		filters={"allow": "Project", "user": ("in", bypass_users)},
+		pluck="name",
+	)
+	for name in stale:
+		frappe.delete_doc("User Permission", name, ignore_permissions=True, force=True)
 
 
 def create_project_custom_fields() -> None:
@@ -482,10 +537,20 @@ def create_stakeholder_roles() -> None:
 		return
 
 	for index, (role_name, is_egc_internal) in enumerate(STAKEHOLDER_ROLES):
+		default_roles = STAKEHOLDER_DEFAULT_ROLES.get(role_name, ())
 		# `EGC Stakeholder Role` is named `field:role_name`, so a row created ad hoc by a user
-		# or another agent under the same name is found and left untouched here rather than
-		# duplicated or silently overwritten.
-		if frappe.db.exists("EGC Stakeholder Role", role_name):
+		# or another agent under the same name is found here rather than duplicated. Unlike the
+		# other fields (left alone once a row exists, in case someone already customized them),
+		# `default_roles` is specifically backfilled on an existing row that has none yet — this
+		# app didn't have the concept until this migration, so an empty template here means
+		# "never seeded," not "deliberately configured empty."
+		existing = frappe.db.exists("EGC Stakeholder Role", role_name)
+		if existing:
+			if default_roles and not frappe.db.exists("EGC Stakeholder Role Grant", {"parent": role_name}):
+				doc = frappe.get_doc("EGC Stakeholder Role", role_name)
+				for role in default_roles:
+					doc.append("default_roles", {"role": role})
+				doc.save(ignore_permissions=True)
 			continue
 		frappe.get_doc(
 			{
@@ -493,6 +558,7 @@ def create_stakeholder_roles() -> None:
 				"role_name": role_name,
 				"is_egc_internal": is_egc_internal,
 				"sequence": index,
+				"default_roles": [{"role": role} for role in default_roles],
 			}
 		).insert(ignore_permissions=True)
 

@@ -314,7 +314,7 @@ found a genuine defect and correctly declined to fix it (per its mandate) or pap
 **Project Hub** (Vue 3 desk page, modelled on Frappe's own `workflow_builder` page pattern):
 `egc_project_hub.bundle.js` → `EgcProjectHub.vue` root, one component per tab
 (`OverviewTab`/`WbsTab`/`ActivitiesTab`/`SubmittalsTab`/`DrawingsTab`/`FinancialsTab`), a
-`useHubRoute` composable syncing `/app/egc-project-hub/<project>/<tab>` with `frappe.get_route()`
+`useHubRoute` composable syncing `/app/project-manager/<project>/<tab>` with `frappe.get_route()`
 and a `localStorage` fallback. All data via `api/hub.py`; the Hub never queries a DocType
 directly and holds no business state that isn't re-derivable from the API.
 
@@ -323,7 +323,7 @@ ERPNext projects and found/fixed 4 bugs itself before reporting: `frappe.format(
 frappe.datetime.comment_when()` returning HTML meant for `v-html` rendered as literal markup
 under plain interpolation (switched to `format_currency()`/`prettyDate()`, which return plain
 strings); a global `frappe.router.on("change", …)` handler misreading *any* Desk navigation as a
-Hub route change and corrupting `localStorage` (gated on `route[0] === "egc-project-hub"`); and
+Hub route change and corrupting `localStorage` (gated on `route[0] === "project-manager"`); and
 a null-deref race when a Link control's own change handler fired after Vue had already
 unmounted it (deferred via `setTimeout(0)`).
 
@@ -391,7 +391,7 @@ a raw JS array.
   the link doctype).
 - **3 script reports**: `EGC Drawing Register`, `EGC Submittal Log`, `EGC Activity Status
   Summary`.
-- **1 Desk Page** (`egc-project-hub`, Vue 3) + **1 Workspace** (`EGC Projects`).
+- **1 Desk Page** (`project-manager`, Vue 3) + **1 Workspace** (`EGC Projects`).
 - **62 tests, all green** (`test_wbs.py`, `test_activity.py`, `test_document_control.py`,
   `test_submittal.py`, `test_relationships.py`, `test_hub_api.py`).
 - `bench migrate` clean and idempotent; `frappe`/`erpnext`/`hrms` unmodified throughout.

@@ -120,6 +120,15 @@ FINANCIAL_ROLES = (
 	"Accounts Manager",
 	"System Manager",
 )
+
+#: Holders of any of these roles see EVERY project, full stop — `grant_portal_access`
+#: (api/directory.py) never scopes them with a `Project` User Permission, because Frappe's own
+#: User Permission enforcement has no role-based bypass at all (confirmed against
+#: frappe/permissions.py): the moment a user has even ONE User Permission row for
+#: `allow="Project"`, they can see only the allowed value(s), regardless of what roles they hold.
+#: Direct user instruction, following a real regression: adding themselves (System Manager) to a
+#: project's Directory and granting access silently cost them visibility of every OTHER project.
+PROJECT_VISIBILITY_BYPASS_ROLES = ("System Manager", "Projects Manager")
 # --- v2: Submittal Review Steps -----------------------------------------------------------
 
 STEP_PENDING = "Pending"

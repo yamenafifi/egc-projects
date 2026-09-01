@@ -1,5 +1,5 @@
 // Route is the single source of truth for "which project / which tab" (docs/ARCHITECTURE.md
-// §5): /app/egc-project-hub/<project>/<tab>. Module-level state because only one Hub instance
+// §5): /app/project-manager/<project>/<tab>. Module-level state because only one Hub instance
 // is ever mounted at a time, and the egc_project_hub.js loader re-syncs the same instance on
 // every internal route change rather than remounting.
 
@@ -45,7 +45,7 @@ export function syncRouteFromBrowser() {
 	// frappe.router fires "change" for every Desk navigation, not just ones inside the Hub —
 	// e.g. clicking a table row sets the route to ["Form", "EGC Activity", name]. Reacting to
 	// that would misread "EGC Activity" as the project and clobber state/localStorage.
-	if (frappe.get_route()[0] !== "egc-project-hub") return;
+	if (frappe.get_route()[0] !== "project-manager") return;
 
 	const { project, tab } = read_route();
 
@@ -53,7 +53,7 @@ export function syncRouteFromBrowser() {
 		const last_project = localStorage.getItem(STORAGE_KEY);
 		if (last_project) {
 			restoring = true;
-			frappe.set_route("egc-project-hub", last_project, tab);
+			frappe.set_route("project-manager", last_project, tab);
 			return;
 		}
 	}
@@ -75,18 +75,18 @@ export function useHubRoute() {
 
 	function setProject(project) {
 		if (!project) return;
-		frappe.set_route("egc-project-hub", project, state.tab || DEFAULT_TAB);
+		frappe.set_route("project-manager", project, state.tab || DEFAULT_TAB);
 	}
 
 	function setTab(tab) {
 		if (!state.project || !TABS.includes(tab)) return;
-		frappe.set_route("egc-project-hub", state.project, tab);
+		frappe.set_route("project-manager", state.project, tab);
 	}
 
 	function clearProject() {
 		localStorage.removeItem(STORAGE_KEY);
 		state.project = null;
-		frappe.set_route("egc-project-hub");
+		frappe.set_route("project-manager");
 	}
 
 	return { route: readonly(state), setProject, setTab, clearProject };

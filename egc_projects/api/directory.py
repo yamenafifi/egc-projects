@@ -25,20 +25,23 @@ from frappe.permissions import add_user_permission, remove_user_permission
 from egc_projects.egc_projects import constants as c
 from egc_projects.egc_projects import project_profile, validators
 
-#: Roles a Directory entry can be granted Portal Access under, with what each one means —
-#: surfaced in the Hub's Grant Portal Access dialog rather than free-typing a role name in.
-GRANTABLE_ROLES = (
-	(c.ROLE_PROJECT_MANAGER, "Internal — full project management access"),
-	(c.ROLE_PROJECT_ENGINEER, "Internal — engineering access"),
-	(c.ROLE_DOCUMENT_CONTROLLER, "Internal — document control access"),
-	(c.ROLE_PROJECT_VIEWER, "Internal — read-only access"),
-	(c.ROLE_EXTERNAL_VIEWER, "External — read-only access, and can respond to Submittal steps assigned to them"),
-)
+
+def _has_bypass_role(user: str | None) -> bool:
+	"""True for System Manager / Projects Manager (`constants.PROJECT_VISIBILITY_BYPASS_ROLES`) —
+	holders see every project unconditionally, so `grant_portal_access` must never scope them with
+	a `Project` User Permission (Frappe's own User Permission enforcement has no role-based
+	bypass: the moment even one row exists for `allow="Project"`, that user is restricted to only
+	the allowed value(s), regardless of role — confirmed against `frappe/permissions.py`)."""
+	if not user:
+		return False
+	return bool(set(frappe.get_roles(user)) & set(c.PROJECT_VISIBILITY_BYPASS_ROLES))
 
 
 def _has_portal_access(user: str | None, project: str) -> bool:
 	if not user:
 		return False
+	if _has_bypass_role(user):
+		return True
 	return bool(frappe.db.exists("User Permission", {"user": user, "allow": "Project", "for_value": project}))
 
 
@@ -80,6 +83,7 @@ def get_directory(project: str) -> list[dict]:
 		else set()
 	)
 	portal_roles_by_person: dict[str, list[str]] = {}
+	bypass_persons: set[str] = set()
 	if persons:
 		for row in frappe.get_all(
 			"Has Role",
@@ -87,13 +91,29 @@ def get_directory(project: str) -> list[dict]:
 			fields=["parent", "role"],
 		):
 			portal_roles_by_person.setdefault(row.parent, []).append(row.role)
+		bypass_persons = set(
+			frappe.get_all(
+				"Has Role",
+				filters={"parent": ("in", persons), "role": ("in", list(c.PROJECT_VISIBILITY_BYPASS_ROLES))},
+				pluck="parent",
+			)
+		)
 
 	for row in rows:
 		row["is_egc_internal"] = bool(internal_by_role.get(row.role))
 		# `person` links directly to a User now — no separate identity record to resolve through.
-		row["has_portal_access"] = row.person in portal_access_users
+		# A bypass-role holder (System Manager/Projects Manager) is never given a scoping User
+		# Permission (see grant_portal_access), so they'd otherwise always read as "No login"/"no
+		# access" here despite genuinely seeing every project — `is_admin_bypass` lets the UI show
+		# what's actually true instead.
+		row["is_admin_bypass"] = row.person in bypass_persons
+		row["has_portal_access"] = row.person in portal_access_users or row["is_admin_bypass"]
 		row["portal_roles"] = portal_roles_by_person.get(row.person, [])
-		if row.organization_type == "Supplier":
+		if row.organization_type == "Other":
+			# A deliberately ad-hoc organization — never a Customer/Supplier record, so there's
+			# nothing to look up; the free-text label the user typed IS the display name.
+			row["organization_name"] = row.organization_label
+		elif row.organization_type == "Supplier":
 			row["organization_name"] = supplier_names.get(row.organization)
 		else:
 			row["organization_name"] = customer_names.get(row.organization)
@@ -112,16 +132,24 @@ def _display_names(doctype: str, name_field: str, rows: list[dict]) -> dict[str,
 
 
 @frappe.whitelist()
-def grant_portal_access(project: str, row_name: str, role: str, email: str | None = None) -> dict:
+def grant_portal_access(project: str, row_name: str, email: str | None = None) -> dict:
 	"""Grants Hub access to the person behind Directory row `row_name` — creating their `User`
 	first if they don't have one yet (via `email`, reusing an existing `User` of that address if
-	one exists), then assigning `role` and scoping them to `project` with a `User Permission`
-	(the same mechanism `test_external_viewer.py` already proves out; nothing new here). `person`
-	links directly to a User (no separate identity record), so a newly created User only needs to
-	be mirrored onto this one row's `person` field."""
+	one exists), then scoping them to `project` with a `User Permission` (the same mechanism
+	`test_external_viewer.py` already proves out; nothing new here). `person` links directly to a
+	User (no separate identity record), so a newly created User only needs to be mirrored onto
+	this one row's `person` field.
+
+	Does exactly one thing beyond that: gives the person visibility into this project. It does
+	NOT let the caller pick an arbitrary Frappe Role from a dropdown — direct instruction, after
+	the previous version's manual role-pick conflated "who is this person" (Stakeholder Role) with
+	"what can they do" (permission Role) and, combined with unconditional User Permission scoping,
+	caused a real regression: an admin (System Manager) granting themselves access lost visibility
+	of every other project. Whatever roles this person's Stakeholder Role template implies are
+	applied automatically (`project_profile.sync_roles_from_stakeholder_role`, additive-only), and
+	a bypass-role holder (`constants.PROJECT_VISIBILITY_BYPASS_ROLES`) is never scoped with a User
+	Permission at all — they already see everything; adding one would only ever narrow them."""
 	validators.require_project_permission(project, "write")
-	if role not in dict(GRANTABLE_ROLES):
-		frappe.throw(_("{0} is not a grantable role.").format(role), exc=frappe.ValidationError)
 
 	stakeholder = frappe.get_doc("EGC Project Stakeholder", row_name)
 	if stakeholder.parenttype != "Project" or stakeholder.parent != project:
@@ -150,16 +178,11 @@ def grant_portal_access(project: str, row_name: str, role: str, email: str | Non
 		# app already uses for narrowly-scoped writes it has separately authorized above.
 		frappe.db.set_value("EGC Project Stakeholder", row_name, "person", user)
 
-	# Not `User.add_roles()` — it calls a plain `self.save()` with no bypass, and a Project
-	# Manager granting scoped Hub access has no reason to also independently need write
-	# permission on the core `User` doctype itself. `require_project_permission` above is the
-	# real gate; this mirrors `add_roles()`'s own two lines with that already-checked authority.
-	user_doc = frappe.get_doc("User", user)
-	user_doc.append_roles(role)
-	user_doc.save(ignore_permissions=True)
+	project_profile.sync_roles_from_stakeholder_role(user, stakeholder.role)
 
 	is_first_grant = not _has_portal_access(user, project)
-	add_user_permission("Project", project, user, ignore_permissions=True)
+	if not _has_bypass_role(user):
+		add_user_permission("Project", project, user, ignore_permissions=True)
 
 	if is_first_grant:
 		from egc_projects.egc_projects import notifications
@@ -183,7 +206,12 @@ def revoke_portal_access(project: str, user: str) -> None:
 	opposite of what "revoke" means. A user who still has a `User Permission` on another
 	Project keeps their roles untouched; only the fully-unscoped case strips them."""
 	validators.require_project_permission(project, "write")
-	remove_user_permission("Project", project, user, ignore_permissions=True)
+	# A bypass-role holder (System Manager/Projects Manager) never got a scoping row in the first
+	# place (grant_portal_access skips it for them) — `remove_user_permission` looks the row up by
+	# (user, allow, for_value) and hands `frappe.delete_doc` a bare `None` name if nothing matches,
+	# which raises rather than no-opping. Guard explicitly instead of assuming a row exists.
+	if frappe.db.exists("User Permission", {"user": user, "allow": "Project", "for_value": project}):
+		remove_user_permission("Project", project, user, ignore_permissions=True)
 
 	if frappe.db.count("User Permission", {"user": user, "allow": "Project"}):
 		return
@@ -211,3 +239,4 @@ def update_stakeholder_role(project: str, row_name: str, role: str) -> None:
 		frappe.throw(_("Stakeholder row not found."), exc=frappe.DoesNotExistError)
 	row.role = role
 	doc.save()
+	project_profile.sync_roles_from_stakeholder_role(row.person, role)

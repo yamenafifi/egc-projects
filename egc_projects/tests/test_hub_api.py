@@ -694,6 +694,45 @@ def _get_or_create_submittal_type():
 	return name
 
 
+class TestGetMyProjects(IntegrationTestCase):
+	"""`get_my_projects()` (the Hub's project-picker landing page, ProjectPicker.vue) — a bare
+	`frappe.get_list("Project", ...)`, deliberately never `frappe.get_all`, so it's naturally
+	permission-respecting with zero bypass logic of its own: whether it returns everything or
+	only a scoped subset is entirely a function of the caller's own User Permission state, which
+	is exactly what `grant_portal_access`'s admin-bypass fix (api/directory.py) is responsible
+	for getting right."""
+
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		frappe.set_user("Administrator")
+		cls.company = frappe.db.get_value("Company", {}, "name") or frappe.get_all(
+			"Company", limit=1, pluck="name"
+		)[0]
+
+	def setUp(self):
+		self.project = _make_project(self.company)
+
+	def tearDown(self):
+		frappe.set_user("Administrator")
+
+	def test_unscoped_user_sees_every_project(self):
+		user = _get_or_create_user("egc-myprojects-broad@example.com", ["Projects User", c.ROLE_PROJECT_MANAGER])
+		frappe.set_user(user)
+		names = {row.name for row in hub.get_my_projects()}
+		self.assertIn(self.project, names)
+
+	def test_scoped_user_sees_only_their_allowed_project(self):
+		other_project = _make_project(self.company)
+		user = _get_or_create_user("egc-myprojects-fenced@example.com", ["Projects User", c.ROLE_PROJECT_VIEWER])
+		add_user_permission("Project", other_project, user, ignore_permissions=True)
+
+		frappe.set_user(user)
+		names = {row.name for row in hub.get_my_projects()}
+		self.assertEqual(names, {other_project})
+		self.assertNotIn(self.project, names)
+
+
 def _get_or_create_user(email, roles):
 	if frappe.db.exists("User", email):
 		user = frappe.get_doc("User", email)

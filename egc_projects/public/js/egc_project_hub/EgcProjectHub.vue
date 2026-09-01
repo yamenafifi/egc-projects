@@ -81,6 +81,17 @@ watch(
 	{ immediate: true }
 );
 
+// Browser tab title — "Project Manager - {project}" once a project is loaded, plain "Project
+// Manager" on the bare picker screen. `route.project` (the Project's own name/naming series,
+// e.g. PROJ-####) IS its identity — there is no separate "project code" field in this app.
+watch(
+	() => route.project,
+	(project) => {
+		frappe.utils.set_title(project ? __("Project Manager - {0}", [project]) : __("Project Manager"));
+	},
+	{ immediate: true }
+);
+
 // A direct/linked URL could land on ?/financials before permissions are known, or for a user
 // who never had access — bounce to Overview rather than call get_financials() speculatively.
 watch(context, (ctx) => {

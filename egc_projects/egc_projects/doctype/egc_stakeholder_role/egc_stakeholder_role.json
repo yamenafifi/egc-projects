@@ -9,7 +9,8 @@
   "role_name",
   "is_egc_internal",
   "enabled",
-  "sequence"
+  "sequence",
+  "default_roles"
  ],
  "fields": [
   {
@@ -39,6 +40,13 @@
    "fieldname": "sequence",
    "fieldtype": "Int",
    "label": "Sequence"
+  },
+  {
+   "description": "Real Frappe Roles applied to a person's User account the moment they hold this Stakeholder Role on a project AND have a login (Grant Portal Access, or being added to the Directory with a login already linked). Additive only — never removes a role a person already holds for an unrelated reason (e.g. an Accounting role).",
+   "fieldname": "default_roles",
+   "fieldtype": "Table",
+   "label": "Default Permission Roles",
+   "options": "EGC Stakeholder Role Grant"
   }
  ],
  "index_web_pages_for_search": 1,

@@ -10,7 +10,7 @@ class EGCProjectHub {
 	}
 
 	init() {
-		this.page.set_title(__("EGC Project Hub"));
+		this.page.set_title(__("Project Manager"));
 		this.setup_app();
 	}
 

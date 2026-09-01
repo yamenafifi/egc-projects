@@ -378,10 +378,10 @@ missing that role gets an explicit permission error, never a silently empty Hub.
 - **Entry points:** (a) Workspace `EGC Projects` (app landing), (b) a
   `Open in EGC Projects` button added to the ERPNext `Project` form via `doctype_js`
   (no custom fields are added to `Project` — keeps upgrade surface at zero).
-- **Implementation:** a Frappe **Desk Page** `egc-project-hub`, rendered by a Vue 3 SFC
+- **Implementation:** a Frappe **Desk Page** `project-manager`, rendered by a Vue 3 SFC
   bundle (`egc_project_hub.bundle.js`) — Vue 3 ships with Frappe v16 and its esbuild pipeline
   compiles SFCs natively (`esbuild-plugin-vue3`).
-- **Route carries context:** `/app/egc-project-hub/<project>/<tab>`; last project is also kept
+- **Route carries context:** `/app/project-manager/<project>/<tab>`; last project is also kept
   in `localStorage` so re-entry restores context. Switching tabs never loses the project.
 - **Tabs:** Overview, WBS, Activities, Submittals, Drawings, Financials.
 - The Hub is a **presentation/orchestration layer only**. All data comes from whitelisted API
