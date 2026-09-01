@@ -342,6 +342,52 @@ class TestHubAPI(IntegrationTestCase):
 		):
 			self.assertEqual(result[key], raw_values[field])
 
+	# -- 2b. Committed Purchase Orders (docs/ARCHITECTURE.md §6) -------------------------------
+	#
+	# Unlike every other figure in get_financials(), there is no `tabProject` field to read this
+	# from — ERPNext only ever counts a Purchase Order towards `total_purchase_cost` once it has
+	# been invoiced. These tests exercise the live query directly instead.
+
+	def test_committed_purchase_orders_nets_out_already_billed_portion(self):
+		po = _make_purchase_order(self.project, self.company, rate=1000, qty=1)
+		frappe.db.set_value("Purchase Order", po, "per_billed", 40)
+
+		frappe.set_user(self.manager_user)
+		result = hub.get_financials(self.project)
+		self.assertEqual(result["committed_purchase_orders"], 600)
+
+	def test_committed_purchase_orders_excludes_draft_cancelled_and_closed(self):
+		draft_po = _make_purchase_order(self.project, self.company, rate=500, qty=1, submit=False)
+
+		cancelled_po = _make_purchase_order(self.project, self.company, rate=700, qty=1)
+		frappe.get_doc("Purchase Order", cancelled_po).cancel()
+
+		closed_po = _make_purchase_order(self.project, self.company, rate=900, qty=1)
+		frappe.db.set_value("Purchase Order", closed_po, "status", "Closed")
+
+		open_po = _make_purchase_order(self.project, self.company, rate=300, qty=1)
+
+		frappe.set_user(self.manager_user)
+		result = hub.get_financials(self.project)
+		self.assertEqual(result["committed_purchase_orders"], 300)
+
+		names = {row["name"] for row in hub.get_financial_transactions(self.project, "committed_purchase_orders")}
+		self.assertEqual(names, {open_po})
+		self.assertNotIn(draft_po, names)
+		self.assertNotIn(cancelled_po, names)
+		self.assertNotIn(closed_po, names)
+
+	def test_committed_purchase_orders_drill_down_matches_headline(self):
+		_make_purchase_order(self.project, self.company, rate=1200, qty=2)
+		_make_purchase_order(self.project, self.company, rate=250, qty=3)
+
+		frappe.set_user(self.manager_user)
+		headline = hub.get_financials(self.project)["committed_purchase_orders"]
+		drill_down_total = sum(
+			row["amount"] for row in hub.get_financial_transactions(self.project, "committed_purchase_orders")
+		)
+		self.assertEqual(headline, drill_down_total)
+
 	# -- 3. Financial gate --------------------------------------------------------------------
 
 	def test_financial_gate_denies_viewer_and_allows_manager(self):
@@ -748,6 +794,73 @@ def _get_or_create_user(email, roles):
 		user.insert(ignore_permissions=True)
 	user.add_roles(*roles)
 	return user.name
+
+
+def _get_or_create_supplier():
+	# Supplier autonames off a naming series (SUP-####), not `supplier_name` — the get-or-create
+	# key and the returned Link value are therefore two different things, unlike every other
+	# `_get_or_create_*` helper in this file.
+	name = "EGC-HUB-Test Supplier"
+	existing = frappe.db.get_value("Supplier", {"supplier_name": name})
+	if existing:
+		return existing
+	doc = frappe.get_doc(
+		{
+			"doctype": "Supplier",
+			"supplier_name": name,
+			"supplier_group": frappe.db.get_value("Supplier Group", {}, "name") or "All Supplier Groups",
+		}
+	)
+	doc.insert(ignore_permissions=True)
+	return doc.name
+
+
+def _get_or_create_purchase_item():
+	# Despite `autoname: field:item_code`, this site's Item Naming setting is series-based
+	# (Stock Settings) — `Item.autoname()` overrides both `.name` and the `item_code` field
+	# itself with a generated series value (e.g. "STO-00011"), so `item_code` can't be trusted
+	# as the eventual Link value either. Same shape of bug as `_get_or_create_supplier()`.
+	name = "EGC-HUB-Test Item"
+	existing = frappe.db.get_value("Item", {"item_name": name})
+	if existing:
+		return existing
+	doc = frappe.get_doc(
+		{
+			"doctype": "Item",
+			"item_code": name,
+			"item_name": name,
+			"item_group": frappe.db.get_value("Item Group", {}, "name") or "All Item Groups",
+			"is_stock_item": 0,
+			"stock_uom": frappe.db.get_value("UOM", {}, "name") or "Nos",
+		}
+	)
+	doc.insert(ignore_permissions=True)
+	return doc.name
+
+
+def _make_purchase_order(project, company, rate, qty, submit=True):
+	doc = frappe.get_doc(
+		{
+			"doctype": "Purchase Order",
+			"supplier": _get_or_create_supplier(),
+			"company": company,
+			"transaction_date": today(),
+			"schedule_date": today(),
+			"project": project,
+			"items": [
+				{
+					"item_code": _get_or_create_purchase_item(),
+					"qty": qty,
+					"rate": rate,
+					"schedule_date": today(),
+				}
+			],
+		}
+	)
+	doc.insert(ignore_permissions=True)
+	if submit:
+		doc.submit()
+	return doc.name
 
 
 def _make_project(company):

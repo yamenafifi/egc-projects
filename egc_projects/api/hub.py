@@ -794,6 +794,7 @@ def get_financials(project: str) -> dict:
 	return {
 		"billed": row.total_billed_amount,
 		"purchase_cost": row.total_purchase_cost,
+		"committed_purchase_orders": _committed_purchase_orders_total(project),
 		"expense_claims": expense_claims,
 		"consumed_material_cost": row.total_consumed_material_cost,
 		"timesheet_cost": row.total_costing_amount,
@@ -931,6 +932,40 @@ def _purchase_cost_transactions(project: str) -> list[dict]:
 	return rows
 
 
+# A submitted Purchase Order is a commitment to spend, not a cost yet — ERPNext only ever counts
+# it towards `Project.total_purchase_cost` once it has actually been invoiced (see
+# `calculate_total_purchase_cost()`, which sums Purchase Invoice Item, never Purchase Order Item
+# at all). That's correct accrual accounting, but it also means a project can carry real,
+# submitted Purchase Orders that are completely invisible on the Financials tab until someone
+# raises an invoice against them — which reads as "my Purchase Orders are being ignored". This
+# shows that money separately as its own figure instead of folding it into `purchase_cost` (which
+# must stay true "already invoiced" for `get_cost_forecast()`'s CPI/EAC math to mean anything).
+# `per_billed` nets out the portion already invoiced so a partially-billed PO isn't double-counted
+# against `purchase_cost`; `status != "Closed"` excludes POs someone has deliberately short-closed
+# (no further invoice is coming, so the unbilled remainder is no longer a real commitment).
+def _committed_purchase_order_transactions(project: str) -> list[dict]:
+	po = frappe.qb.DocType("Purchase Order")
+	rows = (
+		frappe.qb.from_(po)
+		.select(po.name, po.transaction_date, po.supplier, po.base_net_total, po.per_billed)
+		.where((po.docstatus == 1) & (po.project == project) & (po.status != "Closed"))
+		.orderby(po.transaction_date, order=frappe.qb.desc)
+		.run(as_dict=True)
+	)
+	for row in rows:
+		base_net_total = flt(row.pop("base_net_total"))
+		per_billed = flt(row.pop("per_billed"))
+		row["amount"] = max(base_net_total * (100 - per_billed) / 100, 0)
+		row["doctype"] = "Purchase Order"
+		row["date"] = row.pop("transaction_date")
+		row["reference"] = row.pop("supplier")
+	return [row for row in rows if row["amount"] > 0]
+
+
+def _committed_purchase_orders_total(project: str) -> float:
+	return sum(flt(row["amount"]) for row in _committed_purchase_order_transactions(project))
+
+
 def _expense_claim_transactions(project: str) -> list[dict]:
 	ec = frappe.qb.DocType("Expense Claim")
 	ecd = frappe.qb.DocType("Expense Claim Detail")
@@ -1028,6 +1063,7 @@ def _sales_order_transactions(project: str) -> list[dict]:
 _FINANCIAL_TRANSACTION_FNS = {
 	"billed": _billed_transactions,
 	"purchase_cost": _purchase_cost_transactions,
+	"committed_purchase_orders": _committed_purchase_order_transactions,
 	"expense_claims": _expense_claim_transactions,
 	"consumed_material_cost": _consumed_material_transactions,
 	"timesheet_cost": _timesheet_transactions,

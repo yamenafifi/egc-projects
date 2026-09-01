@@ -426,7 +426,7 @@ controllers (`Project.update_costing()`, `calculate_total_purchase_cost()`,
 | Hub label | ERPNext field | Written by |
 |---|---|---|
 | Billed | `total_billed_amount` | `Project.update_billed_amount()` (Sales Invoice) |
-| Purchase Cost | `total_purchase_cost` | `calculate_total_purchase_cost()` (Purchase Invoice) |
+| Purchase Cost (Invoiced) | `total_purchase_cost` | `calculate_total_purchase_cost()` (Purchase Invoice) |
 | Expense Claims | `total_expense_claim` | HRMS custom field, `hrms/overrides/employee_project.py` |
 | Consumed Material Cost | `total_consumed_material_cost` | `Stock Entry` |
 | Timesheet Cost | `total_costing_amount` | `Project.update_costing()` (Timesheet Detail) |
@@ -438,6 +438,15 @@ controllers (`Project.update_costing()`, `calculate_total_purchase_cost()`,
 re-aggregate invoices itself — that would create a second, divergent source of truth.
 `total_expense_claim` is read defensively (`meta.has_field`) because it is an HRMS custom
 field, not core ERPNext.
+
+One figure is a genuine exception, by necessity: **Purchase Orders (Committed, Not Yet
+Invoiced)**. ERPNext never maintains a `tabProject` field for this — `total_purchase_cost` only
+ever counts *invoiced* amounts, so a submitted Purchase Order is otherwise invisible on the
+Financials tab until someone raises an invoice against it. `_committed_purchase_order_transactions()`
+sums submitted, non-`Closed` Purchase Orders' `base_net_total`, netted by their own `per_billed`
+so the still-open portion is never double-counted against `purchase_cost`. `get_financials()` and
+`get_financial_transactions("committed_purchase_orders", ...)` both call this same helper, so the
+headline figure and its drill-down can never disagree.
 
 ---
 
@@ -468,7 +477,7 @@ Mandatory coverage matches the 10 acceptance scenarios in the build brief.
 
 ## 9. Explicitly deferred (do not implement)
 
-BOQ, budgets, commitments, forecasting, change events/orders, RFI/MIR/WIR/FIR/ITP/NCR,
+BOQ, budgets, change events/orders, RFI/MIR/WIR/FIR/ITP/NCR,
 punch lists, daily logs, HSE, procurement, material tracking, resource planning, BIM,
 commissioning, warranty, locations, CPM/scheduling engines, P6/MSP import, offline mobile,
 drawing markup/pins, AI extraction, roll-up of activity progress, readiness engine.

@@ -110,7 +110,12 @@ const rows = computed(() => {
 	const d = data.value;
 	return [
 		{ label: __("Billed"), value: format_amount(d.billed), metric: "billed" },
-		{ label: __("Purchase Cost"), value: format_amount(d.purchase_cost), metric: "purchase_cost" },
+		{ label: __("Purchase Cost (Invoiced)"), value: format_amount(d.purchase_cost), metric: "purchase_cost" },
+		{
+			label: __("Purchase Orders (Committed, Not Yet Invoiced)"),
+			value: format_amount(d.committed_purchase_orders),
+			metric: "committed_purchase_orders",
+		},
 		{ label: __("Expense Claims"), value: format_amount(d.expense_claims), metric: "expense_claims" },
 		{
 			label: __("Consumed Material Cost"),

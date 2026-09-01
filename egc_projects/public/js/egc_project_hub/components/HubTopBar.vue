@@ -117,7 +117,7 @@ const ICONS = {
 	directory:
 		'<circle cx="9" cy="8" r="3"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><circle cx="17" cy="8" r="2.5"/><path d="M15.5 14.3c2.9.4 5 2.8 5 5.7"/>',
 	financials:
-		'<path d="M12 2v20"/><path d="M17 6.5c0-1.7-2.2-3-5-3s-5 1.2-5 3 2.2 2.5 5 3 5 1.3 5 3-2.2 3-5 3-5-1.3-5-3"/>',
+		'<line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>',
 	"project-info":
 		'<circle cx="12" cy="12" r="9"/><path d="M12 11v6"/><circle cx="12" cy="7.5" r="0.25" fill="currentColor" stroke="none"/>',
 };
