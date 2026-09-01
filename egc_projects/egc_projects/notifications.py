@@ -230,11 +230,40 @@ def send_activity_due_date_reminders() -> None:
 		)
 
 
-def _send_email(user: str, subject: str, message: str) -> None:
+def _send_email(
+	user: str,
+	subject: str,
+	title: str,
+	body: str,
+	button_label: str | None = None,
+	button_url: str | None = None,
+) -> None:
+	"""Every email this app sends goes through here, styled exactly like Frappe's own
+	transactional emails (password reset, login-by-link, user invitation) — `with_container=True`
+	is what actually wraps the content below in the branded card (logo/header/footer) seen on
+	every core Frappe email; without it `frappe.sendmail` renders the bare `message` HTML with no
+	wrapper at all, which is what this app's own emails looked like before this fix. The
+	`email-header-title`/`btn btn-primary`/`text-muted text-small` classes aren't decoration —
+	they're the exact vocabulary `frappe/templates/emails/login_with_email_link.html` itself uses,
+	styled for free by the same CSS `with_container` pulls in.
+	"""
 	if not user or user == "Administrator":
 		return
 	email = frappe.db.get_value("User", user, "email") or user
-	frappe.sendmail(recipients=[email], sender=NOTIFY_SENDER, subject=subject, message=message, now=True)
+
+	content = f'<h1 class="email-header-title">{frappe.utils.escape_html(title)}</h1>'
+	content += f"<p>{body}</p>"
+	if button_label and button_url:
+		content += f'<p><a href="{button_url}" class="btn btn-primary">{frappe.utils.escape_html(button_label)}</a></p>'
+
+	frappe.sendmail(
+		recipients=[email],
+		sender=NOTIFY_SENDER,
+		subject=subject,
+		message=content,
+		with_container=True,
+		now=True,
+	)
 
 
 def send_ball_in_court_email(reviewer_user: str, submission: str) -> None:
@@ -245,25 +274,28 @@ def send_ball_in_court_email(reviewer_user: str, submission: str) -> None:
 	)
 	if not revision:
 		return
+	label = revision.revision_label or submission
 	url = f"{get_url()}/app/egc-project-hub/{revision.project}/submittals"
 	_send_email(
 		reviewer_user,
-		frappe._("Review requested: {0}").format(revision.revision_label or submission),
-		frappe._('You\'ve been asked to review {0}.<br><br><a href="{1}">Open in Project Manager</a>').format(
-			revision.revision_label or submission, url
-		),
+		frappe._("Review requested: {0}").format(label),
+		frappe._("Review requested"),
+		frappe._("You've been asked to review {0}.").format(frappe.bold(label)),
+		button_label=frappe._("Open in Project Manager"),
+		button_url=url,
 	)
 
 
 def send_directory_welcome_email(user: str, project: str) -> None:
 	"""Sent once, from `grant_portal_access` (api/directory.py), the moment a Directory entry is
 	first given Portal Access — not on every later change to their access."""
-	project_name = frappe.db.get_value("Project", project, "project_name")
+	project_name = frappe.db.get_value("Project", project, "project_name") or project
 	url = f"{get_url()}/app/egc-project-hub/{project}"
 	_send_email(
 		user,
-		frappe._("You've been added to {0}").format(project_name or project),
-		frappe._('You now have access to {0} in EGC Project Manager.<br><br><a href="{1}">Open the project</a>').format(
-			project_name or project, url
-		),
+		frappe._("You've been added to {0}").format(project_name),
+		frappe._("You've been added to {0}").format(project_name),
+		frappe._("You now have access to {0} in EGC Project Manager.").format(frappe.bold(project_name)),
+		button_label=frappe._("Open the Project"),
+		button_url=url,
 	)

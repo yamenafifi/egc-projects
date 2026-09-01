@@ -194,6 +194,22 @@ class TestDocumentsAPI(IntegrationTestCase):
 		rows = documents.egc_project_document.get_revisions(doc.name)
 		self.assertTrue(rows[0]["native_file"])
 
+	def test_get_revisions_includes_reason_for_revision(self):
+		"""Regression: `get_revisions()`'s `fields=[...]` never selected `reason_for_revision`,
+		even though `create_document_revision()` happily accepts and saves it — whatever a user
+		typed into "Reason for Revision" was saved to the database but could never be read back,
+		so `DocumentDetail.vue`'s timeline (`event.rev.reason_for_revision`) always saw `undefined`
+		and its `v-if` never rendered the reason at all."""
+		doc = self._make_document("DA-REASON-001")
+		documents.create_document_revision(
+			document=doc.name,
+			revision="00",
+			file=_make_private_file(),
+			reason_for_revision="Client comments incorporated",
+		)
+		rows = documents.egc_project_document.get_revisions(doc.name)
+		self.assertEqual(rows[0]["reason_for_revision"], "Client comments incorporated")
+
 	def test_create_document_revision_blocked_while_current_revision_is_under_review(self):
 		"""Direct user instruction: "if there is a current revision and the document status is
 		'under review' ... you should not be able to add revisions." Enforced in
@@ -324,6 +340,10 @@ class TestDocumentsAPI(IntegrationTestCase):
 		self.assertEqual(len(detail["submittals"]), 1)
 		self.assertEqual(detail["submittals"][0]["submittal"], submittal.name)
 		self.assertEqual(detail["submittals"][0]["revision_label"], "00")
+		# Regression: `_related_submittals()` never selected `response_remarks` at all, so a
+		# reviewer's actual rejection notes ("Needs changes") could never reach
+		# DocumentDetail.vue's "Revise & Resubmit"/"Rejected" reason banner.
+		self.assertEqual(detail["submittals"][0]["response_remarks"], "Needs changes")
 
 	def test_get_document_detail_not_found_raises(self):
 		with self.assertRaises(frappe.DoesNotExistError):

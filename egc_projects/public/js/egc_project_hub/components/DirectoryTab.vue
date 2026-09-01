@@ -160,7 +160,7 @@ function open_grant_access_dialog(row) {
 			description: GRANTABLE_ROLES.map((r) => `${r.value}: ${r.label}`).join(" · "),
 		},
 	];
-	if (!row.user) {
+	if (!row.person) {
 		fields.push({
 			fieldname: "email",
 			fieldtype: "Data",
@@ -189,7 +189,7 @@ function open_grant_access_dialog(row) {
 
 function confirm_revoke_access(row) {
 	frappe.confirm(__("Revoke {0}'s access to this project? Their login itself is not affected.", [row.party_name]), () => {
-		revoke_portal_access(props.project, row.user)
+		revoke_portal_access(props.project, row.person)
 			.then(reload)
 			.catch((e) => report_error(__("Could Not Revoke Access"), e));
 	});

@@ -321,7 +321,7 @@ const rejection_reason_text = computed(() => {
 	const d = data.value?.document;
 	const rel = current_related_submittal.value;
 	if (!d || !rel || !["Revise & Resubmit", "Rejected"].includes(d.approval_status)) return null;
-	return rel.remarks || null;
+	return rel.response_remarks || null;
 });
 
 // -- Workflow card: a compact, read-only preview of the governing Submittal's review chain

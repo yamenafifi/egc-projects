@@ -280,7 +280,7 @@ def _submission_documents(submission: str) -> list[dict]:
 	return frappe.get_all(
 		"EGC Submittal Document Item",
 		filters={"parent": submission},
-		fields=["document_revision", "document", "revision", "document_title"],
+		fields=["name", "document_revision", "document", "revision", "document_title"],
 		order_by="idx asc",
 	)
 

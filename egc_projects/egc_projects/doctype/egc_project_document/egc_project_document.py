@@ -84,6 +84,7 @@ def get_revisions(document: str) -> list[dict]:
 			"revision_date",
 			"issue_date",
 			"remarks",
+			"reason_for_revision",
 			"readiness",
 			"superseded_by",
 			# Real Datetimes, unlike revision_date/issue_date (Date-only) — needed to interleave

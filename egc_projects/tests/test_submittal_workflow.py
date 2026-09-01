@@ -544,6 +544,37 @@ class TestSubmittalWorkflow(IntegrationTestCase):
 			frappe.db.get_value("EGC Submittal Revision", submission, "submission_status"), c.SUBMISSION_SUBMITTED
 		)
 
+	def test_submission_document_rows_carry_their_own_name(self):
+		"""Regression: `_submission_documents()`'s `frappe.get_all(..., fields=[...])` omitted
+		`name` entirely — `get_all`/`get_list` return ONLY the fields explicitly listed, unlike
+		`get_doc`, so every row in a submission's own `documents` list had no `name` key at all.
+		The Hub's own `SubmittalDetail.vue` uses exactly that missing key
+		(`remove_submission_document(submission, row.name)`) to remove a document from a Draft
+		submission — with `row.name` silently `undefined`, that call reached the backend as
+		`row_name: undefined` (JSON drops it entirely), and `remove_submission_document`'s required
+		`row_name` argument raised `TypeError: missing 1 required positional argument`."""
+		from egc_projects.api import submittals as submittals_api
+
+		doc = self._make_document("DOC-ROWNAME-1")
+		rev = self._make_issued_revision(doc.name, "00")
+
+		result = submittals_api.create_submittal(
+			self.project,
+			submittal_number="SUB-ROWNAME-1",
+			title="Row Name Regression",
+			submittal_type=self.submittal_type,
+			discipline=self.discipline,
+		)
+		submission = submittals_api.create_first_submission(result["name"])["name"]
+		submittals_api.add_submission_document(submission, rev.name)
+
+		detail = submittals_api.get_submittal_detail(result["name"])
+		row = detail["submissions"][0]["documents"][0]
+		self.assertTrue(row.get("name"))
+
+		submittals_api.remove_submission_document(submission, row["name"])
+		self.assertEqual(len(frappe.get_doc("EGC Submittal Revision", submission).documents), 0)
+
 	def test_direct_save_cannot_bypass_cross_submittal_exclusivity(self):
 		"""The "one document revision under review through only one submittal at a time" rule
 		used to live only in `api/submittals.py.add_submission_document()` — a raw

@@ -239,6 +239,7 @@ def _related_submittals(document: str) -> list[dict]:
 			"revision_label",
 			"submission_status",
 			"response",
+			"response_remarks",
 			"date_submitted",
 			"due_date",
 			# Real Datetimes (unlike date_submitted/due_date, Date-only) — `creation` anchors the
@@ -279,6 +280,7 @@ def _related_submittals(document: str) -> list[dict]:
 				"revision_label": row.revision_label,
 				"submission_status": row.submission_status,
 				"response": row.response,
+				"response_remarks": row.response_remarks,
 				"date_submitted": row.date_submitted,
 				"due_date": row.due_date,
 				"creation": row.creation,
