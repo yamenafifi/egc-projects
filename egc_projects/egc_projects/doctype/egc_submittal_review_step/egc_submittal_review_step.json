@@ -11,6 +11,7 @@
 		"column_break_1",
 		"sequence",
 		"is_required",
+		"origin",
 		"section_break_reviewer",
 		"reviewer_role",
 		"reviewer_user",
@@ -60,6 +61,15 @@
 			"fieldname": "is_required",
 			"fieldtype": "Check",
 			"label": "Required"
+		},
+		{
+			"default": "Pre-Planned",
+			"description": "Pre-Planned: set up before the submission went out (ad-hoc or from a Workflow Template). Forwarded: added live by whoever held Ball in Court, at response time.",
+			"fieldname": "origin",
+			"fieldtype": "Select",
+			"label": "Origin",
+			"options": "Pre-Planned\nForwarded",
+			"read_only": 1
 		},
 		{
 			"fieldname": "section_break_reviewer",

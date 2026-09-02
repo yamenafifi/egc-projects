@@ -23,6 +23,7 @@ class EGCSubmittalReviewStep(Document):
 		from frappe.types import DF
 
 		is_required: DF.Check
+		origin: DF.Literal["Pre-Planned", "Forwarded"]
 		project: DF.Link
 		response: DF.Literal["", "Approved", "Approved with Comments", "Revise & Resubmit", "Rejected"]
 		responded_by: DF.Link | None

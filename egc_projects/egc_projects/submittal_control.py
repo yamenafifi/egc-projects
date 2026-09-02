@@ -784,12 +784,25 @@ def _is_step_override_user() -> bool:
 
 @frappe.whitelist()
 def record_step_response(
-	step: str, response: str, remarks: str | None = None, attachment: str | None = None
+	step: str,
+	response: str,
+	remarks: str | None = None,
+	attachment: str | None = None,
+	forward_to_user: str | None = None,
+	forward_to_role: str | None = None,
 ) -> None:
 	"""Records ONE reviewer's response on their own step. Authorization here is identity-based,
 	not doctype-role-based: the point of Ball in Court is that a specific person — who may be an
 	external party holding no EGC role at all — is the one who must act, so the check is "are
-	you that person" (or an internal override), not "do you hold role X"."""
+	you that person" (or an internal override), not "do you hold role X".
+
+	`forward_to_user`/`forward_to_role` is the live, transmittal-style routing decision — "and
+	then pick who it goes to next" — layered on top of the pre-planned stage/sequence engine
+	below, not a replacement for it (docs on `_evaluate_stage`/`_apply_forward`). Deliberately
+	scoped to a step that is the SOLE active required reviewer of its stage: a parallel stage
+	with several required reviewers has no single coherent "next" for one of them to hand off to
+	on the others' behalf, so forwarding is rejected outright there rather than silently ignored
+	— a caller who explicitly asked for it deserves a clear error, not silently-dropped intent."""
 	doc = frappe.get_doc("EGC Submittal Review Step", step)
 
 	if not (frappe.session.user == doc.reviewer_user or _is_step_override_user()):
@@ -813,6 +826,34 @@ def record_step_response(
 			exc=frappe.ValidationError,
 		)
 
+	if forward_to_user or forward_to_role:
+		if response in _STEP_TERMINAL_RESPONSES:
+			frappe.throw(
+				_("A {0} response already sends this back to EGC's own side — there is nothing to forward.").format(
+					_(response)
+				),
+				title=_("Not Allowed"),
+				exc=frappe.ValidationError,
+			)
+		if forward_to_user and forward_to_user in (frappe.session.user, doc.reviewer_user):
+			frappe.throw(_("You cannot forward a step to the reviewer who just responded to it."), exc=frappe.ValidationError)
+		other_required_open = frappe.db.exists(
+			"EGC Submittal Review Step",
+			{
+				"submittal_revision": doc.submittal_revision,
+				"sequence": doc.sequence,
+				"status": c.STEP_IN_REVIEW,
+				"is_required": 1,
+				"name": ("!=", doc.name),
+			},
+		)
+		if other_required_open:
+			frappe.throw(
+				_("Forwarding is only available when you're the only reviewer required at this stage."),
+				title=_("Not Allowed"),
+				exc=frappe.ValidationError,
+			)
+
 	_engine_set_step(
 		doc.name,
 		{
@@ -825,13 +866,97 @@ def record_step_response(
 		},
 	)
 	_close_step_assignment(doc.name, doc.reviewer_user)
-	_evaluate_stage(doc.submittal_revision)
+	_evaluate_stage(doc.submittal_revision, forward_to_user=forward_to_user, forward_to_role=forward_to_role)
 
 
-def _evaluate_stage(submission: str) -> None:
+def _insert_forwarded_step(submission: str, reviewer_role: str | None, reviewer_user: str | None) -> str:
+	"""A live-forwarded hop becomes a real, audited `EGC Submittal Review Step` row — not a
+	separate log — so the existing step list / ball-in-court / timeline machinery shows it for
+	free. Mirrors `add_review_step`'s own role-resolution (a role with no explicit user resolves
+	to that role's project stakeholder), but is never routed through that whitelisted function
+	itself: `add_review_step` throws on anything but a Draft (docstatus 0) submission, which this
+	submission never is by response time. `ignore_permissions=True` is load-bearing here, unlike
+	`add_review_step`/`apply_workflow_template` (which don't need it — both only ever run
+	pre-submit, called by an internal role that already holds `create` on this doctype): the
+	whole point of this feature is an external reviewer's OWN low-privilege session forwarding
+	their own step, and `EGC External Viewer` has no `create` on `EGC Submittal Review Step`."""
+	project = frappe.db.get_value("EGC Submittal Revision", submission, "project")
+	label = None
+	if reviewer_role and not reviewer_user:
+		from egc_projects.egc_projects import project_profile
+
+		reviewer_user = project_profile.resolve_role_user(project, reviewer_role)
+		stakeholders = project_profile.get_stakeholders(project)
+		label = next((s.party_name for s in stakeholders if s.role == reviewer_role), reviewer_role)
+	elif reviewer_user:
+		label = frappe.db.get_value("User", reviewer_user, "full_name") or reviewer_user
+
+	max_seq = frappe.get_all(
+		"EGC Submittal Review Step",
+		filters={"submittal_revision": submission},
+		fields=[{"MAX": "sequence", "as": "max_seq"}],
+	)[0].max_seq or 0
+
+	step = frappe.get_doc(
+		{
+			"doctype": "EGC Submittal Review Step",
+			"submittal_revision": submission,
+			"sequence": max_seq + 1,
+			"reviewer_role": reviewer_role,
+			"reviewer_user": reviewer_user,
+			"reviewer_label": label,
+			"is_required": 1,
+			"origin": "Forwarded",
+		}
+	)
+	step.insert(ignore_permissions=True)
+	return step.name
+
+
+def _apply_forward(submission: str, forward_to_user: str | None, forward_to_role: str | None) -> None:
+	"""The stage-closing response named who it goes to next. If that's exactly who the
+	pre-planned sequence already had queued next, just open it the normal way (no duplicate row
+	for the same person). Otherwise every remaining Pending row — however many pre-planned
+	stages that bypasses, not only the very next one — is explicitly Skipped before the new
+	ad-hoc step is inserted: left alone, an orphaned Pending row would silently resurface and
+	reopen later, whenever the ad-hoc chain eventually clears another stage, since the pending-
+	scan below matches on status alone, not sequence."""
+	next_pending_rows = frappe.get_all(
+		"EGC Submittal Review Step",
+		filters={"submittal_revision": submission, "status": c.STEP_PENDING},
+		fields=["name", "reviewer_user", "reviewer_role"],
+		order_by="sequence asc",
+		limit=1,
+	)
+	next_pending = next_pending_rows[0] if next_pending_rows else None
+	matches_pre_planned = next_pending and (
+		(forward_to_user and next_pending.reviewer_user == forward_to_user)
+		or (not forward_to_user and forward_to_role and next_pending.reviewer_role == forward_to_role)
+	)
+	if matches_pre_planned:
+		start_review(submission)
+		return
+
+	for row in frappe.get_all(
+		"EGC Submittal Review Step", filters={"submittal_revision": submission, "status": c.STEP_PENDING}, pluck="name"
+	):
+		_engine_set_step(row, {"status": c.STEP_SKIPPED})
+
+	new_step = _insert_forwarded_step(submission, forward_to_role, forward_to_user)
+	_engine_set_step(new_step, {"status": c.STEP_IN_REVIEW})
+	reviewer_user = frappe.db.get_value("EGC Submittal Review Step", new_step, "reviewer_user")
+	if reviewer_user:
+		_assign_step(new_step, reviewer_user, submission)
+	_refresh_ball_in_court(submission)
+
+
+def _evaluate_stage(submission: str, forward_to_user: str | None = None, forward_to_role: str | None = None) -> None:
 	"""Re-derives ball-in-court and, once every REQUIRED step at the current stage has
 	responded, either terminates the submission (a Revise & Resubmit / Rejected response from
-	ANY step wins immediately) or advances to the next stage / final aggregate response."""
+	ANY step wins immediately) or advances to the next stage / final aggregate response — or,
+	when `forward_to_user`/`forward_to_role` was supplied (already validated as eligible by
+	`record_step_response` before this was ever called), routes live via `_apply_forward` instead
+	of following whatever was pre-planned."""
 	stage_rows = frappe.get_all(
 		"EGC Submittal Review Step",
 		filters={"submittal_revision": submission, "status": ("in", (c.STEP_IN_REVIEW, c.STEP_RESPONDED))},
@@ -877,6 +1002,10 @@ def _evaluate_stage(submission: str) -> None:
 			_engine_set_step(row.name, {"status": c.STEP_SKIPPED})
 
 	submission_doc = frappe.get_doc("EGC Submittal Revision", submission)
+
+	if forward_to_user or forward_to_role:
+		_apply_forward(submission, forward_to_user, forward_to_role)
+		return
 
 	next_pending = frappe.get_all(
 		"EGC Submittal Review Step",

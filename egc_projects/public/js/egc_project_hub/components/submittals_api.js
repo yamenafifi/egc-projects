@@ -108,8 +108,15 @@ export function remove_review_step(step) {
 	return call(`${SUBMITTAL_CONTROL_MODULE}.remove_review_step`, { step });
 }
 
-export function record_step_response(step, response, remarks, attachment) {
-	return call(`${SUBMITTAL_CONTROL_MODULE}.record_step_response`, { step, response, remarks, attachment });
+export function record_step_response(step, response, remarks, attachment, forward_to_user, forward_to_role) {
+	return call(`${SUBMITTAL_CONTROL_MODULE}.record_step_response`, {
+		step,
+		response,
+		remarks,
+		attachment,
+		forward_to_user,
+		forward_to_role,
+	});
 }
 
 export function get_ball_in_court(submission) {

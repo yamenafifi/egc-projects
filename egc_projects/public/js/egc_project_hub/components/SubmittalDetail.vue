@@ -28,6 +28,7 @@ import {
 } from "./submittals_api";
 import { openSubmitForReviewFlow } from "./submit_for_review_flow";
 import { renderStagesPreviewHtml } from "./workflow_template_flow";
+import { get_directory_person_emails, person_link_filter } from "./directory_helpers";
 import { link_activity_record, unlink_activity_record } from "./activities_api";
 import { add_assignment, remove_assignment } from "./assignments_api";
 import { get_person_info } from "./project_profile_api";
@@ -231,33 +232,84 @@ async function do_submit() {
 }
 
 const RESPONSES = ["Approved", "Approved with Comments", "Revise & Resubmit", "Rejected"];
+const TERMINAL_RESPONSES = ["Rejected", "Revise & Resubmit"];
 
-function open_record_response_dialog(step) {
+// A step may only forward live when it's the SOLE active required reviewer of its own stage —
+// with several required reviewers in parallel, there's no single "next" for one of them to hand
+// off to on the others' behalf (submittal_control.py's own `record_step_response` enforces this
+// same rule server-side; this is just what decides whether to show the control at all).
+function _is_sole_active_required_step(step) {
+	const siblings = current_submission.value?.steps || [];
+	return !siblings.some(
+		(s) => s.name !== step.name && s.sequence === step.sequence && s.status === "In Review" && s.is_required
+	);
+}
+
+// The pre-planned reviewer this step's stage would otherwise open next, if any — shown as the
+// live "Forward to" field's own default, so accepting it with no changes reproduces exactly
+// today's automatic behavior (zero added friction for the common, non-rerouted case).
+function _default_next_reviewer() {
+	const pending = (current_submission.value?.steps || [])
+		.filter((s) => s.status === "Pending")
+		.sort((a, b) => a.sequence - b.sequence);
+	if (!pending.length) return null;
+	return { user: pending[0].reviewer_user, label: pending[0].reviewer_label || pending[0].reviewer_role };
+}
+
+async function open_record_response_dialog(step) {
+	const forwardable = _is_sole_active_required_step(step);
+	const default_next = forwardable ? _default_next_reviewer() : null;
+	const directory_emails = forwardable ? await get_directory_person_emails(props.project) : [];
+
+	const fields = [
+		{ fieldname: "response", fieldtype: "Select", label: __("Response"), options: RESPONSES, reqd: 1 },
+		{
+			fieldname: "remarks",
+			fieldtype: "Small Text",
+			label: __("Remarks"),
+			// Required specifically for Rejected/Revise & Resubmit — approving with nothing to
+			// say is fine, but sending something back with no reason leaves whoever inherits the
+			// resubmission with nothing to act on.
+			mandatory_depends_on: 'eval:["Rejected", "Revise & Resubmit"].includes(doc.response)',
+			description: __("Required when rejecting or requesting a revision — this is what shows as the reason."),
+		},
+		{
+			fieldname: "attachment",
+			fieldtype: "Attach",
+			label: __("Attachment"),
+			description: __("Optional — a marked-up file you're returning with your response (e.g. an annotated drawing)."),
+			options: { doctype: "EGC Submittal Review Step", docname: step.name, fieldname: "response_attachment", folder: `Home/Projects/${props.project}/Submittals` },
+		},
+	];
+
+	if (forwardable) {
+		fields.push(
+			{
+				fieldtype: "Section Break",
+				label: __("Forward To"),
+				depends_on: `eval:!${JSON.stringify(TERMINAL_RESPONSES)}.includes(doc.response)`,
+			},
+			{
+				fieldname: "forward_to_user",
+				fieldtype: "Link",
+				label: __("Next Reviewer"),
+				options: "User",
+				default: default_next?.user || undefined,
+				description: default_next
+					? __("Defaults to {0}, the next planned reviewer — pick someone else to route there instead, or clear this to leave it unset.", [default_next.label || default_next.user])
+					: __("Nothing is planned after this — pick someone to route it to, or leave blank if this response is final."),
+				get_query: person_link_filter(directory_emails),
+			}
+		);
+	}
+
 	const dialog = new frappe.ui.Dialog({
 		title: __("Record Response"),
-		fields: [
-			{ fieldname: "response", fieldtype: "Select", label: __("Response"), options: RESPONSES, reqd: 1 },
-			{
-				fieldname: "remarks",
-				fieldtype: "Small Text",
-				label: __("Remarks"),
-				// Required specifically for Rejected/Revise & Resubmit — approving with nothing to
-				// say is fine, but sending something back with no reason leaves whoever inherits the
-				// resubmission with nothing to act on.
-				mandatory_depends_on: 'eval:["Rejected", "Revise & Resubmit"].includes(doc.response)',
-				description: __("Required when rejecting or requesting a revision — this is what shows as the reason."),
-			},
-			{
-				fieldname: "attachment",
-				fieldtype: "Attach",
-				label: __("Attachment"),
-				description: __("Optional — a marked-up file you're returning with your response (e.g. an annotated drawing)."),
-				options: { doctype: "EGC Submittal Review Step", docname: step.name, fieldname: "response_attachment", folder: `Home/Projects/${props.project}/Submittals` },
-			},
-		],
+		fields,
 		primary_action_label: __("Record"),
 		primary_action(values) {
-			record_step_response(step.name, values.response, values.remarks, values.attachment)
+			const forward_to = forwardable && !TERMINAL_RESPONSES.includes(values.response) ? values.forward_to_user : null;
+			record_step_response(step.name, values.response, values.remarks, values.attachment, forward_to || undefined)
 				.then(() => {
 					dialog.hide();
 					notify_changed();
