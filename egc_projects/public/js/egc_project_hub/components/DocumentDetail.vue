@@ -850,6 +850,8 @@ const timeline_events = computed(() => {
 	font-size: var(--text-sm);
 	font-weight: 600;
 	color: var(--text-muted);
+	overflow-wrap: break-word;
+	word-break: break-word;
 }
 
 .doc-page__title {
@@ -1069,12 +1071,66 @@ const timeline_events = computed(() => {
 
 .submittal-sidebar__card {
 	border: 1px solid var(--border-color);
-	border-radius: var(--border-radius);
-	padding: 14px;
+	border-radius: var(--border-radius-lg);
+	background: var(--fg-color);
+	padding: 16px;
 }
 
 .submittal-sidebar__meta {
 	margin-top: 8px;
+}
+
+/* Shared with SubmittalDetail.vue's own copy of the same class names — Vue `scoped` styles
+   never leak across components, so each detail page defines them itself; kept visually
+   identical on purpose (see that file's own definitions). Section titles get a real divider,
+   not just a font-weight bump, so a sidebar of five stacked cards reads as five distinct
+   sections rather than one long undifferentiated column — and every value gets explicit
+   wrapping, since a document number, an org name or an email can be arbitrarily long and must
+   never be allowed to overflow a fixed-width sidebar (docs/CLAUDE.md long-text discipline). */
+.activity-detail__section-title {
+	font-size: var(--text-sm);
+	font-weight: 600;
+	color: var(--text-color);
+	padding-bottom: 8px;
+	margin-bottom: 12px;
+	border-bottom: 1px solid var(--border-color);
+}
+
+.activity-detail__head-row {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	padding-bottom: 8px;
+	margin-bottom: 12px;
+	border-bottom: 1px solid var(--border-color);
+}
+
+.activity-detail__head-row .activity-detail__section-title {
+	padding-bottom: 0;
+	margin-bottom: 0;
+	border-bottom: none;
+}
+
+.activity-detail__meta {
+	display: grid;
+	gap: 10px 16px;
+	margin: 0;
+}
+
+.activity-detail__meta dt {
+	font-size: var(--text-xs);
+	color: var(--text-muted);
+	text-transform: uppercase;
+	letter-spacing: 0.02em;
+}
+
+.activity-detail__meta dd {
+	margin: 2px 0 0;
+	font-size: var(--text-sm);
+	color: var(--text-color);
+	overflow-wrap: break-word;
+	word-break: break-word;
 }
 
 .doc-sidebar__file-row {
@@ -1114,9 +1170,12 @@ const timeline_events = computed(() => {
 }
 
 .doc-workflow__line {
+	/* A long submittal number (e.g. a contract-prefixed one) must never fight the status pill
+	   for space on one line — stack them instead of forcing a mid-word wrap between the two. */
 	display: flex;
-	align-items: center;
-	gap: 8px;
+	flex-direction: column;
+	align-items: flex-start;
+	gap: 6px;
 	margin-bottom: 10px;
 }
 
@@ -1124,6 +1183,8 @@ const timeline_events = computed(() => {
 	font-size: var(--text-sm);
 	font-weight: 600;
 	color: var(--text-color);
+	overflow-wrap: break-word;
+	word-break: break-word;
 }
 
 .doc-revision-row {

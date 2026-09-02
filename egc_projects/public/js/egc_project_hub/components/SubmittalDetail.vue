@@ -1439,8 +1439,9 @@ const timeline_events = computed(() => {
 
 .submittal-sidebar__card {
 	border: 1px solid var(--border-color);
-	border-radius: var(--border-radius);
-	padding: 14px;
+	border-radius: var(--border-radius-lg);
+	background: var(--fg-color);
+	padding: 16px;
 }
 
 .submittal-sidebar__sublist {
@@ -1482,6 +1483,8 @@ const timeline_events = computed(() => {
 .submittal-sidebar__reviewer-name {
 	flex: 1 1 auto;
 	color: var(--text-color);
+	overflow-wrap: break-word;
+	word-break: break-word;
 }
 
 .submittal-sidebar__meta {
@@ -1498,18 +1501,25 @@ const timeline_events = computed(() => {
 	font-size: var(--text-sm);
 	font-weight: 600;
 	color: var(--text-color);
-	margin-bottom: 10px;
+	padding-bottom: 8px;
+	margin-bottom: 12px;
+	border-bottom: 1px solid var(--border-color);
 }
 
 .activity-detail__head-row {
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
-	margin-bottom: 10px;
+	gap: 8px;
+	padding-bottom: 8px;
+	margin-bottom: 12px;
+	border-bottom: 1px solid var(--border-color);
 }
 
 .activity-detail__head-row .activity-detail__section-title {
+	padding-bottom: 0;
 	margin-bottom: 0;
+	border-bottom: none;
 }
 
 .activity-detail__meta {
@@ -1529,6 +1539,8 @@ const timeline_events = computed(() => {
 	margin: 2px 0 0;
 	font-size: var(--text-sm);
 	color: var(--text-color);
+	overflow-wrap: break-word;
+	word-break: break-word;
 }
 
 .activity-detail__dep-label {
@@ -1593,6 +1605,8 @@ const timeline_events = computed(() => {
 	flex-direction: column;
 	gap: 2px;
 	font-size: var(--text-sm);
+	overflow-wrap: break-word;
+	word-break: break-word;
 }
 
 .submittal-tracked-docs__rev {
