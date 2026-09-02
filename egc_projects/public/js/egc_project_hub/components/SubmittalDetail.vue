@@ -17,6 +17,7 @@ import {
 	create_next_revision,
 	apply_workflow_template,
 	get_workflow_templates,
+	get_workflow_template_detail,
 	record_step_response,
 	add_submission_document,
 	remove_submission_document,
@@ -26,6 +27,7 @@ import {
 	update_submission_dates,
 } from "./submittals_api";
 import { openSubmitForReviewFlow } from "./submit_for_review_flow";
+import { renderStagesPreviewHtml } from "./workflow_template_flow";
 import { link_activity_record, unlink_activity_record } from "./activities_api";
 import { add_assignment, remove_assignment } from "./assignments_api";
 import { get_person_info } from "./project_profile_api";
@@ -440,9 +442,21 @@ async function open_apply_template_dialog() {
 		return;
 	}
 	if (!templates.length) {
-		frappe.msgprint(__("No workflow templates exist yet. Create one from EGC Submittal Workflow Template."));
+		frappe.msgprint(__("No workflow templates exist yet. Create one from the Submittals tab's \"Workflow Templates\" button."));
 		return;
 	}
+
+	function preview_template(name) {
+		const $wrapper = dialog.fields_dict.stages_preview.$wrapper;
+		if (!name) {
+			$wrapper.html("");
+			return;
+		}
+		get_workflow_template_detail(name).then((detail) => {
+			$wrapper.html(renderStagesPreviewHtml(detail.steps));
+		});
+	}
+
 	const dialog = new frappe.ui.Dialog({
 		title: __("Apply Workflow Template"),
 		fields: [
@@ -452,7 +466,10 @@ async function open_apply_template_dialog() {
 				label: __("Template"),
 				options: templates.map((t) => t.name),
 				reqd: 1,
+				onchange: () => preview_template(dialog.get_value("template")),
 			},
+			{ fieldtype: "Section Break", label: __("Stages") },
+			{ fieldname: "stages_preview", fieldtype: "HTML" },
 		],
 		primary_action_label: __("Apply"),
 		primary_action(values) {
@@ -467,6 +484,9 @@ async function open_apply_template_dialog() {
 		},
 	});
 	dialog.show();
+	// onchange never fires for a field's own default value — prime the preview once, immediately,
+	// same fix already applied to the numbering suggestion fields elsewhere in this app.
+	preview_template(dialog.get_value("template"));
 }
 
 // -- add/remove reviewers (ball in court can hold more than one person at a stage) --------------

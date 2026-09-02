@@ -650,6 +650,70 @@ class TestSubmittalWorkflow(IntegrationTestCase):
 		self.assertTrue(frappe.db.exists("EGC Submittal Workflow Template", name))
 		frappe.delete_doc("EGC Submittal Workflow Template", name, force=True)
 
+	def test_update_workflow_template_replaces_steps(self):
+		frappe.set_user(self.manager_user)
+		name = submittals_api.create_workflow_template(
+			"API Template Update Test",
+			[{"sequence": 0, "reviewer_role": self.role_consultant, "is_required": 1}],
+		)
+		submittals_api.update_workflow_template(
+			name,
+			description="Updated description",
+			steps=[
+				{"sequence": 0, "reviewer_role": self.role_engineer, "is_required": 1},
+				{"sequence": 1, "reviewer_role": self.role_consultant, "is_required": 0, "label": "FYI"},
+			],
+		)
+		detail = submittals_api.get_workflow_template_detail(name)
+		self.assertEqual(detail["description"], "Updated description")
+		self.assertEqual(len(detail["steps"]), 2)
+		self.assertEqual(detail["steps"][1]["label"], "FYI")
+		frappe.delete_doc("EGC Submittal Workflow Template", name, force=True)
+
+	def test_update_workflow_template_renames_via_autorename(self):
+		frappe.set_user(self.manager_user)
+		name = submittals_api.create_workflow_template(
+			"API Template Rename Test",
+			[{"sequence": 0, "reviewer_role": self.role_consultant, "is_required": 1}],
+		)
+		new_name = submittals_api.update_workflow_template(name, template_name="API Template Renamed Test")
+		self.assertEqual(new_name, "API Template Renamed Test")
+		self.assertFalse(frappe.db.exists("EGC Submittal Workflow Template", name))
+		self.assertTrue(frappe.db.exists("EGC Submittal Workflow Template", new_name))
+		frappe.delete_doc("EGC Submittal Workflow Template", new_name, force=True)
+
+	def test_delete_workflow_template_succeeds_even_after_instantiating_steps(self):
+		# Steps are copied at apply_workflow_template time, never a live binding back to the
+		# template (egc_submittal_review_step.py's own docstring) — deleting a template that
+		# already produced real review steps must not error or disturb those steps at all.
+		doc = self._make_document("DOC-TMPL-DEL-1")
+		rev = self._make_issued_revision(doc.name, "00")
+		submittal = self._make_submittal("SUB-TMPL-DEL-1")
+		submission = self._make_draft_submission(submittal.name, "00", [rev.name])
+
+		frappe.set_user(self.manager_user)
+		name = submittals_api.create_workflow_template(
+			"API Template Delete Test",
+			[{"sequence": 0, "reviewer_role": self.role_consultant, "is_required": 1}],
+		)
+		created = submittal_control.apply_workflow_template(submission.name, name)
+
+		submittals_api.delete_workflow_template(name)
+		self.assertFalse(frappe.db.exists("EGC Submittal Workflow Template", name))
+		self.assertTrue(frappe.db.exists("EGC Submittal Review Step", created[0]))
+
+	def test_engineer_cannot_update_or_delete_template(self):
+		frappe.set_user(self.manager_user)
+		name = submittals_api.create_workflow_template(
+			"API Template Permission Test",
+			[{"sequence": 0, "reviewer_role": self.role_consultant, "is_required": 1}],
+		)
+		frappe.set_user(self.engineer_user)
+		self.assertRaises(frappe.PermissionError, submittals_api.update_workflow_template, name, description="nope")
+		self.assertRaises(frappe.PermissionError, submittals_api.delete_workflow_template, name)
+		frappe.set_user(self.manager_user)
+		frappe.delete_doc("EGC Submittal Workflow Template", name, force=True)
+
 	def test_get_my_open_reviews_scoped_to_current_user(self):
 		submittal, submission, steps = self._build_submission_with_two_stage_workflow()
 		submission.submit()

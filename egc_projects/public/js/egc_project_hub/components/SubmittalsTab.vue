@@ -2,6 +2,7 @@
 import { computed, ref, watch, onMounted } from "vue";
 import { get_submittals } from "../api";
 import { openSubmitForReviewFlow } from "./submit_for_review_flow";
+import { openManageWorkflowTemplatesFlow } from "./workflow_template_flow";
 import { openExportDialog, openImportDialog, confirmBulkDelete } from "./bulk_transfer_flow";
 import { useRowSelection } from "../composables/useRowSelection";
 import BulkActionsBar from "./BulkActionsBar.vue";
@@ -119,6 +120,12 @@ function open_export_dialog() {
 	openExportDialog({ project: props.project, doctype: "EGC Submittal", label: __("Submittals") });
 }
 
+function open_manage_templates_dialog() {
+	// Global, not project-scoped — a template is a reusable review sequence any project can
+	// apply, matching EGC Submittal Workflow Template's own shape (no project field).
+	openManageWorkflowTemplatesFlow({});
+}
+
 function open_import_dialog() {
 	openImportDialog({
 		project: props.project,
@@ -179,6 +186,9 @@ function days_overdue(row) {
 				</button>
 				<button v-if="can_write" type="button" class="btn btn-xs btn-default" @click="open_import_dialog">
 					{{ __("Import") }}
+				</button>
+				<button v-if="can_write" type="button" class="btn btn-xs btn-default" @click="open_manage_templates_dialog">
+					{{ __("Workflow Templates") }}
 				</button>
 				<button
 					v-if="can_write"

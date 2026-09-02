@@ -44,6 +44,14 @@ export function create_workflow_template(template_name, steps, description) {
 	return call(`${SUBMITTALS_MODULE}.create_workflow_template`, { template_name, steps, description });
 }
 
+export function update_workflow_template(template, template_name, description, steps) {
+	return call(`${SUBMITTALS_MODULE}.update_workflow_template`, { template, template_name, description, steps });
+}
+
+export function delete_workflow_template(template) {
+	return call(`${SUBMITTALS_MODULE}.delete_workflow_template`, { template });
+}
+
 export function get_my_open_reviews(project) {
 	return call(`${SUBMITTALS_MODULE}.get_my_open_reviews`, { project });
 }

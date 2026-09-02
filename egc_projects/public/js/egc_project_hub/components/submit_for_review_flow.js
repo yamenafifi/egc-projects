@@ -27,10 +27,12 @@ import {
 	add_submission_document,
 	get_documents_with_current_revision,
 	get_workflow_templates,
+	get_workflow_template_detail,
 	apply_workflow_template,
 	add_review_step,
 	submit_submission,
 } from "./submittals_api";
+import { renderStagesPreviewHtml } from "./workflow_template_flow";
 import {
 	get_directory_person_emails,
 	get_directory_organization_names,
@@ -243,8 +245,26 @@ export async function openSubmitForReviewFlow({
 			options: templates.map((t) => t.name),
 			depends_on: 'eval:doc.review_approach == "Apply a workflow template"',
 			mandatory_depends_on: 'eval:doc.review_approach == "Apply a workflow template"',
+			onchange: () => preview_template(dialog.get_value("template")),
+		},
+		{
+			fieldname: "template_stages_preview",
+			fieldtype: "HTML",
+			depends_on: 'eval:doc.review_approach == "Apply a workflow template"',
 		}
 	);
+
+	function preview_template(name) {
+		const field = dialog.fields_dict.template_stages_preview;
+		if (!field) return;
+		if (!name) {
+			field.$wrapper.html("");
+			return;
+		}
+		get_workflow_template_detail(name).then((detail) => {
+			field.$wrapper.html(renderStagesPreviewHtml(detail.steps));
+		});
+	}
 
 	const dialog = new frappe.ui.Dialog({
 		title: existingSubmittal ? __("Start Submission") : __("New Submittal"),

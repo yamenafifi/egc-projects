@@ -438,6 +438,52 @@ def create_workflow_template(template_name: str, steps, description: str | None 
 	return doc.name
 
 
+@frappe.whitelist()
+def update_workflow_template(
+	template: str, template_name: str | None = None, description: str | None = None, steps=None
+) -> str:
+	"""Full replace of `description`/`steps` — mirrors `create_workflow_template`'s own untyped
+	`steps` handling. `template_name` is this doctype's `autoname: field:template_name` source,
+	but that only sets `.name` at INSERT time — Frappe does not re-rename an existing document
+	just because its autoname field changes on save, so a rename goes through `frappe.rename_doc`
+	explicitly (which also syncs `template_name` itself to the new name). Editing or deleting a
+	template never touches any already-instantiated `EGC Submittal Review Step` — those are
+	copies made at `apply_workflow_template` time, never a live binding back to the template (see
+	that function's own docstring), so this is always safe regardless of how many submissions
+	already used this template."""
+	frappe.has_permission("EGC Submittal Workflow Template", "write", throw=True)
+
+	if template_name and template_name != template:
+		template = frappe.rename_doc("EGC Submittal Workflow Template", template, template_name)
+
+	doc = frappe.get_doc("EGC Submittal Workflow Template", template)
+	if description is not None:
+		doc.description = description
+	if steps is not None:
+		if isinstance(steps, str):
+			steps = frappe.parse_json(steps)
+		doc.set(
+			"steps",
+			[
+				{
+					"sequence": row.get("sequence"),
+					"reviewer_role": row.get("reviewer_role"),
+					"is_required": row.get("is_required", 1),
+					"label": row.get("label"),
+				}
+				for row in steps
+			],
+		)
+	doc.save()
+	return doc.name
+
+
+@frappe.whitelist()
+def delete_workflow_template(template: str) -> None:
+	frappe.has_permission("EGC Submittal Workflow Template", "delete", throw=True)
+	frappe.delete_doc("EGC Submittal Workflow Template", template)
+
+
 # --- My Open Items support: submittals awaiting the current user's response -------------------
 
 
