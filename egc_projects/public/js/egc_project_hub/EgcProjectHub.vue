@@ -1,10 +1,12 @@
 <script setup>
 import { ref, computed, watch } from "vue";
 import { useHubRoute, TABS } from "./composables/useHubRoute";
+import { has_financial_access } from "./constants";
 import { get_project_context } from "./api";
 import HubHeader from "./components/HubHeader.vue";
 import HubTopBar from "./components/HubTopBar.vue";
 import ProjectPicker from "./components/ProjectPicker.vue";
+import PortfolioDashboard from "./components/PortfolioDashboard.vue";
 import LoadingState from "./components/LoadingState.vue";
 import ErrorState from "./components/ErrorState.vue";
 import OverviewTab from "./components/OverviewTab.vue";
@@ -103,7 +105,8 @@ watch(context, (ctx) => {
 
 <template>
 	<div class="egc-shell">
-		<ProjectPicker v-if="!route.project" @select="setProject" />
+		<PortfolioDashboard v-if="!route.project && has_financial_access()" @select="setProject" />
+		<ProjectPicker v-else-if="!route.project" @select="setProject" />
 
 		<template v-else>
 			<HubTopBar

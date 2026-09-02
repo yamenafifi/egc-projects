@@ -21,6 +21,13 @@ export function get_my_projects() {
 	return call_hub("get_my_projects", {});
 }
 
+// The bare `/app/project-manager` landing dashboard's data source — only ever called for a
+// financial-access user (see constants.js's FINANCIAL_ROLES / useHubRoute.js); the server gates
+// it identically regardless, this is just avoiding a doomed round trip for everyone else.
+export function get_portfolio_overview() {
+	return call_hub("get_portfolio_overview", {});
+}
+
 export function get_project_context(project) {
 	return call_hub("get_project_context", { project });
 }

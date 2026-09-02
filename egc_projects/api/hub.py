@@ -1085,6 +1085,216 @@ def get_financial_transactions(project: str, metric: str) -> list[dict]:
 	return fn(project)
 
 
+# --- get_portfolio_overview (the bare `/app/project-manager` landing dashboard) ----------------
+#
+# Everything below reuses the SAME formulas as get_financials()/_committed_purchase_order_
+# transactions() above, evaluated once across every project the caller can see instead of once
+# per project. Six of the seven metrics are linear sums and collapse cleanly into one grouped
+# query each; committed Purchase Orders is the one exception — its per-row amount is
+# `base_net_total * (100-per_billed)/100`, a product of two columns, so it can't collapse into a
+# SQL SUM without duplicating that formula in a second place. That one instead broadens its WHERE
+# to every visible project and sums in Python, reusing the exact same per-row formula — still one
+# round trip, zero formula duplication.
+#
+# The project list itself is never accepted from the caller — always `_portfolio_projects()`'s
+# own permission-respecting `frappe.get_list` result, the same primitive `get_my_projects()`
+# already relies on. That's what keeps "check permission once, trust every row after" (this
+# file's existing project-isolation model) safe when applied in bulk instead of per-project.
+
+
+def _portfolio_projects() -> list[str]:
+	return frappe.get_list("Project", pluck="name")
+
+
+def _billed_by_project(projects: list[str]) -> dict[str, float]:
+	si = frappe.qb.DocType("Sales Invoice")
+	sii = frappe.qb.DocType("Sales Invoice Item")
+	project_expr = Coalesce(sii.project, si.project)
+	rows = (
+		frappe.qb.from_(sii)
+		.join(si)
+		.on(si.name == sii.parent)
+		.select(project_expr.as_("project"), Sum(sii.base_net_amount).as_("amount"))
+		.where((si.docstatus == 1) & project_expr.isin(projects))
+		.groupby(project_expr)
+		.run(as_dict=True)
+	)
+	return {row.project: flt(row.amount) for row in rows}
+
+
+def _purchase_cost_by_project(projects: list[str]) -> dict[str, float]:
+	pi = frappe.qb.DocType("Purchase Invoice")
+	pii = frappe.qb.DocType("Purchase Invoice Item")
+	rows = (
+		frappe.qb.from_(pii)
+		.join(pi)
+		.on(pi.name == pii.parent)
+		.select(pii.project.as_("project"), Sum(pii.base_net_amount).as_("amount"))
+		.where((pi.docstatus == 1) & pii.project.isin(projects))
+		.groupby(pii.project)
+		.run(as_dict=True)
+	)
+	return {row.project: flt(row.amount) for row in rows}
+
+
+def _committed_purchase_orders_by_project(projects: list[str]) -> dict[str, float]:
+	po = frappe.qb.DocType("Purchase Order")
+	rows = (
+		frappe.qb.from_(po)
+		.select(po.project, po.base_net_total, po.per_billed)
+		.where((po.docstatus == 1) & po.project.isin(projects) & (po.status != "Closed"))
+		.run(as_dict=True)
+	)
+	totals: dict[str, float] = {}
+	for row in rows:
+		amount = max(flt(row.base_net_total) * (100 - flt(row.per_billed)) / 100, 0)
+		totals[row.project] = totals.get(row.project, 0) + amount
+	return totals
+
+
+def _expense_claims_by_project(projects: list[str]) -> dict[str, float]:
+	if not frappe.get_meta("Project").has_field("total_expense_claim"):
+		return {}
+	ec = frappe.qb.DocType("Expense Claim")
+	ecd = frappe.qb.DocType("Expense Claim Detail")
+	project_expr = Coalesce(NullIf(ecd.project, ""), ec.project)
+	rows = (
+		frappe.qb.from_(ecd)
+		.join(ec)
+		.on(ec.name == ecd.parent)
+		.select(project_expr.as_("project"), Sum(ecd.sanctioned_amount).as_("amount"))
+		.where((ec.docstatus == 1) & project_expr.isin(projects))
+		.groupby(project_expr)
+		.run(as_dict=True)
+	)
+	return {row.project: flt(row.amount) for row in rows}
+
+
+def _consumed_material_by_project(projects: list[str]) -> dict[str, float]:
+	se = frappe.qb.DocType("Stock Entry")
+	sed = frappe.qb.DocType("Stock Entry Detail")
+	rows = (
+		frappe.qb.from_(sed)
+		.join(se)
+		.on(se.name == sed.parent)
+		.select(sed.project.as_("project"), Sum(sed.amount).as_("amount"))
+		.where((sed.docstatus == 1) & sed.project.isin(projects) & (sed.t_warehouse.isnull() | (sed.t_warehouse == "")))
+		.groupby(sed.project)
+		.run(as_dict=True)
+	)
+	totals = {row.project: flt(row.amount) for row in rows}
+
+	lc = frappe.qb.DocType("Landed Cost Taxes and Charges")
+	landed_rows = (
+		frappe.qb.from_(se)
+		.join(lc)
+		.on(lc.parent == se.name)
+		.select(se.project.as_("project"), Sum(lc.base_amount).as_("amount"))
+		.where((se.docstatus == 1) & se.project.isin(projects) & (se.purpose == "Manufacture"))
+		.groupby(se.project)
+		.run(as_dict=True)
+	)
+	for row in landed_rows:
+		totals[row.project] = totals.get(row.project, 0) + flt(row.amount)
+	return totals
+
+
+def _timesheet_cost_by_project(projects: list[str]) -> dict[str, float]:
+	ts = frappe.qb.DocType("Timesheet")
+	tsd = frappe.qb.DocType("Timesheet Detail")
+	rows = (
+		frappe.qb.from_(tsd)
+		.join(ts)
+		.on(ts.name == tsd.parent)
+		.select(tsd.project.as_("project"), Sum(tsd.costing_amount).as_("amount"))
+		.where((tsd.docstatus == 1) & tsd.project.isin(projects))
+		.groupby(tsd.project)
+		.run(as_dict=True)
+	)
+	return {row.project: flt(row.amount) for row in rows}
+
+
+def _sales_order_value_by_project(projects: list[str]) -> dict[str, float]:
+	rows = frappe.get_all(
+		"Sales Order",
+		filters={"project": ("in", projects), "docstatus": 1},
+		fields=["project", {"SUM": "base_net_total", "as": "amount"}],
+		group_by="project",
+	)
+	return {row.project: flt(row.amount) for row in rows}
+
+
+@frappe.whitelist()
+def get_portfolio_overview() -> dict:
+	"""The bare `/app/project-manager` landing dashboard's one data source — every project the
+	caller can see, its financial totals, and a health rollup, gated identically to every other
+	financial endpoint in this file (`_require_financial_access()`). Never called for a user
+	without that role: `EgcProjectHub.vue` falls back to the plain `ProjectPicker` instead, same
+	as it already does today for a bare URL with nothing to auto-open."""
+	_require_financial_access()
+
+	projects = _portfolio_projects()
+	if not projects:
+		return {"projects": [], "needs_attention": []}
+
+	project_rows = frappe.get_all(
+		"Project",
+		filters={"name": ("in", projects)},
+		fields=["name", "project_name", "status", "company", "gross_margin", "percent_complete"],
+		order_by="modified desc",
+	)
+
+	billed = _billed_by_project(projects)
+	purchase_cost = _purchase_cost_by_project(projects)
+	committed_purchase_orders = _committed_purchase_orders_by_project(projects)
+	expense_claims = _expense_claims_by_project(projects)
+	consumed_material_cost = _consumed_material_by_project(projects)
+	timesheet_cost = _timesheet_cost_by_project(projects)
+	sales_order_value = _sales_order_value_by_project(projects)
+
+	# Global, not per-project — the same list `get_overview()` already fetches once per call;
+	# fetched once here too rather than once per project in the loop below.
+	drawing_types = get_drawing_document_types()
+
+	result_projects = []
+	needs_attention = []
+	for row in project_rows:
+		currency = erpnext.get_company_currency(row.company) if row.company else None
+		financials = {
+			"billed": billed.get(row.name, 0),
+			"purchase_cost": purchase_cost.get(row.name, 0),
+			"committed_purchase_orders": committed_purchase_orders.get(row.name, 0),
+			"expense_claims": expense_claims.get(row.name),
+			"consumed_material_cost": consumed_material_cost.get(row.name, 0),
+			"timesheet_cost": timesheet_cost.get(row.name, 0),
+			"sales_order_value": sales_order_value.get(row.name, 0),
+			"gross_margin": row.gross_margin,
+			"currency": currency,
+		}
+
+		# Same signals `get_overview()` already computes per-project — reused, not re-derived
+		# with different logic, so a project flagged here shows the identical health on its own
+		# Overview tab, never a portfolio-only signal a user can't cross-check.
+		activity_rows = _activity_rows(row.name)
+		submittal_rows = _submittal_rows(row.name)
+		health = _project_health(row.name, activity_rows, submittal_rows, drawing_types)
+
+		entry = {
+			"project": row.name,
+			"project_name": row.project_name,
+			"status": row.status,
+			"percent_complete": row.percent_complete,
+			"financials": financials,
+			"health": health,
+		}
+		result_projects.append(entry)
+
+		if "red" in (health.get("financials"), health.get("schedule"), health.get("submittals")):
+			needs_attention.append({"project": row.name, "project_name": row.project_name, "health": health})
+
+	return {"projects": result_projects, "needs_attention": needs_attention}
+
+
 # --- Project Information: get_project_info (Level 0 §8) ----------------------------------------
 #
 # Read-side only — `save_project_profile`/`add_stakeholder`/`remove_stakeholder`/

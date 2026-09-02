@@ -388,6 +388,68 @@ class TestHubAPI(IntegrationTestCase):
 		)
 		self.assertEqual(headline, drill_down_total)
 
+	# -- 2b. get_portfolio_overview (the bare /app/project-manager landing dashboard) -----------
+
+	def test_portfolio_overview_denies_non_financial_user(self):
+		frappe.set_user(self.financial_denied_user)
+		with self.assertRaises(frappe.PermissionError):
+			hub.get_portfolio_overview()
+
+	def test_portfolio_overview_batched_committed_pos_matches_single_project_function(self):
+		_make_purchase_order(self.project, self.company, rate=1200, qty=2)
+		_make_purchase_order(self.project, self.company, rate=250, qty=3)
+
+		frappe.set_user(self.manager_user)
+		single = hub.get_financials(self.project)["committed_purchase_orders"]
+		batched = hub._committed_purchase_orders_by_project([self.project]).get(self.project, 0)
+		self.assertEqual(single, batched)
+
+	def test_portfolio_overview_separates_two_projects_correctly(self):
+		# The one real risk in batching: a query bug that sums two projects' rows together, or
+		# attributes one project's amount to another. Two fresh projects, two different PO
+		# amounts, each project's row in the result must show only its own.
+		other_project = _make_project(self.company)
+		_make_purchase_order(self.project, self.company, rate=1000, qty=1)
+		_make_purchase_order(other_project, self.company, rate=500, qty=1)
+
+		frappe.set_user(self.manager_user)
+		result = hub.get_portfolio_overview()
+		by_project = {row["project"]: row for row in result["projects"]}
+		self.assertIn(self.project, by_project)
+		self.assertIn(other_project, by_project)
+		self.assertEqual(by_project[self.project]["financials"]["committed_purchase_orders"], 1000)
+		self.assertEqual(by_project[other_project]["financials"]["committed_purchase_orders"], 500)
+
+	def test_portfolio_overview_needs_attention_flags_negative_gross_margin(self):
+		frappe.db.set_value("Project", self.project, "gross_margin", -500)
+
+		frappe.set_user(self.manager_user)
+		result = hub.get_portfolio_overview()
+		self.assertIn(self.project, {row["project"] for row in result["needs_attention"]})
+		by_project = {row["project"]: row for row in result["projects"]}
+		self.assertEqual(by_project[self.project]["health"]["financials"], "red")
+
+	def test_portfolio_overview_never_includes_a_project_outside_get_list(self):
+		# The one hard rule: the project list is always server-derived, never accepted from the
+		# caller — proven here by fencing a role-holder to a single decoy project (same fixture
+		# `test_project_isolation_denies_every_endpoint` already relies on) and confirming this
+		# test's own freshly-created project never appears for them.
+		add_user_permission("Project", self.decoy_project, self.manager_user, ignore_permissions=True)
+		try:
+			frappe.set_user(self.manager_user)
+			result = hub.get_portfolio_overview()
+			seen = {row["project"] for row in result["projects"]}
+			self.assertIn(self.decoy_project, seen)
+			self.assertNotIn(self.project, seen)
+		finally:
+			frappe.set_user("Administrator")
+			for perm in frappe.get_all(
+				"User Permission",
+				filters={"user": self.manager_user, "allow": "Project", "for_value": self.decoy_project},
+				pluck="name",
+			):
+				frappe.delete_doc("User Permission", perm, ignore_permissions=True)
+
 	# -- 3. Financial gate --------------------------------------------------------------------
 
 	def test_financial_gate_denies_viewer_and_allows_manager(self):

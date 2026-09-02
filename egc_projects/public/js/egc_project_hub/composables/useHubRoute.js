@@ -4,6 +4,7 @@
 // every internal route change rather than remounting.
 
 import { reactive, readonly } from "vue";
+import { has_financial_access } from "../constants";
 
 // "documents" (Documents register) and "project-info" (Project Information) were added in
 // WP-11 alongside the WP-10/WP-09 packages that own their tab content. Order here drives
@@ -49,7 +50,12 @@ export function syncRouteFromBrowser() {
 
 	const { project, tab } = read_route();
 
-	if (!project && !restoring) {
+	// A financial-access user gets the real portfolio dashboard at the bare URL instead (see
+	// EgcProjectHub.vue) — jumping them straight to whatever project was last open would bury it
+	// behind the exact "last project" auto-redirect they asked to stop seeing. Everyone else
+	// keeps this convenience unchanged: there's no dashboard for them either way, so skipping it
+	// would only cost an extra click to reopen the one project they already had.
+	if (!project && !restoring && !has_financial_access()) {
 		const last_project = localStorage.getItem(STORAGE_KEY);
 		if (last_project) {
 			restoring = true;
