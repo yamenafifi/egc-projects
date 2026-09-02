@@ -31,8 +31,23 @@ exactly like a native naming series would. Keys are joined with "/", one of the 
 `NamingSeries`'s own validation (`NAMING_SERIES_PATTERN` in frappe/model/naming.py) allows
 alongside word characters, "-", ".", "#", "{" and "}" — "-" alone was deliberately avoided since a
 discipline code or type abbreviation could itself contain one, which would make two distinct
-(project, discipline) scopes collide onto the same joined key.
+(project, discipline) scopes collide onto the same joined key. The counter KEY (built from the
+full discipline value, e.g. "ARCH") is independent of the DISPLAYED code's discipline segment
+(a single letter, e.g. "A") — see `_discipline_letter` below — so a display-format change here
+never risks colliding two previously-distinct counters onto one key.
+
+Document/Submittal codes carry one more segment than Activity codes: a project-specific prefix,
+matching the real client MDR (Master Document Register) convention this was built to follow —
+e.g. `26010049-MSF-A-014` for a Siemens/Aseer PET-CT document. That prefix is never a stored
+field (`custom_egc_project_code` was deliberately dropped as a second, disconnected identity
+field alongside Project's own naming series) — it's detected from whatever real document/
+submittal numbers the project already has (see `_project_prefix`). A brand-new project with no
+numbered records yet falls back to its own Project ID; a System Manager can always override by
+typing the desired first number manually (the "only fills if blank" contract), and every later
+number on that project will detect and continue that same prefix.
 """
+
+import re
 
 import frappe
 from frappe.utils import cint
@@ -40,6 +55,28 @@ from frappe.utils import cint
 from egc_projects.egc_projects import validators
 
 CODE_DIGITS = 3
+
+# {prefix}-{TYPE}-{DISC}-{seq} — prefix/TYPE/DISC are `.+`/`[A-Z0-9]+`/`[A-Z]` by construction
+# (see _project_prefix/_discipline_letter), anchored so a prefix containing "-" or digits (e.g.
+# "26010049") is still parsed correctly.
+_CODE_PATTERN = re.compile(r"^(?P<prefix>.+)-(?P<type>[A-Z0-9]+)-(?P<disc>[A-Z])-(?P<seq>\d+)$")
+
+
+def _discipline_letter(discipline: str) -> str:
+	return (discipline or "")[:1].upper()
+
+
+def _project_prefix(project: str) -> str:
+	"""The numbering prefix this project's own Document/Submittal numbers already use, recovered
+	from whichever existing number happens to match the pattern first (every number on one
+	project shares one prefix by construction). Falls back to the Project's own ID for a project
+	with no numbered records yet — never a stored field (see module docstring)."""
+	for doctype, field in (("EGC Project Document", "document_number"), ("EGC Submittal", "submittal_number")):
+		for value in frappe.get_all(doctype, filters={"project": project}, pluck=field, order_by="creation asc"):
+			match = _CODE_PATTERN.match(value or "")
+			if match:
+				return match.group("prefix")
+	return project
 
 
 def _activity_series_key(project: str, discipline: str) -> str:
@@ -109,7 +146,7 @@ def suggest_document_code(
 	if not abbr:
 		return ""
 	seq = _peek_next(_document_series_key(project, discipline, abbr))
-	return f"{abbr}-{discipline}-{seq:0{CODE_DIGITS}d}"
+	return f"{_project_prefix(project)}-{abbr}-{_discipline_letter(discipline)}-{seq:0{CODE_DIGITS}d}"
 
 
 def assign_document_code(project: str | None, discipline: str | None, document_type: str | None) -> str | None:
@@ -119,7 +156,7 @@ def assign_document_code(project: str | None, discipline: str | None, document_t
 	if not abbr:
 		return None
 	seq = _assign_next(_document_series_key(project, discipline, abbr))
-	return f"{abbr}-{discipline}-{seq}"
+	return f"{_project_prefix(project)}-{abbr}-{_discipline_letter(discipline)}-{seq}"
 
 
 # --- Submittal -------------------------------------------------------------------------------
@@ -136,7 +173,7 @@ def suggest_submittal_code(
 	if not abbr:
 		return ""
 	seq = _peek_next(_submittal_series_key(project, discipline, abbr))
-	return f"{abbr}-{discipline}-{seq:0{CODE_DIGITS}d}"
+	return f"{_project_prefix(project)}-{abbr}-{_discipline_letter(discipline)}-{seq:0{CODE_DIGITS}d}"
 
 
 def assign_submittal_code(project: str | None, discipline: str | None, submittal_type: str | None) -> str | None:
@@ -146,4 +183,4 @@ def assign_submittal_code(project: str | None, discipline: str | None, submittal
 	if not abbr:
 		return None
 	seq = _assign_next(_submittal_series_key(project, discipline, abbr))
-	return f"{abbr}-{discipline}-{seq}"
+	return f"{_project_prefix(project)}-{abbr}-{_discipline_letter(discipline)}-{seq}"

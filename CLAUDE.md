@@ -120,6 +120,7 @@ Enforced by code — you will get a `ValidationError`, not a silent wrong answer
 | change the unified "submit a document for review" flow (used from Documents, Submittals, and a Submittal's own empty state) | `egc_projects/public/js/egc_project_hub/components/submit_for_review_flow.js` — the ONE place this flow is implemented; do not add a fourth divergent dialog |
 | change how a Document/Submittal cross-navigates into the other's Hub view | `egc_projects/public/js/egc_project_hub/composables/useOpenDocumentIntent.js` / `useOpenSubmittalIntent.js` — the one-shot intent pattern (same shape as `useDrawingsIntent.js`) |
 | change which Documents/Submittals fields are financial-only-readable | `egc_projects/install.py` (`restrict_financial_field_permlevel`, `_FINANCIAL_PROJECT_FIELDS`) |
+| change Activity/Document/Submittal auto-numbering (live preview + server-side assignment) | `egc_projects/egc_projects/code_naming.py` — `suggest_*_code` (peek, whitelisted) / `assign_*_code` (called from each doctype's own `before_insert()`, real `Series` counter via `getseries()`). Document/Submittal codes are `{prefix}-{TYPE}-{DISC}-{seq}` (e.g. `26010049-MSF-A-014`) — the prefix is detected from the project's own existing numbers, never a stored field; type/discipline abbreviations live on `EGC Document Type`/`EGC Submittal Type`/`EGC Discipline`, not in this file. Only fires if the field is left blank — a bulk import supplying its own real number is never overwritten |
 
 ## Running the test suite
 

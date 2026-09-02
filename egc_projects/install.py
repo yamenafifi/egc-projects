@@ -17,11 +17,17 @@ DISCIPLINES = (
 )
 
 #: (name, abbreviation, is_drawing)
+#: "Drawing" -> "SD" and "Technical Data" -> "MSF" match the real client MDR (Master Document
+#: Register) convention (docs/ARCHITECTURE_V2.md — Siemens/Aseer PET-CT import): the imported
+#: register's own document numbers use "SD" for the large majority of drawing submissions (Shop
+#: Drawing, its dominant category) and "MSF" for every Technical Data / material submittal one —
+#: see code_naming.py's own module docstring for why the code lives on the Type master rather
+#: than a fourth parallel field.
 DOCUMENT_TYPES = (
-	("Drawing", "DWG", 1),
+	("Drawing", "SD", 1),
 	("Specification", "SPEC", 0),
 	("Method Statement", "MS", 0),
-	("Technical Data", "TD", 0),
+	("Technical Data", "MSF", 0),
 	("Calculation", "CALC", 0),
 	("Certificate", "CERT", 0),
 	("Report", "RPT", 0),
@@ -105,10 +111,11 @@ EQUIPMENT_MANUFACTURERS = (
 	"Other",
 )
 
-#: (name, abbreviation)
+#: (name, abbreviation) — "Material Submittal" -> "MSF" for the same reason as Document Type's
+#: "Technical Data" above: it's the code the real MDR's own submittal numbers already use.
 SUBMITTAL_TYPES = (
 	("Shop Drawing", "SD"),
-	("Material Submittal", "MAT"),
+	("Material Submittal", "MSF"),
 	("Method Statement", "MS"),
 	("Calculation", "CALC"),
 	("Technical Data", "TD"),

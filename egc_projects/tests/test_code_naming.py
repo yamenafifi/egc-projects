@@ -131,18 +131,32 @@ class TestSuggestDocumentCode(IntegrationTestCase):
 		doc.insert(ignore_permissions=True)
 		return doc
 
-	def test_fresh_scope_uses_abbreviation(self):
-		expected = f"ZDW-{self.discipline}-001"
+	def test_fresh_scope_uses_abbreviation_and_project_prefix(self):
+		# No existing numbers on this project yet, so the prefix falls back to the Project's own
+		# ID (never a stored field — see code_naming.py's module docstring), and the discipline
+		# segment is shortened to its first letter, matching the real client MDR convention.
+		expected = f"{self.project}-ZDW-{self.discipline[:1]}-001"
 		self.assertEqual(
 			code_naming.suggest_document_code(self.project, self.discipline, self.document_type), expected
 		)
 
 	def test_real_insert_assigns_and_advances_the_series(self):
 		doc = self._make_document()
-		self.assertEqual(doc.document_number, f"ZDW-{self.discipline}-001")
+		self.assertEqual(doc.document_number, f"{self.project}-ZDW-{self.discipline[:1]}-001")
 		self.assertEqual(
 			code_naming.suggest_document_code(self.project, self.discipline, self.document_type),
-			f"ZDW-{self.discipline}-002",
+			f"{self.project}-ZDW-{self.discipline[:1]}-002",
+		)
+
+	def test_real_insert_prefix_then_locks_in_for_later_numbers(self):
+		# The Project's own PRJ-#### id is only ever the FALLBACK prefix (no existing numbers to
+		# detect one from yet). A project whose first real number carries its own client prefix
+		# (e.g. the Siemens MDR's own contract number) must have every later number continue
+		# using THAT prefix, not silently fall back to the Project id once a real one exists.
+		self._make_document(document_number=f"26010049-ZDW-{self.discipline[:1]}-005")
+		self.assertEqual(
+			code_naming.suggest_document_code(self.project, self.discipline, self.document_type),
+			f"26010049-ZDW-{self.discipline[:1]}-001",
 		)
 
 	def test_explicit_code_is_preserved_and_does_not_advance_series(self):
@@ -150,7 +164,7 @@ class TestSuggestDocumentCode(IntegrationTestCase):
 		self.assertEqual(doc.document_number, "CLIENT-LEGACY-DWG-042")
 		self.assertEqual(
 			code_naming.suggest_document_code(self.project, self.discipline, self.document_type),
-			f"ZDW-{self.discipline}-001",
+			f"{self.project}-ZDW-{self.discipline[:1]}-001",
 		)
 
 	def test_missing_abbreviation_returns_empty(self):
@@ -191,18 +205,37 @@ class TestSuggestSubmittalCode(IntegrationTestCase):
 		doc.insert(ignore_permissions=True)
 		return doc
 
-	def test_fresh_scope_uses_abbreviation(self):
-		expected = f"ZSD-{self.discipline}-001"
+	def test_fresh_scope_uses_abbreviation_and_project_prefix(self):
+		expected = f"{self.project}-ZSD-{self.discipline[:1]}-001"
 		self.assertEqual(
 			code_naming.suggest_submittal_code(self.project, self.discipline, self.submittal_type), expected
 		)
 
 	def test_real_insert_assigns_and_advances_the_series(self):
 		doc = self._make_submittal()
-		self.assertEqual(doc.submittal_number, f"ZSD-{self.discipline}-001")
+		self.assertEqual(doc.submittal_number, f"{self.project}-ZSD-{self.discipline[:1]}-001")
 		self.assertEqual(
 			code_naming.suggest_submittal_code(self.project, self.discipline, self.submittal_type),
-			f"ZSD-{self.discipline}-002",
+			f"{self.project}-ZSD-{self.discipline[:1]}-002",
+		)
+
+	def test_prefix_detected_from_an_existing_document_too(self):
+		# Document and Submittal are separate counters (never derive one number from the other),
+		# but they DO share one project prefix — a Submittal created after the project's first
+		# real Document must pick up that same prefix, not fall back to the Project id.
+		frappe.get_doc(
+			{
+				"doctype": "EGC Project Document",
+				"project": self.project,
+				"document_number": f"26010049-ZDW-{self.discipline[:1]}-001",
+				"title": "Test Document",
+				"document_type": _get_or_create_document_type(),
+				"discipline": self.discipline,
+			}
+		).insert(ignore_permissions=True)
+		self.assertEqual(
+			code_naming.suggest_submittal_code(self.project, self.discipline, self.submittal_type),
+			f"26010049-ZSD-{self.discipline[:1]}-001",
 		)
 
 	def test_explicit_code_is_preserved_and_does_not_advance_series(self):
@@ -210,7 +243,7 @@ class TestSuggestSubmittalCode(IntegrationTestCase):
 		self.assertEqual(doc.submittal_number, "CLIENT-LEGACY-SD-042")
 		self.assertEqual(
 			code_naming.suggest_submittal_code(self.project, self.discipline, self.submittal_type),
-			f"ZSD-{self.discipline}-001",
+			f"{self.project}-ZSD-{self.discipline[:1]}-001",
 		)
 
 	def test_missing_required_fields_return_empty(self):
