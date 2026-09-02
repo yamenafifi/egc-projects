@@ -256,6 +256,14 @@ function _default_next_reviewer() {
 	return { user: pending[0].reviewer_user, label: pending[0].reviewer_label || pending[0].reviewer_role };
 }
 
+// What the sidebar's reviewer row shows inline, next to a currently-active step — visible before
+// anyone has to open the Respond dialog at all, per "make information readily present."
+function next_reviewer_hint(step) {
+	if (step.status !== "In Review" || !_is_sole_active_required_step(step)) return null;
+	const next = _default_next_reviewer();
+	return next ? next.label || next.user : null;
+}
+
 async function open_record_response_dialog(step) {
 	const forwardable = _is_sole_active_required_step(step);
 	const default_next = forwardable ? _default_next_reviewer() : null;
@@ -794,7 +802,7 @@ function event_response(event) {
 }
 
 function event_tone(event) {
-	if (event.type === "submitted") return "blue";
+	if (event.type === "submitted" || event.type === "step_assigned") return "blue";
 	if (event.type === "step_responded" || event.type === "responded") return response_tone(event_response(event));
 	return "grey";
 }
@@ -802,6 +810,7 @@ function event_tone(event) {
 function event_icon(event) {
 	if (event.type === "started") return "+";
 	if (event.type === "submitted") return "↑";
+	if (event.type === "step_assigned") return "→";
 	if (event.type === "comment") return "●";
 	const response = event_response(event);
 	if (RESPONSE_IS_FINAL_OK.includes(response)) return "✓";
@@ -832,6 +841,15 @@ const timeline_events = computed(() => {
 			.sort((a, b) => new Date(a.modified) - new Date(b.modified));
 		for (const step of responded_steps) {
 			events.push({ type: "step_responded", key: step.name, timestamp: step.modified, submission: s, step });
+		}
+		// Only forwarded steps get their own "assigned" event — a pre-planned step's `creation`
+		// predates the submission itself (add_review_step/apply_workflow_template only ever run
+		// pre-submit), so it would show as "assigned" before "submitted", which is backwards. A
+		// forwarded step's `creation` IS the real moment it was handed off — exactly the live
+		// routing hop this timeline should make visible.
+		const forwarded_steps = (s.steps || []).filter((step) => step.origin === "Forwarded");
+		for (const step of forwarded_steps) {
+			events.push({ type: "step_assigned", key: `${step.name}-assigned`, timestamp: step.creation, submission: s, step });
 		}
 		if (!(s.steps || []).length && s.submission_status === "Responded") {
 			events.push({
@@ -998,6 +1016,14 @@ const timeline_events = computed(() => {
 										</a>
 									</template>
 
+									<template v-else-if="event.type === 'step_assigned'">
+										<p class="submittal-timeline__headline">
+											{{ __("Forwarded to") }}
+											<strong>{{ event.step.reviewer_label || event.step.reviewer_role }}</strong>
+											<span class="submittal-timeline__when">{{ format_datetime(event.timestamp) }}</span>
+										</p>
+									</template>
+
 									<template v-else-if="event.type === 'responded'">
 										<p class="submittal-timeline__headline">
 											{{ __("Response recorded") }}
@@ -1098,6 +1124,9 @@ const timeline_events = computed(() => {
 									<div v-for="step in stage.steps" :key="step.name" class="submittal-sidebar__reviewer">
 										<span class="submittal-sidebar__reviewer-name">
 											{{ step.reviewer_role }}<template v-if="step.reviewer_label">: {{ step.reviewer_label }}</template>
+											<span v-if="next_reviewer_hint(step)" class="submittal-sidebar__next-hint">
+												{{ __("→ next: {0}", [next_reviewer_hint(step)]) }}
+											</span>
 										</span>
 										<StatusPill :status="step.status" />
 										<button
@@ -1557,6 +1586,12 @@ const timeline_events = computed(() => {
 	color: var(--text-color);
 	overflow-wrap: break-word;
 	word-break: break-word;
+}
+
+.submittal-sidebar__next-hint {
+	display: block;
+	color: var(--text-muted);
+	font-size: var(--text-xs);
 }
 
 .submittal-sidebar__meta {

@@ -288,3 +288,18 @@ class TestSubmittalForwarding(IntegrationTestCase):
 		self.assertEqual(len(a_steps), 2)
 		statuses = sorted(row.status for row in a_steps)
 		self.assertEqual(statuses, [c.STEP_IN_REVIEW, c.STEP_RESPONDED])
+
+	# -- pre-planned steps stay Pre-Planned; forwarded steps expose their origin over the API -----
+
+	def test_pre_planned_step_origin_defaults_and_get_submittal_detail_exposes_it(self):
+		from egc_projects.api import submittals as submittals_api
+
+		submission, step = self._single_reviewer_submission(self.user_a)
+		self.assertEqual(step.origin, "Pre-Planned")
+
+		submittal_control.record_step_response(step.name, c.RESPONSE_APPROVED, forward_to_user=self.user_b)
+		detail = submittals_api.get_submittal_detail(submission.submittal)
+		steps = detail["submissions"][0]["steps"]
+		origin_by_reviewer = {s["reviewer_user"]: s["origin"] for s in steps}
+		self.assertEqual(origin_by_reviewer[self.user_a], "Pre-Planned")
+		self.assertEqual(origin_by_reviewer[self.user_b], "Forwarded")

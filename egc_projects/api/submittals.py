@@ -265,6 +265,7 @@ _STEP_FIELDS = (
 	"reviewer_user",
 	"reviewer_label",
 	"is_required",
+	"origin",
 	"status",
 	"response",
 	"response_date",
