@@ -1060,6 +1060,93 @@ def _sales_order_transactions(project: str) -> list[dict]:
 	return rows
 
 
+# --- Cash Flow (Payment Entry — real cash movement, not invoiced-but-maybe-unpaid) --------------
+#
+# Never queried anywhere in this app before this: ERPNext's Payment Entry already carries a
+# native `project` field, just never surfaced. Two real limitations disclosed in the UI, not
+# hidden: `project` is only auto-set when a payment is created from a Sales/Purchase Order or
+# Invoice (not from Bank Reconciliation, Payment Reconciliation, or a bare New Payment Entry), so
+# a project's real cash flow can be under-reported by any payment entered through those other
+# paths. And one Payment Entry can only ever belong to one project (`Payment Entry Reference` has
+# no `project` field of its own) — a payment reconciling invoices from multiple projects can't be
+# split proportionally; that's a structural ERPNext limitation, not something a query can fix.
+# `base_received_amount`/`base_paid_amount` (company currency) are used throughout, never the
+# bare `paid_amount`/`received_amount` — those are denominated in the paid-from/paid-to account's
+# own currency, not company currency, so summing them raw across multi-currency payments would be
+# meaningless. `unallocated_amount` (an advance beyond what the source document actually needed)
+# is surfaced as its own disclosed figure, never netted invisibly into received/paid — neither
+# choice is obviously "more correct", so this doesn't pretend to have resolved that ambiguity.
+
+
+def _cash_flow_transactions(project: str) -> list[dict]:
+	pe = frappe.qb.DocType("Payment Entry")
+	rows = (
+		frappe.qb.from_(pe)
+		.select(
+			pe.name,
+			pe.posting_date,
+			pe.payment_type,
+			pe.party,
+			pe.reference_no,
+			pe.base_received_amount,
+			pe.base_paid_amount,
+		)
+		.where((pe.docstatus == 1) & (pe.project == project) & (pe.payment_type.isin(["Receive", "Pay"])))
+		.orderby(pe.posting_date, order=frappe.qb.desc)
+		.run(as_dict=True)
+	)
+	for row in rows:
+		party = row.pop("party")
+		reference_no = row.pop("reference_no")
+		received = flt(row.pop("base_received_amount"))
+		paid = flt(row.pop("base_paid_amount"))
+		row["doctype"] = "Payment Entry"
+		row["date"] = row.pop("posting_date")
+		row["reference"] = party or reference_no or None
+		row["amount"] = received if row["payment_type"] == "Receive" else -paid
+	return rows
+
+
+@frappe.whitelist()
+def get_cash_flow(project: str) -> dict:
+	validators.require_project_permission(project)
+	_require_financial_access()
+
+	pe = frappe.qb.DocType("Payment Entry")
+	rows = (
+		frappe.qb.from_(pe)
+		.select(
+			pe.payment_type,
+			Sum(pe.base_received_amount).as_("received"),
+			Sum(pe.base_paid_amount).as_("paid"),
+			Sum(pe.unallocated_amount).as_("unallocated"),
+		)
+		.where((pe.docstatus == 1) & (pe.project == project) & (pe.payment_type.isin(["Receive", "Pay"])))
+		.groupby(pe.payment_type)
+		.run(as_dict=True)
+	)
+	received = 0.0
+	paid = 0.0
+	unallocated = 0.0
+	for row in rows:
+		if row.payment_type == "Receive":
+			received = flt(row.received)
+		else:
+			paid = flt(row.paid)
+		unallocated += flt(row.unallocated)
+
+	company = frappe.db.get_value("Project", project, "company")
+	currency = erpnext.get_company_currency(company) if company else None
+
+	return {
+		"received": received,
+		"paid": paid,
+		"net": received - paid,
+		"unallocated": unallocated,
+		"currency": currency,
+	}
+
+
 _FINANCIAL_TRANSACTION_FNS = {
 	"billed": _billed_transactions,
 	"purchase_cost": _purchase_cost_transactions,
@@ -1068,6 +1155,7 @@ _FINANCIAL_TRANSACTION_FNS = {
 	"consumed_material_cost": _consumed_material_transactions,
 	"timesheet_cost": _timesheet_transactions,
 	"sales_order_value": _sales_order_transactions,
+	"cash_flow": _cash_flow_transactions,
 }
 
 

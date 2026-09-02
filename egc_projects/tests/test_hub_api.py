@@ -450,6 +450,53 @@ class TestHubAPI(IntegrationTestCase):
 			):
 				frappe.delete_doc("User Permission", perm, ignore_permissions=True)
 
+	# -- 2c. get_cash_flow (Payment Entry — real cash movement) ---------------------------------
+
+	def test_cash_flow_denies_non_financial_user(self):
+		frappe.set_user(self.financial_denied_user)
+		with self.assertRaises(frappe.PermissionError):
+			hub.get_cash_flow(self.project)
+
+	def test_cash_flow_sums_received_and_paid_separately(self):
+		_make_payment_entry(self.project, self.company, "Receive", 1000)
+		_make_payment_entry(self.project, self.company, "Pay", 400)
+
+		frappe.set_user(self.manager_user)
+		result = hub.get_cash_flow(self.project)
+		self.assertEqual(result["received"], 1000)
+		self.assertEqual(result["paid"], 400)
+		self.assertEqual(result["net"], 600)
+
+	def test_cash_flow_unallocated_amount_is_disclosed_not_dropped(self):
+		# An unallocated payment (no Payment Entry Reference row) is still real cash for this
+		# project — it must show in `received`, not silently zero out just because it hasn't
+		# been reconciled against a specific invoice yet.
+		_make_payment_entry(self.project, self.company, "Receive", 1000)
+
+		frappe.set_user(self.manager_user)
+		result = hub.get_cash_flow(self.project)
+		self.assertEqual(result["received"], 1000)
+		self.assertEqual(result["unallocated"], 1000)
+
+	def test_cash_flow_transactions_drill_down_matches_headline(self):
+		_make_payment_entry(self.project, self.company, "Receive", 700)
+		_make_payment_entry(self.project, self.company, "Pay", 200)
+
+		frappe.set_user(self.manager_user)
+		headline = hub.get_cash_flow(self.project)
+		transactions = hub.get_financial_transactions(self.project, "cash_flow")
+		self.assertEqual(sum(t["amount"] for t in transactions if t["amount"] > 0), headline["received"])
+		self.assertEqual(-sum(t["amount"] for t in transactions if t["amount"] < 0), headline["paid"])
+
+	def test_cash_flow_excludes_other_projects_and_draft_entries(self):
+		other_project = _make_project(self.company)
+		_make_payment_entry(self.project, self.company, "Receive", 500)
+		_make_payment_entry(other_project, self.company, "Receive", 999)
+		_make_payment_entry(self.project, self.company, "Receive", 111, submit=False)
+
+		frappe.set_user(self.manager_user)
+		self.assertEqual(hub.get_cash_flow(self.project)["received"], 500)
+
 	# -- 3. Financial gate --------------------------------------------------------------------
 
 	def test_financial_gate_denies_viewer_and_allows_manager(self):
@@ -934,6 +981,57 @@ def _make_project(company):
 		}
 	)
 	doc.insert(ignore_permissions=True)
+	return doc.name
+
+
+def _get_or_create_customer():
+	name = "EGC-HUB-Test Customer"
+	existing = frappe.db.get_value("Customer", {"customer_name": name})
+	if existing:
+		return existing
+	doc = frappe.get_doc(
+		{
+			"doctype": "Customer",
+			"customer_name": name,
+			"customer_group": frappe.db.get_value("Customer Group", {}, "name") or "All Customer Groups",
+			"territory": frappe.db.get_value("Territory", {}, "name") or "All Territories",
+		}
+	)
+	doc.insert(ignore_permissions=True)
+	return doc.name
+
+
+def _make_payment_entry(project, company, payment_type, amount, submit=True):
+	"""A Payment Entry constructed directly (not via ERPNext's own `get_payment_entry(dt, dn)`
+	off a source Sales/Purchase Order or Invoice) — deliberately unallocated, which is exactly
+	the state `get_cash_flow()`'s own docstring documents as a real ambiguity: the full amount
+	still counts as real received/paid cash for this project, disclosed alongside its own
+	(here, equally large) `unallocated_amount`, never silently netted to zero."""
+	receivable = frappe.db.get_value("Company", company, "default_receivable_account")
+	payable = frappe.db.get_value("Company", company, "default_payable_account")
+	cash_or_bank = frappe.db.get_value("Account", {"company": company, "account_type": "Cash"}, "name") or frappe.db.get_value(
+		"Account", {"company": company, "account_type": "Bank"}, "name"
+	)
+	is_receive = payment_type == "Receive"
+	doc = frappe.get_doc(
+		{
+			"doctype": "Payment Entry",
+			"payment_type": payment_type,
+			"party_type": "Customer" if is_receive else "Supplier",
+			"party": _get_or_create_customer() if is_receive else _get_or_create_supplier(),
+			"company": company,
+			"project": project,
+			"paid_from": receivable if is_receive else cash_or_bank,
+			"paid_to": cash_or_bank if is_receive else payable,
+			"paid_amount": amount,
+			"received_amount": amount,
+			"reference_no": f"EGC-HUB-TEST-{frappe.generate_hash(length=6)}",
+			"reference_date": today(),
+		}
+	)
+	doc.insert(ignore_permissions=True)
+	if submit:
+		doc.submit()
 	return doc.name
 
 

@@ -1,6 +1,6 @@
 <script setup>
-import { computed, watch } from "vue";
-import { get_financials, get_financial_transactions, get_cost_forecast } from "../api";
+import { ref, computed, watch } from "vue";
+import { get_financials, get_financial_transactions, get_cost_forecast, get_cash_flow } from "../api";
 import { get_contract_value_breakdown } from "./change_orders_api";
 import { useHubResource } from "../composables/useHubResource";
 import LoadingState from "./LoadingState.vue";
@@ -30,6 +30,33 @@ const {
 	reload: reload_cost_forecast,
 } = useHubResource(() => get_cost_forecast(props.project));
 
+const {
+	data: cash_flow,
+	loading: cash_flow_loading,
+	error: cash_flow_error,
+	reload: reload_cash_flow,
+} = useHubResource(() => get_cash_flow(props.project));
+
+const {
+	data: cash_flow_transactions,
+	loading: cash_flow_transactions_loading,
+	reload: reload_cash_flow_transactions,
+} = useHubResource(() => get_financial_transactions(props.project, "cash_flow"));
+
+// Declared here (ahead of the permission-gated watch below, which eagerly loads it) rather than
+// down with the rest of the Transactions sub-view's own logic — `{ immediate: true }` fires that
+// watch synchronously during setup, so anything it references must already exist by then, not
+// merely appear later in this same file.
+const selected_metric = ref("billed");
+const {
+	data: browser_transactions,
+	loading: browser_transactions_loading,
+	error: browser_transactions_error,
+	reload: reload_browser_transactions,
+} = useHubResource((metric) => get_financial_transactions(props.project, metric));
+
+watch(selected_metric, (metric) => reload_browser_transactions(metric));
+
 // A client-side hint only — EGC Change Order's own DocType permissions are the actual boundary.
 const WRITE_ROLES = ["EGC Project Manager", "System Manager"];
 const can_write_change_orders = computed(() =>
@@ -39,12 +66,15 @@ const can_write_change_orders = computed(() =>
 watch(
 	() => [props.project, has_access.value],
 	() => {
-		// Never call get_financials() when the caller has no financial visibility — the tab
-		// isn't even shown in that case, but this guard keeps the component safe standalone.
+		// Never call the financial endpoints when the caller has no financial visibility — the
+		// tab isn't even shown in that case, but this guard keeps the component safe standalone.
 		if (has_access.value) {
 			reload();
 			reload_contract_value();
 			reload_cost_forecast();
+			reload_cash_flow();
+			reload_cash_flow_transactions();
+			reload_browser_transactions(selected_metric.value);
 		}
 	},
 	{ immediate: true }
@@ -88,6 +118,11 @@ function format_amount(value) {
 	return format_currency(value, data.value?.currency);
 }
 
+function format_cash_flow_amount(value) {
+	if (value === null || value === undefined) return "—";
+	return format_currency(value, cash_flow.value?.currency);
+}
+
 function format_percent(value) {
 	if (value === null || value === undefined) return "—";
 	return `${flt(value, 2)}%`;
@@ -101,10 +136,15 @@ const currency_note = computed(() =>
 	data.value?.currency ? __("All amounts in {0}", [data.value.currency]) : ""
 );
 
-// Only these six figures are backed by a single, well-defined set of underlying ERPNext
+// -- sub-view switch (local component state, not URL-based — matches OverviewTab.vue's own
+// Overview/My Tasks toggle and ActivitiesTab.vue's Table/Gantt/Outline toggle; the Hub's actual
+// top-level tab bar is a dropdown "Toolbox" menu, not built for a second nested level). ----------
+const active_view = ref("overview");
+
+// Only these seven figures are backed by a single, well-defined set of underlying ERPNext
 // transactions (docs/ARCHITECTURE_V2.md §10) — `billable`/`estimated_costing`/`gross_margin`/
 // `per_gross_margin` are derived/computed values with no one-to-one transaction list behind
-// them, so they stay plain tiles rather than getting a drill-down that couldn't reconcile.
+// them, so they stay plain tiles with no metric key, never routed to the Transactions browser.
 const rows = computed(() => {
 	if (!data.value) return [];
 	const d = data.value;
@@ -135,47 +175,29 @@ const rows = computed(() => {
 	];
 });
 
-function escape(value) {
-	return frappe.utils.escape_html(value == null ? "" : String(value));
+// -- Transactions sub-view: one real browsing screen instead of a per-tile modal dialog ----------
+
+const TRANSACTION_METRICS = [
+	{ key: "billed", label: __("Billed") },
+	{ key: "purchase_cost", label: __("Purchase Cost (Invoiced)") },
+	{ key: "committed_purchase_orders", label: __("Purchase Orders (Committed)") },
+	{ key: "expense_claims", label: __("Expense Claims") },
+	{ key: "consumed_material_cost", label: __("Consumed Material Cost") },
+	{ key: "timesheet_cost", label: __("Timesheet Cost") },
+	{ key: "sales_order_value", label: __("Sales Order Value") },
+];
+
+function view_transactions(metric) {
+	if (!metric) return;
+	active_view.value = "transactions";
+	// Setting this alone is enough — the watch() above reacts to the change and reloads; calling
+	// reload_browser_transactions here too would double-fetch on a genuine metric switch, and do
+	// nothing extra when re-clicking the same metric (watch only fires on an actual value change).
+	selected_metric.value = metric;
 }
 
-async function open_drill_down(row) {
-	if (!row.metric) return;
-	const dialog = new frappe.ui.Dialog({
-		title: __("{0} — Transactions", [row.label]),
-		size: "large",
-		fields: [{ fieldtype: "HTML", fieldname: "transactions" }],
-	});
-	dialog.show();
-	dialog.set_value("transactions", `<div class="text-muted">${__("Loading…")}</div>`);
-
-	try {
-		const transactions = await get_financial_transactions(props.project, row.metric);
-		if (!transactions.length) {
-			dialog.set_value("transactions", `<div class="text-muted">${__("No transactions found.")}</div>`);
-			return;
-		}
-		const body = transactions
-			.map(
-				(t) => `<tr>
-					<td>${escape(t.doctype)}</td>
-					<td><a href="/app/${encodeURIComponent(frappe.router.slug(t.doctype))}/${encodeURIComponent(t.name)}" target="_blank" rel="noopener">${escape(t.name)}</a></td>
-					<td>${t.date ? escape(frappe.datetime.str_to_user(t.date)) : "—"}</td>
-					<td>${escape(t.reference || "—")}</td>
-					<td style="text-align:right">${format_amount(t.amount)}</td>
-				</tr>`
-			)
-			.join("");
-		dialog.set_value(
-			"transactions",
-			`<table class="hub-table"><thead><tr>
-				<th>${__("Type")}</th><th>${__("Document")}</th><th>${__("Date")}</th>
-				<th>${__("Reference")}</th><th style="text-align:right">${__("Amount")}</th>
-			</tr></thead><tbody>${body}</tbody></table>`
-		);
-	} catch (e) {
-		dialog.set_value("transactions", `<div class="text-muted">${escape(e.message)}</div>`);
-	}
+function doc_link(t) {
+	return `/app/${encodeURIComponent(frappe.router.slug(t.doctype))}/${encodeURIComponent(t.name)}`;
 }
 </script>
 
@@ -191,130 +213,295 @@ async function open_drill_down(row) {
 		<EmptyState v-else-if="!data" :title="__('No financial data yet')" />
 
 		<template v-else>
-		<div v-if="currency_note" class="hub-financials__currency">{{ currency_note }}</div>
+			<div v-if="currency_note" class="hub-financials__currency">{{ currency_note }}</div>
 
-		<div class="hub-card hub-contract-value">
-			<div class="hub-contract-value__head">
-				<div class="hub-financials__label">{{ __("Contract Value") }}</div>
+			<div class="hub-view-switch">
 				<button
-					v-if="can_write_change_orders"
 					type="button"
-					class="btn btn-xs btn-default"
-					@click="open_new_change_order"
+					class="hub-view-switch__btn"
+					:class="{ 'hub-view-switch__btn--active': active_view === 'overview' }"
+					@click="active_view = 'overview'"
 				>
-					{{ __("New Change Order") }}
+					{{ __("Overview") }}
+				</button>
+				<button
+					type="button"
+					class="hub-view-switch__btn"
+					:class="{ 'hub-view-switch__btn--active': active_view === 'transactions' }"
+					@click="active_view = 'transactions'"
+				>
+					{{ __("Transactions") }}
+				</button>
+				<button
+					type="button"
+					class="hub-view-switch__btn"
+					:class="{ 'hub-view-switch__btn--active': active_view === 'cash-flow' }"
+					@click="active_view = 'cash-flow'"
+				>
+					{{ __("Cash Flow") }}
+				</button>
+				<button
+					type="button"
+					class="hub-view-switch__btn"
+					:class="{ 'hub-view-switch__btn--active': active_view === 'coming-soon' }"
+					@click="active_view = 'coming-soon'"
+				>
+					{{ __("Coming Soon") }}
 				</button>
 			</div>
 
-			<LoadingState v-if="contract_value_loading" :rows="2" />
-			<ErrorState v-else-if="contract_value_error" :message="contract_value_error" @retry="reload_contract_value" />
-
-			<template v-else-if="contract_value">
-				<div class="hub-contract-value__total">{{ format_contract_amount(contract_value.total) }}</div>
-
-				<div class="hub-contract-value__bar">
-					<div class="hub-contract-value__bar-fill" :style="{ width: change_orders_pct + '%' }" />
-				</div>
-
-				<div class="hub-contract-value__breakdown">
-					<div class="hub-contract-value__item">
-						<span class="hub-contract-value__swatch hub-contract-value__swatch--original" />
-						{{ __("Original Scope") }}
-						<strong>{{ format_contract_amount(contract_value.original_scope_total) }}</strong>
+			<!-- ============================ Overview ============================ -->
+			<template v-if="active_view === 'overview'">
+				<div class="hub-card hub-contract-value">
+					<div class="hub-contract-value__head">
+						<div class="hub-financials__label">{{ __("Contract Value") }}</div>
+						<button
+							v-if="can_write_change_orders"
+							type="button"
+							class="btn btn-xs btn-default"
+							@click="open_new_change_order"
+						>
+							{{ __("New Change Order") }}
+						</button>
 					</div>
-					<div class="hub-contract-value__item">
-						<span class="hub-contract-value__swatch hub-contract-value__swatch--co" />
-						{{ __("Change Orders") }}
-						<strong>{{ format_contract_amount(contract_value.change_orders_total) }}</strong>
-						<span class="hub-contract-value__pct">({{ change_orders_pct }}%)</span>
-					</div>
-				</div>
 
-				<EmptyState v-if="!contract_value.change_orders.length" :title="__('No approved Change Orders yet')" />
-				<ul v-else class="hub-contract-value__list">
-					<li v-for="co in contract_value.change_orders" :key="co.name" @click="open_change_order(co.name)">
-						<span class="hub-contract-value__co-number">{{ co.co_number }}</span>
-						<span class="hub-contract-value__co-title">{{ co.title }}</span>
-						<span class="hub-contract-value__co-amount">{{ format_contract_amount(co.amount) }}</span>
-					</li>
-				</ul>
-			</template>
-		</div>
+					<LoadingState v-if="contract_value_loading" :rows="2" />
+					<ErrorState v-else-if="contract_value_error" :message="contract_value_error" @retry="reload_contract_value" />
 
-		<div class="hub-card hub-cost-forecast">
-			<div class="hub-cost-forecast__title-row">
-				<div class="hub-financials__label">{{ __("Cost to Complete") }}</div>
-				<span class="hub-cost-forecast__experimental-tag" :title="__('This estimate has no real cost-loaded budget behind it yet — treat it as a rough indicator, never a contractual figure.')">
-					{{ __("Experimental") }}
-				</span>
-			</div>
+					<template v-else-if="contract_value">
+						<div class="hub-contract-value__total">{{ format_contract_amount(contract_value.total) }}</div>
 
-			<LoadingState v-if="cost_forecast_loading" :rows="2" />
-			<ErrorState v-else-if="cost_forecast_error" :message="cost_forecast_error" @retry="reload_cost_forecast" />
-
-			<EmptyState
-				v-else-if="cost_forecast && !cost_forecast.budget"
-				:title="__('No budget set yet')"
-				:description="__('Set Estimated Costing on the Project to forecast remaining cost from progress.')"
-			/>
-
-			<template v-else-if="cost_forecast">
-				<p class="hub-cost-forecast__disclaimer">
-					{{
-						__(
-							"Estimated from overall physical Activity progress against a single project budget figure — not a certified earned-value calculation from cost-loaded activities. Use as a rough indicator, not a contractual forecast."
-						)
-					}}
-				</p>
-				<div class="hub-cost-forecast__row">
-					<div class="hub-cost-forecast__stat">
-						<div class="hub-cost-forecast__stat-label">{{ __("Spent to Date") }}</div>
-						<div class="hub-cost-forecast__stat-value">{{ format_contract_amount(cost_forecast.actual_cost) }}</div>
-					</div>
-					<div class="hub-cost-forecast__stat">
-						<div class="hub-cost-forecast__stat-label">
-							{{ __("Remaining to Spend") }}
-							<span v-if="is_over_budget" class="hub-cost-forecast__over-tag">{{ __("Over Budget") }}</span>
+						<div class="hub-contract-value__bar">
+							<div class="hub-contract-value__bar-fill" :style="{ width: change_orders_pct + '%' }" />
 						</div>
-						<div class="hub-cost-forecast__stat-value hub-cost-forecast__stat-value--emphasis">
-							{{ format_contract_amount(cost_forecast.estimate_to_complete) }}
+
+						<div class="hub-contract-value__breakdown">
+							<div class="hub-contract-value__item">
+								<span class="hub-contract-value__swatch hub-contract-value__swatch--original" />
+								{{ __("Original Scope") }}
+								<strong>{{ format_contract_amount(contract_value.original_scope_total) }}</strong>
+							</div>
+							<div class="hub-contract-value__item">
+								<span class="hub-contract-value__swatch hub-contract-value__swatch--co" />
+								{{ __("Change Orders") }}
+								<strong>{{ format_contract_amount(contract_value.change_orders_total) }}</strong>
+								<span class="hub-contract-value__pct">({{ change_orders_pct }}%)</span>
+							</div>
 						</div>
-					</div>
+
+						<EmptyState v-if="!contract_value.change_orders.length" :title="__('No approved Change Orders yet')" />
+						<ul v-else class="hub-contract-value__list">
+							<li v-for="co in contract_value.change_orders" :key="co.name" @click="open_change_order(co.name)">
+								<span class="hub-contract-value__co-number">{{ co.co_number }}</span>
+								<span class="hub-contract-value__co-title">{{ co.title }}</span>
+								<span class="hub-contract-value__co-amount">{{ format_contract_amount(co.amount) }}</span>
+							</li>
+						</ul>
+					</template>
 				</div>
 
-				<div class="hub-cost-forecast__bar">
-					<div class="hub-cost-forecast__bar-fill" :style="{ width: Math.min(spent_pct, 100) + '%' }" />
+				<div class="hub-card hub-cost-forecast">
+					<div class="hub-cost-forecast__title-row">
+						<div class="hub-financials__label">{{ __("Cost to Complete") }}</div>
+						<span class="hub-cost-forecast__experimental-tag" :title="__('This estimate has no real cost-loaded budget behind it yet — treat it as a rough indicator, never a contractual figure.')">
+							{{ __("Experimental") }}
+						</span>
+					</div>
+
+					<LoadingState v-if="cost_forecast_loading" :rows="2" />
+					<ErrorState v-else-if="cost_forecast_error" :message="cost_forecast_error" @retry="reload_cost_forecast" />
+
+					<EmptyState
+						v-else-if="cost_forecast && !cost_forecast.budget"
+						:title="__('No budget set yet')"
+						:description="__('Set Estimated Costing on the Project to forecast remaining cost from progress.')"
+					/>
+
+					<template v-else-if="cost_forecast">
+						<p class="hub-cost-forecast__disclaimer">
+							{{
+								__(
+									"Estimated from overall physical Activity progress against a single project budget figure — not a certified earned-value calculation from cost-loaded activities. Use as a rough indicator, not a contractual forecast."
+								)
+							}}
+						</p>
+						<div class="hub-cost-forecast__row">
+							<div class="hub-cost-forecast__stat">
+								<div class="hub-cost-forecast__stat-label">{{ __("Spent to Date") }}</div>
+								<div class="hub-cost-forecast__stat-value">{{ format_contract_amount(cost_forecast.actual_cost) }}</div>
+							</div>
+							<div class="hub-cost-forecast__stat">
+								<div class="hub-cost-forecast__stat-label">
+									{{ __("Remaining to Spend") }}
+									<span v-if="is_over_budget" class="hub-cost-forecast__over-tag">{{ __("Over Budget") }}</span>
+								</div>
+								<div class="hub-cost-forecast__stat-value hub-cost-forecast__stat-value--emphasis">
+									{{ format_contract_amount(cost_forecast.estimate_to_complete) }}
+								</div>
+							</div>
+						</div>
+
+						<div class="hub-cost-forecast__bar">
+							<div class="hub-cost-forecast__bar-fill" :style="{ width: Math.min(spent_pct, 100) + '%' }" />
+						</div>
+
+						<div class="hub-contract-value__breakdown">
+							<div class="hub-contract-value__item">
+								{{ __("Budget") }}
+								<strong>{{ format_contract_amount(cost_forecast.budget) }}</strong>
+							</div>
+							<div class="hub-contract-value__item">
+								{{ __("Physical % Complete (weighted, not cost-based)") }}
+								<strong>{{ Math.round(cost_forecast.percent_complete) }}%</strong>
+							</div>
+							<div class="hub-contract-value__item" :class="{ 'hub-cost-forecast__over-text': is_over_budget }">
+								{{ __("Forecasted Total Cost") }}
+								<strong>{{ format_contract_amount(cost_forecast.estimate_at_completion) }}</strong>
+							</div>
+						</div>
+					</template>
 				</div>
 
-				<div class="hub-contract-value__breakdown">
-					<div class="hub-contract-value__item">
-						{{ __("Budget") }}
-						<strong>{{ format_contract_amount(cost_forecast.budget) }}</strong>
-					</div>
-					<div class="hub-contract-value__item">
-						{{ __("Physical % Complete (weighted, not cost-based)") }}
-						<strong>{{ Math.round(cost_forecast.percent_complete) }}%</strong>
-					</div>
-					<div class="hub-contract-value__item" :class="{ 'hub-cost-forecast__over-text': is_over_budget }">
-						{{ __("Forecasted Total Cost") }}
-						<strong>{{ format_contract_amount(cost_forecast.estimate_at_completion) }}</strong>
+				<div class="hub-financials__grid">
+					<div
+						v-for="row in rows"
+						:key="row.label"
+						class="hub-card hub-financials__tile"
+						:class="{ 'hub-financials__tile--emphasis': row.emphasis, 'hub-financials__tile--clickable': row.metric }"
+						@click="view_transactions(row.metric)"
+					>
+						<div class="hub-financials__label">{{ row.label }}</div>
+						<div class="hub-financials__value">{{ row.value }}</div>
 					</div>
 				</div>
 			</template>
-		</div>
 
-		<div class="hub-financials__grid">
-			<div
-				v-for="row in rows"
-				:key="row.label"
-				class="hub-card hub-financials__tile"
-				:class="{ 'hub-financials__tile--emphasis': row.emphasis, 'hub-financials__tile--clickable': row.metric }"
-				@click="open_drill_down(row)"
-			>
-				<div class="hub-financials__label">{{ row.label }}</div>
-				<div class="hub-financials__value">{{ row.value }}</div>
-			</div>
-		</div>
+			<!-- ============================ Transactions ============================ -->
+			<template v-else-if="active_view === 'transactions'">
+				<div class="hub-card hub-financials__transactions">
+					<div class="hub-financials__transactions-head">
+						<div class="hub-financials__label">{{ __("Transactions") }}</div>
+						<select v-model="selected_metric" class="hub-financials__metric-select">
+							<option v-for="m in TRANSACTION_METRICS" :key="m.key" :value="m.key">{{ m.label }}</option>
+						</select>
+					</div>
+
+					<LoadingState v-if="browser_transactions_loading" :rows="4" />
+					<ErrorState v-else-if="browser_transactions_error" :message="browser_transactions_error" @retry="() => reload_browser_transactions(selected_metric)" />
+					<EmptyState v-else-if="!(browser_transactions || []).length" :title="__('No transactions found')" />
+
+					<div v-else class="hub-table-wrap">
+						<table class="hub-table">
+							<thead>
+								<tr>
+									<th>{{ __("Type") }}</th>
+									<th>{{ __("Document") }}</th>
+									<th>{{ __("Date") }}</th>
+									<th>{{ __("Reference") }}</th>
+									<th style="text-align: right">{{ __("Amount") }}</th>
+								</tr>
+							</thead>
+							<tbody>
+								<tr v-for="t in browser_transactions" :key="t.name">
+									<td>{{ t.doctype }}</td>
+									<td>
+										<a :href="doc_link(t)" target="_blank" rel="noopener" class="hub-link">{{ t.name }}</a>
+									</td>
+									<td>{{ t.date ? frappe.datetime.str_to_user(t.date) : "—" }}</td>
+									<td>{{ t.reference || "—" }}</td>
+									<td style="text-align: right">{{ format_amount(t.amount) }}</td>
+								</tr>
+							</tbody>
+						</table>
+					</div>
+				</div>
+			</template>
+
+			<!-- ============================ Cash Flow ============================ -->
+			<template v-else-if="active_view === 'cash-flow'">
+				<div class="hub-card hub-cash-flow">
+					<div class="hub-financials__label">{{ __("Cash Flow") }}</div>
+					<p class="hub-cost-forecast__disclaimer">
+						{{
+							__(
+								"Real cash received and paid against this project, from Payment Entry — not what's been invoiced, what's actually moved. Two real limits: a payment only carries this project when it was created from one of this project's own Sales/Purchase Orders or Invoices (not from Bank Reconciliation, Payment Reconciliation, or a bare new payment), and a single payment can only ever belong to one project, so a payment that settles invoices across several projects can't be split between them."
+							)
+						}}
+					</p>
+
+					<LoadingState v-if="cash_flow_loading" :rows="2" />
+					<ErrorState v-else-if="cash_flow_error" :message="cash_flow_error" @retry="reload_cash_flow" />
+
+					<template v-else-if="cash_flow">
+						<div class="hub-cost-forecast__row">
+							<div class="hub-cost-forecast__stat">
+								<div class="hub-cost-forecast__stat-label">{{ __("Received") }}</div>
+								<div class="hub-cost-forecast__stat-value hub-cost-forecast__stat-value--emphasis">
+									{{ format_cash_flow_amount(cash_flow.received) }}
+								</div>
+							</div>
+							<div class="hub-cost-forecast__stat">
+								<div class="hub-cost-forecast__stat-label">{{ __("Paid") }}</div>
+								<div class="hub-cost-forecast__stat-value">{{ format_cash_flow_amount(cash_flow.paid) }}</div>
+							</div>
+							<div class="hub-cost-forecast__stat">
+								<div class="hub-cost-forecast__stat-label">{{ __("Net") }}</div>
+								<div class="hub-cost-forecast__stat-value">{{ format_cash_flow_amount(cash_flow.net) }}</div>
+							</div>
+						</div>
+						<div class="hub-contract-value__breakdown">
+							<div class="hub-contract-value__item">
+								{{ __("Of which unallocated (not yet reconciled to a specific invoice)") }}
+								<strong>{{ format_cash_flow_amount(cash_flow.unallocated) }}</strong>
+							</div>
+						</div>
+
+						<div v-if="!cash_flow_transactions_loading && (cash_flow_transactions || []).length" class="hub-table-wrap hub-cash-flow__table">
+							<table class="hub-table">
+								<thead>
+									<tr>
+										<th>{{ __("Date") }}</th>
+										<th>{{ __("Party") }}</th>
+										<th>{{ __("Document") }}</th>
+										<th style="text-align: right">{{ __("Amount") }}</th>
+									</tr>
+								</thead>
+								<tbody>
+									<tr v-for="t in cash_flow_transactions" :key="t.name">
+										<td>{{ t.date ? frappe.datetime.str_to_user(t.date) : "—" }}</td>
+										<td>{{ t.reference || "—" }}</td>
+										<td>
+											<a :href="doc_link(t)" target="_blank" rel="noopener" class="hub-link">{{ t.name }}</a>
+										</td>
+										<td style="text-align: right">{{ format_cash_flow_amount(t.amount) }}</td>
+									</tr>
+								</tbody>
+							</table>
+						</div>
+						<EmptyState v-else-if="!cash_flow_transactions_loading" :title="__('No payments recorded against this project yet')" />
+					</template>
+				</div>
+			</template>
+
+			<!-- ============================ Coming Soon ============================ -->
+			<template v-else-if="active_view === 'coming-soon'">
+				<div class="hub-card hub-coming-soon">
+					<div class="hub-financials__label">{{ __("Coming Soon") }}</div>
+					<p class="hub-cost-forecast__disclaimer">
+						{{ __("Sketching the intended shape of this tab ahead of the data that would back it — nothing below is a real figure.") }}
+					</p>
+					<ul class="hub-coming-soon__list">
+						<li>
+							<strong>{{ __("Receivables & Payables Aging") }}</strong>
+							<span>{{ __("How overdue are the invoices we're owed on, and the ones we owe — needs outstanding-balance tracking this app doesn't have yet.") }}</span>
+						</li>
+						<li>
+							<strong>{{ __("Cost-Loaded Forecast Trend") }}</strong>
+							<span>{{ __("A real earned-value curve over time, once Activities carry their own budgeted cost instead of today's physical-progress proxy — see the Overview tab's own Experimental cost forecast.") }}</span>
+						</li>
+					</ul>
+				</div>
+			</template>
 		</template>
 	</div>
 </template>
@@ -324,6 +511,42 @@ async function open_drill_down(row) {
 	font-size: var(--text-xs);
 	color: var(--text-muted);
 	margin-bottom: 10px;
+}
+
+.hub-view-switch {
+	display: flex;
+	border: 1px solid var(--border-color);
+	border-radius: var(--border-radius);
+	overflow: hidden;
+	width: fit-content;
+	margin-bottom: 16px;
+}
+
+.hub-view-switch__btn {
+	appearance: none;
+	border: none;
+	background: var(--fg-color);
+	color: var(--text-muted);
+	padding: 5px 12px;
+	font-size: var(--text-sm);
+	cursor: pointer;
+	display: flex;
+	align-items: center;
+	gap: 6px;
+}
+
+.hub-view-switch__btn + .hub-view-switch__btn {
+	border-left: 1px solid var(--border-color);
+}
+
+.hub-view-switch__btn:hover {
+	color: var(--text-color);
+}
+
+.hub-view-switch__btn--active {
+	background: var(--control-bg);
+	color: var(--text-color);
+	font-weight: 600;
 }
 
 .hub-financials__grid {
@@ -448,7 +671,10 @@ async function open_drill_down(row) {
 	flex: 0 0 auto;
 }
 
-.hub-cost-forecast {
+.hub-cost-forecast,
+.hub-cash-flow,
+.hub-coming-soon,
+.hub-financials__transactions {
 	padding: 16px 18px;
 	margin-bottom: 14px;
 }
@@ -473,13 +699,14 @@ async function open_drill_down(row) {
 	margin: 4px 0 12px;
 	font-size: var(--text-xs);
 	color: var(--text-muted);
-	max-width: 60ch;
+	max-width: 70ch;
 }
 
 .hub-cost-forecast__row {
 	display: flex;
 	gap: 32px;
 	margin: 10px 0 14px;
+	flex-wrap: wrap;
 }
 
 .hub-cost-forecast__stat-label {
@@ -554,5 +781,54 @@ async function open_drill_down(row) {
 	font-size: var(--text-lg);
 	font-weight: 600;
 	color: var(--text-color);
+}
+
+.hub-financials__transactions-head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	margin-bottom: 12px;
+}
+
+.hub-financials__metric-select {
+	font-size: var(--text-sm);
+	border: 1px solid var(--border-color);
+	border-radius: var(--border-radius);
+	background: var(--fg-color);
+	color: var(--text-color);
+	padding: 5px 8px;
+	min-height: 30px;
+}
+
+.hub-cash-flow__table {
+	margin-top: 14px;
+}
+
+.hub-coming-soon__list {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+}
+
+.hub-coming-soon__list li {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	padding: 10px 12px;
+	border: 1px dashed var(--border-color);
+	border-radius: var(--border-radius);
+}
+
+.hub-coming-soon__list li strong {
+	color: var(--text-color);
+	font-size: var(--text-sm);
+}
+
+.hub-coming-soon__list li span {
+	color: var(--text-muted);
+	font-size: var(--text-xs);
 }
 </style>

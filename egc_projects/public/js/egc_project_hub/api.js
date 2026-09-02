@@ -68,6 +68,10 @@ export function get_cost_forecast(project) {
 	return call_hub("get_cost_forecast", { project });
 }
 
+export function get_cash_flow(project) {
+	return call_hub("get_cash_flow", { project });
+}
+
 export function get_my_open_items(project) {
 	return call_hub("get_my_open_items", { project });
 }
