@@ -286,6 +286,38 @@ def send_ball_in_court_email(reviewer_user: str, submission: str) -> None:
 	)
 
 
+def notify_watchers(submittal: str, subject: str, body: str, actionable: bool = False) -> None:
+	"""Pure visibility for `EGC Assignment` rows with `assignment_role="Watcher"` on a Submittal —
+	a party (a client just tracking progress, a government body that refuses to use the app and
+	wants hard copy) who should never be asked to approve anything (`assignments.py`'s own
+	`ASSIGNMENT_ROLES` docstring: "a Watcher who isn't a reviewer at all").
+
+	Raw `frappe.get_all` query, deliberately not `assignments.get_assignments_for` — that helper
+	calls `frappe.has_permission(parent_doctype, "read", ...)` and this can run from inside the
+	response-recording engine path (`submittal_control.py`'s `_assign_step`/
+	`_apply_response_and_refresh`), which may execute under an external reviewer's own
+	low-privilege session with no read permission on the Submittal itself. Same reasoning already
+	documented on that module's own `_first_responsible_label`.
+
+	In-app (`_notify`, passive — a Watcher isn't being asked to DO anything) on every call.
+	Email only when `actionable=True`, reserved for the two events actually worth an inbox
+	interruption — submission received and final response — not every intermediate forward/
+	stage-advance hop, matching this module's existing email philosophy (see module docstring)."""
+	watchers = frappe.get_all(
+		"EGC Assignment",
+		filters={"parent_doctype": "EGC Submittal", "parent_name": submittal, "assignment_role": "Watcher"},
+		pluck="person",
+	)
+	watchers = [u for u in dict.fromkeys(watchers) if u]
+	if not watchers:
+		return
+
+	_notify(watchers, "EGC Submittal", submittal, subject)
+	if actionable:
+		for user in watchers:
+			_send_email(user, subject, subject, body)
+
+
 def send_directory_welcome_email(user: str, project: str) -> None:
 	"""Sent once, from `grant_portal_access` (api/directory.py), the moment a Directory entry is
 	first given Portal Access — not on every later change to their access."""

@@ -319,7 +319,10 @@ def on_submission_submit(doc, method=None) -> None:
 	# start_review() to do, so this is a no-op for every v1-style submission and the
 	# submission's own status stays Submitted, exactly as before this module grew steps.
 	if _has_review_steps(doc.name):
-		start_review(doc.name)
+		# actionable=True: this is the one ball-in-court assignment that IS the "submission
+		# received" moment — every LATER stage-open (a pre-planned advance, or a live forward)
+		# stays in-app only for a Watcher, per notify_watchers's own cadence.
+		start_review(doc.name, actionable_for_watchers=True)
 	refresh_submittal_state(doc.submittal)
 	_refresh_documents(doc)
 
@@ -524,10 +527,11 @@ def _has_review_steps(submission: str) -> bool:
 	return bool(frappe.db.exists("EGC Submittal Review Step", {"submittal_revision": submission}))
 
 
-def _assign_step(step: str, reviewer_user: str, submission: str) -> None:
+def _assign_step(step: str, reviewer_user: str, submission: str, actionable_for_watchers: bool = False) -> None:
 	from frappe.desk.form.assign_to import _add as assign_add
 
-	label = frappe.db.get_value("EGC Submittal Revision", submission, "revision_label")
+	revision = frappe.db.get_value("EGC Submittal Revision", submission, ["revision_label", "submittal"], as_dict=True)
+	label = revision.revision_label if revision else None
 	assign_add(
 		{
 			"doctype": "EGC Submittal Review Step",
@@ -541,6 +545,13 @@ def _assign_step(step: str, reviewer_user: str, submission: str) -> None:
 	from egc_projects.egc_projects import notifications
 
 	notifications.send_ball_in_court_email(reviewer_user, submission)
+	if revision and revision.submittal:
+		notifications.notify_watchers(
+			revision.submittal,
+			_("{0}: submitted to a new reviewer").format(label or submission),
+			_("{0} is now with a new reviewer.").format(label or submission),
+			actionable=actionable_for_watchers,
+		)
 
 
 def _close_step_assignment(step: str, reviewer_user: str | None) -> None:
@@ -608,10 +619,14 @@ def get_ball_in_court(submission: str) -> dict:
 	}
 
 
-def start_review(submission: str) -> None:
+def start_review(submission: str, actionable_for_watchers: bool = False) -> None:
 	"""Marks every Pending step at the lowest pending `sequence` as In Review — the parallel
 	stage that just opened — and assigns each such step's `reviewer_user` a ToDo, which is the
-	actual notification delivery (§7: "reuse Frappe's own assignment mechanism")."""
+	actual notification delivery (§7: "reuse Frappe's own assignment mechanism").
+
+	`actionable_for_watchers` is only ever True from `on_submission_submit`'s own call — the
+	single moment a Watcher's notification is worth an email, not every later stage-open this
+	function also handles (see `_assign_step`'s own `notify_watchers` call)."""
 	rows = frappe.get_all(
 		"EGC Submittal Review Step",
 		filters={"submittal_revision": submission, "status": c.STEP_PENDING},
@@ -627,7 +642,7 @@ def start_review(submission: str) -> None:
 			continue
 		_engine_set_step(row.name, {"status": c.STEP_IN_REVIEW})
 		if row.reviewer_user:
-			_assign_step(row.name, row.reviewer_user, submission)
+			_assign_step(row.name, row.reviewer_user, submission, actionable_for_watchers=actionable_for_watchers)
 
 	_refresh_ball_in_court(submission)
 
@@ -662,13 +677,23 @@ def _apply_response_and_refresh(submission_doc, response: str, remarks: str | No
 	refresh_submittal_state(submission_doc.submittal)
 	_refresh_documents(submission_doc)
 
+	from egc_projects.egc_projects import notifications
+
 	submitted_by = frappe.db.get_value("EGC Submittal Revision", submission_doc.name, "submitted_by")
 	submittal_manager = frappe.db.get_value("EGC Submittal", submission_doc.submittal, "submittal_manager")
 	recipients = [u for u in (submitted_by, submittal_manager) if u]
 	if recipients:
-		from egc_projects.egc_projects import notifications
-
 		notifications.notify_response_recorded(submission_doc.name, response, recipients)
+
+	# A final response is the other moment worth a Watcher's inbox, alongside submission-received
+	# (start_review's own actionable=True call) — every intermediate forward/stage-advance stays
+	# in-app only, per notify_watchers's own cadence.
+	notifications.notify_watchers(
+		submission_doc.submittal,
+		_("{0}: {1}").format(submission_doc.revision_label or submission_doc.name, response),
+		_("{0} was responded to: {1}.").format(submission_doc.revision_label or submission_doc.name, response),
+		actionable=True,
+	)
 
 
 @frappe.whitelist()
