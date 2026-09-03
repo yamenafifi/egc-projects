@@ -238,3 +238,102 @@ class TestRemoveAdminProjectOverscoping(IntegrationTestCase):
 		self.assertTrue(
 			frappe.db.exists("User Permission", {"user": viewer, "allow": "Project", "for_value": project})
 		)
+
+
+class TestRemoveInternalStakeholderOverscoping(IntegrationTestCase):
+	"""Regression coverage for the second instance of the same bug `TestRemoveAdminProjectOverscoping`
+	covers: `grant_portal_access` used to scope an internal EGC stakeholder (Document Controller,
+	Project Engineer, ...) with a `Project` User Permission too, not just external parties — but
+	their Stakeholder Role already grants a real EGC role meant to work across every project, so
+	that one scoping row silently cost them visibility of every OTHER Project-linked doctype
+	(Purchase Order, Purchase Invoice, Timesheet, ...) system-wide. Hit live in production: an
+	internal Document Controller granted access to one project lost Purchase Order/Invoice
+	visibility everywhere else. This is what repairs an already-affected account on the next
+	`bench migrate`, checked per (user, project) pair against that project's own Directory row."""
+
+	def _make_project(self):
+		company = frappe.db.get_value("Company", {}, "name") or frappe.get_all("Company", limit=1, pluck="name")[0]
+		return frappe.get_doc(
+			{"doctype": "Project", "project_name": f"EGC-IntOverscope-Test-{frappe.generate_hash(length=8)}", "company": company}
+		).insert(ignore_permissions=True).name
+
+	def _make_user(self, email):
+		if frappe.db.exists("User", email):
+			return email
+		frappe.get_doc(
+			{"doctype": "User", "email": email, "first_name": email.split("@")[0], "send_welcome_email": 0}
+		).insert(ignore_permissions=True)
+		return email
+
+	def _make_role(self, role_name, is_egc_internal):
+		if frappe.db.exists("EGC Stakeholder Role", role_name):
+			return role_name
+		frappe.get_doc(
+			{"doctype": "EGC Stakeholder Role", "role_name": role_name, "is_egc_internal": is_egc_internal}
+		).insert(ignore_permissions=True)
+		return role_name
+
+	def _add_stakeholder(self, project, role, person):
+		doc = frappe.get_doc("Project", project)
+		doc.append("custom_egc_stakeholders", {"role": role, "party_name": person, "person": person})
+		doc.save(ignore_permissions=True)
+
+	def tearDown(self):
+		names = frappe.get_all(
+			"User Permission", filters={"allow": "Project", "user": ("like", "int-overscope-test-%")}, pluck="name"
+		)
+		for name in names:
+			frappe.delete_doc("User Permission", name, ignore_permissions=True, force=True)
+
+	def test_removes_a_stale_grant_for_an_internal_stakeholder(self):
+		project = self._make_project()
+		role = self._make_role("EGC-Install-Test-Internal Role", is_egc_internal=1)
+		user = self._make_user("int-overscope-test-doccon@example.com")
+		self._add_stakeholder(project, role, user)
+		frappe.get_doc(
+			{"doctype": "User Permission", "user": user, "allow": "Project", "for_value": project}
+		).insert(ignore_permissions=True)
+
+		install.remove_internal_stakeholder_overscoping()
+
+		self.assertFalse(frappe.db.exists("User Permission", {"user": user, "allow": "Project", "for_value": project}))
+
+	def test_leaves_a_genuinely_external_stakeholder_alone(self):
+		project = self._make_project()
+		role = self._make_role("EGC-Install-Test-External Role", is_egc_internal=0)
+		user = self._make_user("int-overscope-test-client@example.com")
+		self._add_stakeholder(project, role, user)
+		frappe.get_doc(
+			{"doctype": "User Permission", "user": user, "allow": "Project", "for_value": project}
+		).insert(ignore_permissions=True)
+
+		install.remove_internal_stakeholder_overscoping()
+
+		self.assertTrue(frappe.db.exists("User Permission", {"user": user, "allow": "Project", "for_value": project}))
+
+	def test_leaves_a_different_projects_external_scoping_alone_for_the_same_person(self):
+		# The precision the per-(user, project) check exists for: this person is an internal
+		# stakeholder on `internal_project` but genuinely external (a different hat) on
+		# `other_project` — only the internal-project scoping row should be removed.
+		internal_project = self._make_project()
+		other_project = self._make_project()
+		internal_role = self._make_role("EGC-Install-Test-Internal Role", is_egc_internal=1)
+		external_role = self._make_role("EGC-Install-Test-External Role", is_egc_internal=0)
+		user = self._make_user("int-overscope-test-dualhat@example.com")
+		self._add_stakeholder(internal_project, internal_role, user)
+		self._add_stakeholder(other_project, external_role, user)
+		frappe.get_doc(
+			{"doctype": "User Permission", "user": user, "allow": "Project", "for_value": internal_project}
+		).insert(ignore_permissions=True)
+		frappe.get_doc(
+			{"doctype": "User Permission", "user": user, "allow": "Project", "for_value": other_project}
+		).insert(ignore_permissions=True)
+
+		install.remove_internal_stakeholder_overscoping()
+
+		self.assertFalse(
+			frappe.db.exists("User Permission", {"user": user, "allow": "Project", "for_value": internal_project})
+		)
+		self.assertTrue(
+			frappe.db.exists("User Permission", {"user": user, "allow": "Project", "for_value": other_project})
+		)

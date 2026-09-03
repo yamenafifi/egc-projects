@@ -150,6 +150,7 @@ def setup() -> None:
 	restrict_financial_field_permlevel()
 	raise_project_attachment_limit()
 	remove_admin_project_overscoping()
+	remove_internal_stakeholder_overscoping()
 	provision_all_project_folders()
 	frappe.db.commit()
 
@@ -175,6 +176,32 @@ def remove_admin_project_overscoping() -> None:
 	)
 	for name in stale:
 		frappe.delete_doc("User Permission", name, ignore_permissions=True, force=True)
+
+
+def remove_internal_stakeholder_overscoping() -> None:
+	"""Sibling to `remove_admin_project_overscoping` above, for the exact same regression hitting
+	a second population it didn't cover: `grant_portal_access` used to scope EVERY non-bypass
+	person with a `Project` User Permission, including an internal EGC stakeholder (Document
+	Controller, Project Engineer, Site Manager, ...) — but their Stakeholder Role already grants a
+	real EGC role meant to work across every project they're on, and that one scoping row, being a
+	native `Project`-link doctype, silently narrowed their visibility on Purchase Order/Purchase
+	Invoice/Timesheet/... system-wide too, not just this app. Hit live: an internal Document
+	Controller granted access to one project lost visibility into Purchase Orders/Invoices for
+	every other project. `grant_portal_access` itself is now fixed to never create these rows for
+	an internal stakeholder going forward (api/directory.py); this repairs any that already exist,
+	on every migrate, checked per (user, project) pair against THAT project's own Directory row —
+	so a person who is genuinely external on a different project keeps that row untouched."""
+	rows = frappe.get_all("User Permission", filters={"allow": "Project"}, fields=["name", "user", "for_value"])
+	if not rows:
+		return
+	for row in rows:
+		stakeholder_role = frappe.db.get_value(
+			"EGC Project Stakeholder",
+			{"parenttype": "Project", "parent": row.for_value, "person": row.user},
+			"role",
+		)
+		if stakeholder_role and frappe.db.get_value("EGC Stakeholder Role", stakeholder_role, "is_egc_internal"):
+			frappe.delete_doc("User Permission", row.name, ignore_permissions=True, force=True)
 
 
 def provision_all_project_folders() -> None:

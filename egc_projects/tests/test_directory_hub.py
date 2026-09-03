@@ -273,6 +273,31 @@ class TestDirectoryHub(IntegrationTestCase):
 		self.assertTrue(row["is_admin_bypass"])
 		self.assertTrue(row["has_portal_access"])
 
+	def test_grant_portal_access_skips_user_permission_for_an_internal_stakeholder(self):
+		# The second instance of the exact same regression: an internal EGC stakeholder (Document
+		# Controller, Project Engineer, ...) is not a bypass-role holder, but their Stakeholder
+		# Role already grants a real EGC role meant to work across every project they're on.
+		# Scoping them with a Project User Permission here would silently narrow their access on
+		# every OTHER doctype that links to Project (Purchase Order, Purchase Invoice,
+		# Timesheet, ...), system-wide, not just this app — confirmed live in production.
+		internal_user = _get_or_create_user("egc-dh-internal@example.com")
+		row_name = self._add_stakeholder(self.role_internal, "Internal Target", person=internal_user)
+
+		frappe.set_user(self.manager_user)
+		directory.grant_portal_access(self.project, row_name)
+
+		self.assertFalse(
+			frappe.db.exists(
+				"User Permission", {"user": internal_user, "allow": "Project", "for_value": self.project}
+			)
+		)
+		self.assertIn(c.ROLE_PROJECT_VIEWER, frappe.get_roles(internal_user))
+		rows = directory.get_directory(self.project)
+		row = next(r for r in rows if r["name"] == row_name)
+		self.assertFalse(row["is_admin_bypass"])
+		self.assertTrue(row["is_internal_unscoped"])
+		self.assertTrue(row["has_portal_access"])
+
 	# -- revoke_portal_access ----------------------------------------------------------------------
 
 	def test_revoke_portal_access_removes_user_permission_but_keeps_user(self):

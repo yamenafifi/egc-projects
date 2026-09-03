@@ -37,10 +37,25 @@ def _has_bypass_role(user: str | None) -> bool:
 	return bool(set(frappe.get_roles(user)) & set(c.PROJECT_VISIBILITY_BYPASS_ROLES))
 
 
-def _has_portal_access(user: str | None, project: str) -> bool:
+def _is_internal_stakeholder_role(role: str | None) -> bool:
+	"""True when `role` (an `EGC Stakeholder Role` name) is internal — the same class of
+	exemption as `_has_bypass_role`, for a second population that hit the identical regression:
+	`sync_roles_from_stakeholder_role` already grants an internal stakeholder a real EGC role
+	(EGC Project Manager/Document Controller/Project Engineer/Project Viewer) meant to work
+	across every project they touch, so scoping them to the ONE project they were just added to
+	here would silently narrow their access on every OTHER doctype that links to the native
+	`Project` doctype (Purchase Order, Purchase Invoice, Timesheet, ...) — not just this app's own
+	doctypes. Confirmed live: an internal Document Controller granted access to one project lost
+	visibility into Purchase Orders/Invoices belonging to every other project."""
+	if not role:
+		return False
+	return bool(frappe.db.get_value("EGC Stakeholder Role", role, "is_egc_internal"))
+
+
+def _has_portal_access(user: str | None, project: str, stakeholder_role: str | None = None) -> bool:
 	if not user:
 		return False
-	if _has_bypass_role(user):
+	if _has_bypass_role(user) or _is_internal_stakeholder_role(stakeholder_role):
 		return True
 	return bool(frappe.db.exists("User Permission", {"user": user, "allow": "Project", "for_value": project}))
 
@@ -107,7 +122,18 @@ def get_directory(project: str) -> list[dict]:
 		# access" here despite genuinely seeing every project — `is_admin_bypass` lets the UI show
 		# what's actually true instead.
 		row["is_admin_bypass"] = row.person in bypass_persons
-		row["has_portal_access"] = row.person in portal_access_users or row["is_admin_bypass"]
+		# An internal stakeholder never gets a scoping User Permission (see grant_portal_access) —
+		# they read as unscoped-but-access-granted once their role sync has actually run (i.e.
+		# they hold at least one EGC role already), same reasoning as is_admin_bypass above, just
+		# for a different population. Before that first sync (no login yet, or granted before
+		# this fix existed and not yet re-synced) they correctly still show "No login"/"Access
+		# granted" like anyone else — this only recognizes a state that's already true.
+		row["is_internal_unscoped"] = bool(
+			row["is_egc_internal"] and row.person and portal_roles_by_person.get(row.person) and not row["is_admin_bypass"]
+		)
+		row["has_portal_access"] = (
+			row.person in portal_access_users or row["is_admin_bypass"] or row["is_internal_unscoped"]
+		)
 		row["portal_roles"] = portal_roles_by_person.get(row.person, [])
 		if row.organization_type == "Other":
 			# A deliberately ad-hoc organization — never a Customer/Supplier record, so there's
@@ -147,8 +173,10 @@ def grant_portal_access(project: str, row_name: str, email: str | None = None) -
 	caused a real regression: an admin (System Manager) granting themselves access lost visibility
 	of every other project. Whatever roles this person's Stakeholder Role template implies are
 	applied automatically (`project_profile.sync_roles_from_stakeholder_role`, additive-only), and
-	a bypass-role holder (`constants.PROJECT_VISIBILITY_BYPASS_ROLES`) is never scoped with a User
-	Permission at all — they already see everything; adding one would only ever narrow them."""
+	neither a bypass-role holder (`constants.PROJECT_VISIBILITY_BYPASS_ROLES`) nor an internal
+	stakeholder (`EGC Stakeholder Role.is_egc_internal`) is ever scoped with a User Permission —
+	both already need to see across projects as part of their own role; adding one would only ever
+	narrow them, exactly the same regression as the admin case above, just for internal staff."""
 	validators.require_project_permission(project, "write")
 
 	stakeholder = frappe.get_doc("EGC Project Stakeholder", row_name)
@@ -180,8 +208,8 @@ def grant_portal_access(project: str, row_name: str, email: str | None = None) -
 
 	project_profile.sync_roles_from_stakeholder_role(user, stakeholder.role)
 
-	is_first_grant = not _has_portal_access(user, project)
-	if not _has_bypass_role(user):
+	is_first_grant = not _has_portal_access(user, project, stakeholder.role)
+	if not _has_bypass_role(user) and not _is_internal_stakeholder_role(stakeholder.role):
 		add_user_permission("Project", project, user, ignore_permissions=True)
 
 	if is_first_grant:

@@ -135,11 +135,18 @@ function open_add_dialog() {
 					if (!person) return;
 					const info = await get_person_info(person).catch(() => null);
 					if (!info) return;
-					dialog.set_value("party_name", info.party_name || "");
-					dialog.set_value("organization_type", info.organization_type || "Customer");
-					dialog.set_value("organization", info.organization || "");
-					dialog.set_value("email", info.email || "");
-					dialog.set_value("phone", info.phone || "");
+					// Auto-fill only ever fills a still-blank field — never overwrites something
+					// the user already typed/picked. Picking Person can happen at any point while
+					// filling this form, not only first; a brand-new person has no resolvable
+					// organization (info.organization is blank), and without this guard that blank
+					// would silently wipe out an Organization the user had already chosen.
+					if (!dialog.get_value("party_name")) dialog.set_value("party_name", info.party_name || "");
+					if (!dialog.get_value("organization") && !dialog.get_value("organization_label")) {
+						dialog.set_value("organization_type", info.organization_type || "Customer");
+						dialog.set_value("organization", info.organization || "");
+					}
+					if (!dialog.get_value("email")) dialog.set_value("email", info.email || "");
+					if (!dialog.get_value("phone")) dialog.set_value("phone", info.phone || "");
 				},
 			},
 			{ fieldname: "party_name", fieldtype: "Data", label: __("Party Name") },
@@ -387,6 +394,9 @@ function confirm_revoke_access(row) {
 								<span v-if="row.is_admin_bypass" class="indicator-pill blue" :title="row.portal_roles.join(', ')">
 									{{ __("Admin — sees all projects") }}
 								</span>
+								<span v-else-if="row.is_internal_unscoped" class="indicator-pill blue" :title="row.portal_roles.join(', ')">
+									{{ __("Internal — sees all projects") }}
+								</span>
 								<span v-else-if="row.has_portal_access" class="indicator-pill green" :title="row.portal_roles.join(', ')">
 									{{ __("Access granted") }}
 								</span>
@@ -397,7 +407,7 @@ function confirm_revoke_access(row) {
 									{{ __("Change Role") }}
 								</button>
 								<button
-									v-if="row.has_portal_access && !row.is_admin_bypass"
+									v-if="row.has_portal_access && !row.is_admin_bypass && !row.is_internal_unscoped"
 									type="button"
 									class="btn btn-xs btn-default"
 									@click.stop="confirm_revoke_access(row)"
