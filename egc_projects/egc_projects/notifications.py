@@ -246,6 +246,22 @@ def _send_email(
 	`email-header-title`/`btn btn-primary`/`text-muted text-small` classes aren't decoration —
 	they're the exact vocabulary `frappe/templates/emails/login_with_email_link.html` itself uses,
 	styled for free by the same CSS `with_container` pulls in.
+
+	Deliberately NOT `now=True`. Caught live, root-caused against `frappe/email/__init__.py`:
+	`now=True` doesn't send inline — it registers the real send as a `frappe.db.after_commit`
+	callback, which Frappe's own framework runs immediately after this request's transaction
+	commits, still inside the same request/response cycle. A send failure there (this site's
+	`no-reply` Email Account currently has an undecryptable password — a site_config encryption-
+	key mismatch, not an application bug) throws an uncaught exception at that point, which
+	crashes the response as a 500 even though the actual work (submitting a document for review,
+	here) had already committed successfully — every caller of this function was silently
+	vulnerable to that on live, not just newly-added ones. Leaving `now` unset restores Frappe's
+	default `delayed=True` behavior: the email is queued normally and sent later by the regular
+	scheduled Email Queue flush, on its own request cycle — a failure there never touches the
+	user's own request, exactly like this app's other, already-graceful "Failed to send email"
+	cases. Email is already documented as a best-effort, additive channel on top of the in-app
+	Notification Log/ToDo (the actually-actionable mechanism) — a few minutes' delivery delay is
+	a fully acceptable trade for a live request never crashing over a downstream mail problem.
 	"""
 	if not user or user == "Administrator":
 		return
@@ -262,7 +278,6 @@ def _send_email(
 		subject=subject,
 		message=content,
 		with_container=True,
-		now=True,
 	)
 
 
