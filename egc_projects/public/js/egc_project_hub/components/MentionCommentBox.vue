@@ -40,6 +40,13 @@ import { get_directory } from "./directory_api";
 const props = defineProps({
 	project: { type: String, required: true },
 	posting: { type: Boolean, default: false },
+	// Inline-edit mode (CommentCard.vue's "Edit"): strips the avatar/header/own-button chrome
+	// (comment.js's make_wrapper()) down to a bare editor — matching Frappe core's own
+	// make_editable() (form_timeline.js), which uses this exact same no_wrapper:true for the
+	// identical purpose. With no chrome there's no built-in submit button either, so the parent
+	// is expected to supply its own Save/Discard pair and read getValue() directly.
+	noWrapper: { type: Boolean, default: false },
+	initialValue: { type: String, default: "" },
 });
 const emit = defineEmits(["submit"]);
 
@@ -86,6 +93,7 @@ onMounted(async () => {
 			render_input: true,
 			only_input: true,
 			enable_mentions: true,
+			no_wrapper: props.noWrapper,
 			df: { fieldtype: "Comment", fieldname: "comment" },
 			on_submit: (value) => {
 				if (!strip_html(value || "").trim() && !(value || "").includes("img")) return;
@@ -95,6 +103,8 @@ onMounted(async () => {
 	} finally {
 		ControlTextEditor.prototype.get_mention_options = original_get_mention_options;
 	}
+	if (props.initialValue) control.set_value(props.initialValue);
+	if (props.noWrapper) control.quill?.focus();
 });
 
 onBeforeUnmount(() => {
@@ -114,7 +124,11 @@ function clear() {
 	control?.clear();
 }
 
-defineExpose({ clear });
+function getValue() {
+	return control?.get_value() || "";
+}
+
+defineExpose({ clear, getValue });
 </script>
 
 <template>
@@ -126,6 +140,21 @@ defineExpose({ clear });
 	     override never matches, and the editor renders at a jarring 100px minimum height with a
 	     single line of text stranded at the top. Using Frappe's real class here instead of a
 	     `hub-`-prefixed one of this app's own is what makes it look like the native desk comment
-	     box, not a coincidence of similar CSS. -->
-	<div ref="containerRef" class="comment-box"></div>
+	     box, not a coincidence of similar CSS.
+
+	     `no_wrapper` mode never creates a `.comment-input-container` at all (comment.js's own
+	     make_wrapper()), so that override can't match regardless of this div's own class — a
+	     second, narrowly-scoped override for exactly that case lives in this component's own
+	     <style> below, not in the app's global stylesheet (this class name is Frappe's own,
+	     shared by every native desk comment box — a global override here would leak onto pages
+	     this app has nothing to do with, the same mistake already made and fixed once this
+	     session for the non-edit case). -->
+	<div ref="containerRef" :class="noWrapper ? 'hub-comment-edit' : 'comment-box'"></div>
 </template>
+
+<style scoped>
+.hub-comment-edit :deep(.ql-editor) {
+	min-height: 48px;
+	max-height: 240px;
+}
+</style>

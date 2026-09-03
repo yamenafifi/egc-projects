@@ -28,8 +28,8 @@ import {
 	update_revision_readiness,
 } from "./documents_api";
 import { get_submittal_detail } from "./submittals_api";
-import { get_comments, add_comment } from "./comments_api";
-import { renderCommentHtml } from "./mention_render";
+import { get_activity, add_comment } from "./comments_api";
+import { openNewEmail } from "./email_composer";
 import { openSubmitForReviewFlow } from "./submit_for_review_flow";
 import { useHubRoute } from "../composables/useHubRoute";
 import { openSubmittalIntent } from "../composables/useOpenSubmittalIntent";
@@ -42,6 +42,8 @@ import StatusPill from "./StatusPill.vue";
 import FilePreview from "./FilePreview.vue";
 import WorkflowStepper from "./WorkflowStepper.vue";
 import MentionCommentBox from "./MentionCommentBox.vue";
+import CommentCard from "./CommentCard.vue";
+import CommunicationCard from "./CommunicationCard.vue";
 
 const props = defineProps({
 	document: { type: String, required: true },
@@ -378,30 +380,43 @@ const workflow_stages = computed(() => {
 // as part of the unified timeline below, not a separate box. ------------------------------------
 
 const comments = ref([]);
+const communications = ref([]);
 const posting_comment = ref(false);
 const commentBoxRef = ref(null);
 const comment_project = computed(() => data.value?.document?.project || null);
 
-async function load_comments() {
+async function load_activity() {
 	try {
-		comments.value = await get_comments("EGC Project Document", props.document);
+		const result = await get_activity("EGC Project Document", props.document);
+		comments.value = result.comments;
+		communications.value = result.communications;
 	} catch (e) {
 		comments.value = [];
+		communications.value = [];
 	}
 }
-watch(() => props.document, load_comments, { immediate: true });
+watch(() => props.document, load_activity, { immediate: true });
 
 async function do_post_comment(content) {
 	posting_comment.value = true;
 	try {
 		await add_comment("EGC Project Document", props.document, content);
 		commentBoxRef.value?.clear();
-		await load_comments();
+		await load_activity();
 	} catch (e) {
 		frappe.msgprint({ title: __("Could Not Post Comment"), message: e.message, indicator: "red" });
 	} finally {
 		posting_comment.value = false;
 	}
+}
+
+function open_new_email() {
+	openNewEmail({
+		referenceDoctype: "EGC Project Document",
+		referenceName: props.document,
+		title: data.value?.document?.title,
+		onClose: load_activity,
+	});
 }
 
 // -- unified timeline: every revision uploaded/issued, every related Submittal cycle
@@ -458,6 +473,9 @@ const timeline_events = computed(() => {
 
 	for (const c of comments.value) {
 		events.push({ type: "comment", key: `comment-${c.name}`, timestamp: c.creation, comment: c });
+	}
+	for (const m of communications.value) {
+		events.push({ type: "communication", key: `communication-${m.name}`, timestamp: m.creation, communication: m });
 	}
 
 	return events.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
@@ -532,6 +550,12 @@ const timeline_events = computed(() => {
 
 			<div class="submittal-page__body">
 				<div class="submittal-main">
+					<div class="submittal-main__header">
+						<h3 class="submittal-main__title">{{ __("Activity") }}</h3>
+						<button type="button" class="btn btn-sm btn-default" @click="open_new_email">
+							{{ __("+ New Email") }}
+						</button>
+					</div>
 					<div class="submittal-timeline">
 						<div v-for="event in timeline_events" :key="event.key" class="submittal-timeline__row">
 							<div class="submittal-timeline__rail">
@@ -580,11 +604,17 @@ const timeline_events = computed(() => {
 								</template>
 
 								<template v-else-if="event.type === 'comment'">
-									<p class="submittal-timeline__headline">
-										<strong>{{ event.comment.owner }}</strong> {{ __("commented") }}
-										<span class="submittal-timeline__when">{{ format_datetime(event.timestamp) }}</span>
-									</p>
-									<p class="submittal-timeline__remarks submittal-timeline__remarks--comment" v-html="renderCommentHtml(event.comment.content)"></p>
+									<CommentCard
+										:comment="event.comment"
+										reference-doctype="EGC Project Document"
+										:reference-name="props.document"
+										:project="comment_project"
+										@changed="load_activity"
+									/>
+								</template>
+
+								<template v-else-if="event.type === 'communication'">
+									<CommunicationCard :communication="event.communication" />
 								</template>
 							</div>
 						</div>
@@ -1035,8 +1065,18 @@ const timeline_events = computed(() => {
 	padding: 8px 10px;
 }
 
-.submittal-timeline__remarks--comment {
-	background: var(--fg-color);
+.submittal-main__header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	margin-bottom: 12px;
+}
+
+.submittal-main__title {
+	font-size: var(--text-lg, 16px);
+	font-weight: 600;
+	color: var(--text-color);
+	margin: 0;
 }
 
 .submittal-composer {

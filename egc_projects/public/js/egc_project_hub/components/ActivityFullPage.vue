@@ -32,8 +32,8 @@ import {
 	person_link_filter,
 	organization_link_filter,
 } from "./directory_helpers";
-import { get_comments, add_comment } from "./comments_api";
-import { renderCommentHtml } from "./mention_render";
+import { get_activity, add_comment } from "./comments_api";
+import { openNewEmail } from "./email_composer";
 import { useHubResource } from "../composables/useHubResource";
 import { useHubRoute } from "../composables/useHubRoute";
 import { DEPENDENCY_TYPES } from "../../shared_constants";
@@ -44,6 +44,8 @@ import ErrorState from "./ErrorState.vue";
 import EmptyState from "./EmptyState.vue";
 import StatusPill from "./StatusPill.vue";
 import MentionCommentBox from "./MentionCommentBox.vue";
+import CommentCard from "./CommentCard.vue";
+import CommunicationCard from "./CommunicationCard.vue";
 
 const props = defineProps({
 	activity: { type: String, required: true },
@@ -442,29 +444,42 @@ function confirm_remove_link(row) {
 // -- comments (generic thread — comments.py's only gate is read access to the Activity itself) --
 
 const comments = ref([]);
+const communications = ref([]);
 const posting_comment = ref(false);
 const commentBoxRef = ref(null);
 
-async function load_comments() {
+async function load_activity() {
 	try {
-		comments.value = await get_comments("EGC Activity", props.activity);
+		const result = await get_activity("EGC Activity", props.activity);
+		comments.value = result.comments;
+		communications.value = result.communications;
 	} catch (e) {
 		comments.value = [];
+		communications.value = [];
 	}
 }
-watch(() => props.activity, load_comments, { immediate: true });
+watch(() => props.activity, load_activity, { immediate: true });
 
 async function do_post_comment(content) {
 	posting_comment.value = true;
 	try {
 		await add_comment("EGC Activity", props.activity, content);
 		commentBoxRef.value?.clear();
-		await load_comments();
+		await load_activity();
 	} catch (e) {
 		frappe.msgprint({ title: __("Could Not Post Comment"), message: e.message, indicator: "red" });
 	} finally {
 		posting_comment.value = false;
 	}
+}
+
+function open_new_email() {
+	openNewEmail({
+		referenceDoctype: "EGC Activity",
+		referenceName: props.activity,
+		title: data.value?.activity?.activity_name,
+		onClose: load_activity,
+	});
 }
 
 // -- unified timeline: everything that happened, merged and sorted by real timestamp — every
@@ -496,6 +511,7 @@ function event_icon(event) {
 	}
 	if (event.type === "link" || event.type === "dependency" || event.type === "assignment") return "+";
 	if (event.type === "comment") return "●";
+	if (event.type === "communication") return "✉";
 	return "○";
 }
 
@@ -532,6 +548,9 @@ const timeline_events = computed(() => {
 
 	for (const c of comments.value) {
 		events.push({ type: "comment", key: `comment-${c.name}`, timestamp: c.creation, owner: c.owner, comment: c });
+	}
+	for (const m of communications.value) {
+		events.push({ type: "communication", key: `communication-${m.name}`, timestamp: m.creation, communication: m });
 	}
 
 	return events.filter((e) => e.timestamp).sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
@@ -597,6 +616,12 @@ const timeline_events = computed(() => {
 
 			<div class="activity-page__body">
 				<div class="activity-main">
+					<div class="activity-main__header">
+						<h3 class="activity-main__title">{{ __("Activity") }}</h3>
+						<button type="button" class="btn btn-sm btn-default" @click="open_new_email">
+							{{ __("+ New Email") }}
+						</button>
+					</div>
 					<div class="activity-timeline">
 						<EmptyState v-if="!timeline_events.length" :title="__('Nothing recorded yet')" />
 						<div v-for="event in timeline_events" :key="event.key" class="activity-timeline__row">
@@ -659,11 +684,17 @@ const timeline_events = computed(() => {
 								</template>
 
 								<template v-else-if="event.type === 'comment'">
-									<p class="activity-timeline__headline">
-										<strong>{{ event.owner }}</strong> {{ __("commented") }}
-										<span class="activity-timeline__when">{{ format_datetime(event.timestamp) }}</span>
-									</p>
-									<p class="activity-timeline__remarks" v-html="renderCommentHtml(event.comment.content)"></p>
+									<CommentCard
+										:comment="event.comment"
+										reference-doctype="EGC Activity"
+										:reference-name="props.activity"
+										:project="props.project"
+										@changed="load_activity"
+									/>
+								</template>
+
+								<template v-else-if="event.type === 'communication'">
+									<CommunicationCard :communication="event.communication" />
 								</template>
 							</div>
 						</div>
@@ -1136,15 +1167,18 @@ const timeline_events = computed(() => {
 	padding: 8px 10px;
 }
 
-.activity-timeline__remarks {
-	margin: 6px 0 0;
-	font-size: var(--text-sm);
+.activity-main__header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	margin-bottom: 12px;
+}
+
+.activity-main__title {
+	font-size: var(--text-lg, 16px);
+	font-weight: 600;
 	color: var(--text-color);
-	white-space: pre-wrap;
-	background: var(--fg-color);
-	border: 1px solid var(--border-color);
-	border-radius: var(--border-radius);
-	padding: 8px 10px;
+	margin: 0;
 }
 
 .activity-composer {

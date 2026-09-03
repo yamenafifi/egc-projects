@@ -22,6 +22,18 @@ export function get_comments(reference_doctype, reference_name) {
 	return call(`${COMMENTS_MODULE}.get_comments`, { reference_doctype, reference_name });
 }
 
+export function get_activity(reference_doctype, reference_name) {
+	return call(`${COMMENTS_MODULE}.get_activity`, { reference_doctype, reference_name });
+}
+
 export function add_comment(reference_doctype, reference_name, content) {
 	return call(`${COMMENTS_MODULE}.add_comment`, { reference_doctype, reference_name, content });
+}
+
+export function update_comment(reference_doctype, reference_name, comment_name, content) {
+	return call(`${COMMENTS_MODULE}.update_comment`, { reference_doctype, reference_name, comment_name, content });
+}
+
+export function delete_comment(reference_doctype, reference_name, comment_name) {
+	return call(`${COMMENTS_MODULE}.delete_comment`, { reference_doctype, reference_name, comment_name });
 }

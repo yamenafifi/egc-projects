@@ -32,8 +32,8 @@ import { get_directory_person_emails, person_link_filter } from "./directory_hel
 import { link_activity_record, unlink_activity_record } from "./activities_api";
 import { add_assignment, remove_assignment } from "./assignments_api";
 import { get_person_info } from "./project_profile_api";
-import { get_comments, add_comment } from "./comments_api";
-import { renderCommentHtml } from "./mention_render";
+import { get_activity, add_comment } from "./comments_api";
+import { openNewEmail } from "./email_composer";
 import { useHubRoute } from "../composables/useHubRoute";
 import { openDocumentIntent } from "../composables/useOpenDocumentIntent";
 import { openActivityIntent } from "../composables/useOpenActivityIntent";
@@ -42,6 +42,8 @@ import LoadingState from "./LoadingState.vue";
 import ErrorState from "./ErrorState.vue";
 import EmptyState from "./EmptyState.vue";
 import StatusPill from "./StatusPill.vue";
+import CommentCard from "./CommentCard.vue";
+import CommunicationCard from "./CommunicationCard.vue";
 import WorkflowStepper from "./WorkflowStepper.vue";
 import MentionCommentBox from "./MentionCommentBox.vue";
 
@@ -738,29 +740,42 @@ function confirm_remove_document(row) {
 // of the unified timeline below, not a separate box — see `timeline_events`. -------------------
 
 const comments = ref([]);
+const communications = ref([]);
 const posting_comment = ref(false);
 const commentBoxRef = ref(null);
 
-async function load_comments() {
+async function load_activity() {
 	try {
-		comments.value = await get_comments("EGC Submittal", props.submittal);
+		const result = await get_activity("EGC Submittal", props.submittal);
+		comments.value = result.comments;
+		communications.value = result.communications;
 	} catch (e) {
 		comments.value = [];
+		communications.value = [];
 	}
 }
-watch(() => props.submittal, load_comments, { immediate: true });
+watch(() => props.submittal, load_activity, { immediate: true });
 
 async function do_post_comment(content) {
 	posting_comment.value = true;
 	try {
 		await add_comment("EGC Submittal", props.submittal, content);
 		commentBoxRef.value?.clear();
-		await load_comments();
+		await load_activity();
 	} catch (e) {
 		frappe.msgprint({ title: __("Could Not Post Comment"), message: e.message, indicator: "red" });
 	} finally {
 		posting_comment.value = false;
 	}
+}
+
+function open_new_email() {
+	openNewEmail({
+		referenceDoctype: "EGC Submittal",
+		referenceName: props.submittal,
+		title: data.value?.submittal?.title,
+		onClose: load_activity,
+	});
 }
 
 function open_link_activity_dialog() {
@@ -813,6 +828,7 @@ function event_icon(event) {
 	if (event.type === "submitted") return "↑";
 	if (event.type === "step_assigned") return "→";
 	if (event.type === "comment") return "●";
+	if (event.type === "communication") return "✉";
 	const response = event_response(event);
 	if (RESPONSE_IS_FINAL_OK.includes(response)) return "✓";
 	if (response === "Rejected") return "✕";
@@ -863,21 +879,28 @@ const timeline_events = computed(() => {
 		return { anchor: s.creation, events };
 	});
 
-	for (const c of comments.value) {
-		const comment_time = new Date(c.creation).getTime();
+	function insert_by_time(item) {
+		const item_time = new Date(item.timestamp).getTime();
 		let bucket = groups[0];
 		for (const g of groups) {
-			if (new Date(g.anchor).getTime() <= comment_time) bucket = g;
+			if (new Date(g.anchor).getTime() <= item_time) bucket = g;
 		}
-		if (!bucket) continue;
+		if (!bucket) return;
 		let insert_at = bucket.events.length;
 		for (let i = 0; i < bucket.events.length; i++) {
-			if (new Date(bucket.events[i].timestamp).getTime() > comment_time) {
+			if (new Date(bucket.events[i].timestamp).getTime() > item_time) {
 				insert_at = i;
 				break;
 			}
 		}
-		bucket.events.splice(insert_at, 0, { type: "comment", key: `comment-${c.name}`, timestamp: c.creation, comment: c });
+		bucket.events.splice(insert_at, 0, item);
+	}
+
+	for (const c of comments.value) {
+		insert_by_time({ type: "comment", key: `comment-${c.name}`, timestamp: c.creation, comment: c });
+	}
+	for (const m of communications.value) {
+		insert_by_time({ type: "communication", key: `communication-${m.name}`, timestamp: m.creation, communication: m });
 	}
 
 	return groups.flatMap((g) => g.events);
@@ -967,6 +990,12 @@ const timeline_events = computed(() => {
 
 				<div class="submittal-page__body">
 					<div class="submittal-main">
+						<div class="submittal-main__header">
+							<h3 class="submittal-main__title">{{ __("Activity") }}</h3>
+							<button type="button" class="btn btn-sm btn-default" @click="open_new_email">
+								{{ __("+ New Email") }}
+							</button>
+						</div>
 						<div class="submittal-timeline">
 							<div v-for="event in timeline_events" :key="event.key" class="submittal-timeline__row">
 								<div class="submittal-timeline__rail">
@@ -1036,11 +1065,17 @@ const timeline_events = computed(() => {
 									</template>
 
 									<template v-else-if="event.type === 'comment'">
-										<p class="submittal-timeline__headline">
-											<strong>{{ event.comment.owner }}</strong> {{ __("commented") }}
-											<span class="submittal-timeline__when">{{ format_datetime(event.timestamp) }}</span>
-										</p>
-										<p class="submittal-timeline__remarks submittal-timeline__remarks--comment" v-html="renderCommentHtml(event.comment.content)"></p>
+										<CommentCard
+											:comment="event.comment"
+											reference-doctype="EGC Submittal"
+											:reference-name="props.submittal"
+											:project="props.project"
+											@changed="load_activity"
+										/>
+									</template>
+
+									<template v-else-if="event.type === 'communication'">
+										<CommunicationCard :communication="event.communication" />
 									</template>
 								</div>
 							</div>
@@ -1497,8 +1532,18 @@ const timeline_events = computed(() => {
 	padding: 8px 10px;
 }
 
-.submittal-timeline__remarks--comment {
-	background: var(--fg-color);
+.submittal-main__header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	margin-bottom: 12px;
+}
+
+.submittal-main__title {
+	font-size: var(--text-lg, 16px);
+	font-weight: 600;
+	color: var(--text-color);
+	margin: 0;
 }
 
 .submittal-timeline__attachment {

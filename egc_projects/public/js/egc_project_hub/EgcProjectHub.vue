@@ -297,4 +297,104 @@ watch(context, (ctx) => {
    since `.comment-box` is Frappe's own class, used by every native desk Timeline, this
    stylesheet must never add a blanket rule for it here (this file's <style> is global, not
    scoped) or it would leak onto every other comment box in the whole system. */
+
+/* CommentCard.vue / CommunicationCard.vue — shared by all three detail pages' activity feeds. */
+.hub-comment-card {
+	border: 1px solid var(--border-color);
+	border-radius: var(--border-radius);
+	background: var(--fg-color);
+	padding: 10px 12px;
+}
+
+.hub-comment-card__header {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	font-size: var(--text-sm);
+	color: var(--text-color);
+	flex-wrap: wrap;
+}
+
+.hub-comment-card__when {
+	color: var(--text-muted);
+	font-size: var(--text-xs);
+}
+
+.hub-comment-card__status {
+	font-size: var(--text-xs);
+}
+
+.hub-comment-card__actions {
+	margin-left: auto;
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	font-size: var(--text-xs);
+}
+
+.hub-comment-card__menu {
+	position: relative;
+}
+
+.hub-comment-card__menu-btn {
+	background: none;
+	border: none;
+	cursor: pointer;
+	color: var(--text-muted);
+	padding: 0 4px;
+	font-weight: 700;
+	line-height: 1;
+}
+
+.hub-comment-card__menu-list {
+	position: absolute;
+	right: 0;
+	top: 100%;
+	z-index: 5;
+	background: var(--fg-color);
+	border: 1px solid var(--border-color);
+	border-radius: var(--border-radius);
+	box-shadow: var(--shadow-md, 0 2px 6px rgba(0, 0, 0, 0.12));
+	min-width: 100px;
+}
+
+.hub-comment-card__menu-list button {
+	display: block;
+	width: 100%;
+	text-align: left;
+	padding: 6px 10px;
+	background: none;
+	border: none;
+	cursor: pointer;
+	color: var(--text-color);
+	font-size: var(--text-sm);
+}
+
+.hub-comment-card__menu-list button:hover {
+	background: var(--fg-hover-color, var(--control-bg));
+}
+
+.hub-comment-card__body {
+	margin-top: 6px;
+	font-size: var(--text-sm);
+	color: var(--text-color);
+	white-space: pre-wrap;
+	word-break: break-word;
+}
+
+.hub-comment-card__email-meta {
+	margin-top: 4px;
+	font-size: var(--text-xs);
+	color: var(--text-muted);
+}
+
+.hub-comment-card__edit {
+	margin-top: 6px;
+}
+
+.hub-comment-card__edit-actions {
+	display: flex;
+	gap: 6px;
+	margin-top: 6px;
+}
 </style>
