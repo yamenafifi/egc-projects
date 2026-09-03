@@ -5,25 +5,19 @@
 // frappe/core/doctype/comment/comment.py) unconditionally runs it through `sanitize_html()`
 // (frappe/utils/html_utils.py) on every save, old comments and new alike: a real HTML parser
 // (`nh3`, a Rust binding of the `ammonia` sanitizer) that strips anything not on its own
-// allowlist and re-serializes the rest as well-formed, safe HTML. So `content` at rest is
-// already genuinely safe markup, not raw user input — a second escape pass here would be
-// redundant at best and actively wrong at worst (confirmed directly: it double-escaped already-
-// safe entities sanitize_html had produced, corrupting the display of anything that wasn't a
-// mention). `v-html`-ing it directly is the correct move, not a shortcut around one.
+// allowlist and re-serializes the rest as well-formed, safe HTML — including MentionCommentBox.vue's
+// own Quill-produced rich text (bold/italic/lists/links/...) and its `<span class="mention"
+// data-id="...">` tags (`generic_attribute_prefixes={"data-"}` in html_utils.py specifically
+// keeps `data-id` intact, since Frappe core's own `notify_mentions` needs that exact shape to
+// fire the mention notification). So `content` at rest is already genuinely safe markup, not raw
+// user input — `v-html`-ing it directly is correct, not a shortcut around one.
 //
-// The one thing this still does: sanitize_html's own allowlist includes `data-*` generically
-// (`generic_attribute_prefixes={"data-"}` in html_utils.py) specifically so a `<span
-// class="mention" data-id="...">` — the exact shape MentionCommentBox.vue's own composer
-// produces, and the shape Frappe core's own `notify_mentions` (frappe/desk/notifications.py)
-// scans stored content for to fire the mention notification — survives sanitization intact. This
-// adds this app's own visual styling on top of that survived span, without touching or
-// re-interpreting anything else in the content.
+// No transform needed either: `.mention` and `.ql-editor` already have real, theme-aware CSS
+// loaded globally on every desk page (frappe/public/scss/common/quill.scss) — this app doesn't
+// need to invent its own chip styling on top, and doing so would just fight Frappe's own.
 
-/** @returns {string} safe HTML for `v-html` — content is already sanitized; this only re-tags
- * Frappe's own `.mention` spans with this app's own chip styling. */
+/** @returns {string} safe HTML for `v-html` — never bind `content` directly without this (keeps
+ * a null-safe default and one documented place to point at for why this is safe). */
 export function renderCommentHtml(content) {
-	const container = document.createElement("div");
-	container.innerHTML = content ?? "";
-	container.querySelectorAll(".mention").forEach((el) => el.classList.add("hub-mention-chip"));
-	return container.innerHTML;
+	return content || "";
 }

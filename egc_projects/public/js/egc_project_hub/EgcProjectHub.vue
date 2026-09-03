@@ -289,80 +289,10 @@ watch(context, (ctx) => {
 	margin-bottom: 12px;
 }
 
-/* MentionCommentBox.vue (composer) + mention_render.js (rendered display, in every detail
-   page's timeline) — shared so both stay visually identical, on the same tokens as the rest of
-   this stylesheet. */
-.hub-mention-box {
-	display: flex;
-	flex-direction: column;
-	gap: 8px;
-}
-
-.hub-mention-box__editor {
-	min-height: 60px;
-	white-space: pre-wrap;
-	word-break: break-word;
-	cursor: text;
-}
-
-.hub-mention-box__editor:empty::before {
-	content: attr(data-placeholder);
-	color: var(--text-muted);
-	pointer-events: none;
-}
-
-/* Same tokens Frappe core's own `.indicator-pill.blue` uses (indicator.scss: `--bg-blue` /
-   `--text-on-blue`) rather than `--egc-accent` — that variable resolves to this site's dark
-   near-black primary color (verified live: `--primary` here is `#171717`, not a blue), which
-   made an early version of this chip nearly unreadable against the timeline's dark background.
-   `--bg-blue`/`--text-on-blue` are the pairing Frappe itself keeps legible across both themes. */
-.hub-mention-box__chip,
-.hub-mention-chip {
-	display: inline-flex;
-	background: var(--bg-blue);
-	color: var(--text-on-blue);
-	border-radius: 3px;
-	padding: 0 4px;
-	font-weight: 600;
-	white-space: nowrap;
-}
-
-.hub-mention-box__suggestions {
-	display: flex;
-	flex-direction: column;
-	border: 1px solid var(--border-color);
-	border-radius: var(--border-radius);
-	background: var(--fg-color);
-	max-height: 220px;
-	overflow-y: auto;
-	box-shadow: var(--shadow-md, 0 2px 6px rgba(0, 0, 0, 0.12));
-}
-
-.hub-mention-box__suggestion {
-	display: flex;
-	flex-direction: column;
-	align-items: flex-start;
-	gap: 1px;
-	padding: 6px 10px;
-	background: none;
-	border: none;
-	text-align: left;
-	cursor: pointer;
-	color: var(--text-color);
-	font-size: var(--text-sm);
-}
-
-.hub-mention-box__suggestion span {
-	color: var(--text-muted);
-	font-size: var(--text-xs, 11px);
-}
-
-.hub-mention-box__suggestion:hover,
-.hub-mention-box__suggestion--active {
-	background: var(--fg-hover-color, var(--control-bg));
-}
-
-.hub-mention-box__submit {
-	align-self: flex-end;
+/* MentionCommentBox.vue wraps Frappe's own comment control (comment.js), which brings its own
+   complete styling (quill.scss, timeline.scss) already loaded globally on every desk page — no
+   styling of its internals needed or wanted here. This just gives it room. */
+.hub-comment-box {
+	width: 100%;
 }
 </style>

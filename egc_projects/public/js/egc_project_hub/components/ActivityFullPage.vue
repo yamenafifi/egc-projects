@@ -670,13 +670,7 @@ const timeline_events = computed(() => {
 					</div>
 
 					<div class="activity-composer">
-						<MentionCommentBox
-							ref="commentBoxRef"
-							:project="props.project"
-							:posting="posting_comment"
-							:placeholder="__('Add a comment… (@ to mention someone on this project)')"
-							@submit="do_post_comment"
-						/>
+						<MentionCommentBox ref="commentBoxRef" :posting="posting_comment" @submit="do_post_comment" />
 					</div>
 				</div>
 
@@ -1154,16 +1148,10 @@ const timeline_events = computed(() => {
 }
 
 .activity-composer {
-	display: flex;
-	flex-direction: column;
-	gap: 8px;
-	align-items: flex-end;
-	margin-left: 36px;
-}
-
-.activity-composer textarea {
+	/* MentionCommentBox.vue renders Frappe's own comment control, which lays out its own
+	   avatar/editor/button internally (comment.js's make_wrapper()) — this just needs to hand it
+	   the full row width, not constrain or indent it the way the old plain <textarea> needed. */
 	width: 100%;
-	resize: vertical;
 }
 
 .activity-sidebar {
