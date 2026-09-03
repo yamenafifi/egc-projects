@@ -670,7 +670,7 @@ const timeline_events = computed(() => {
 					</div>
 
 					<div class="activity-composer">
-						<MentionCommentBox ref="commentBoxRef" :posting="posting_comment" @submit="do_post_comment" />
+						<MentionCommentBox ref="commentBoxRef" :project="props.project" :posting="posting_comment" @submit="do_post_comment" />
 					</div>
 				</div>
 

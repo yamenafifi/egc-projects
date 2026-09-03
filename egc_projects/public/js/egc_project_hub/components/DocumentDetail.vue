@@ -380,6 +380,7 @@ const workflow_stages = computed(() => {
 const comments = ref([]);
 const posting_comment = ref(false);
 const commentBoxRef = ref(null);
+const comment_project = computed(() => data.value?.document?.project || null);
 
 async function load_comments() {
 	try {
@@ -591,7 +592,7 @@ const timeline_events = computed(() => {
 					</div>
 
 					<div class="submittal-composer">
-						<MentionCommentBox ref="commentBoxRef" :posting="posting_comment" @submit="do_post_comment" />
+						<MentionCommentBox ref="commentBoxRef" :project="comment_project" :posting="posting_comment" @submit="do_post_comment" />
 					</div>
 				</div>
 
