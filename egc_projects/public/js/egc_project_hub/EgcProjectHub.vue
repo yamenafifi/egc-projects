@@ -289,10 +289,12 @@ watch(context, (ctx) => {
 	margin-bottom: 12px;
 }
 
-/* MentionCommentBox.vue wraps Frappe's own comment control (comment.js), which brings its own
-   complete styling (quill.scss, timeline.scss) already loaded globally on every desk page — no
-   styling of its internals needed or wanted here. This just gives it room. */
-.hub-comment-box {
-	width: 100%;
-}
+/* MentionCommentBox.vue mounts Frappe's own comment control inside a real `.comment-box` div —
+   Frappe's own class, deliberately, not a `hub-`-prefixed one of this app's (see that
+   component's own template comment for why the exact class name matters). Nothing to add here:
+   `.comment-box` is block-level by default and its parent (`.submittal-composer`/
+   `.activity-composer`, both plain `width: 100%` blocks) already gives it the full row — and
+   since `.comment-box` is Frappe's own class, used by every native desk Timeline, this
+   stylesheet must never add a blanket rule for it here (this file's <style> is global, not
+   scoped) or it would leak onto every other comment box in the whole system. */
 </style>

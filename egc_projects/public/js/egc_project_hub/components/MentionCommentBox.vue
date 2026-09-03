@@ -118,5 +118,14 @@ defineExpose({ clear });
 </script>
 
 <template>
-	<div ref="containerRef" class="hub-comment-box"></div>
+	<!-- `comment-box`, not a made-up class: Frappe's own footer.js appends this exact control
+	     into a `.comment-box` ancestor, and desk/form.scss's ONLY ql-editor override targeted
+	     at it (`.comment-box .comment-input-container .frappe-control .ql-editor { min-height:
+	     24px; ... }`) is what shrinks the control back down from the generic 100px every
+	     `.ql-bubble .ql-editor` gets (common/quill.scss) — without this exact class name that
+	     override never matches, and the editor renders at a jarring 100px minimum height with a
+	     single line of text stranded at the top. Using Frappe's real class here instead of a
+	     `hub-`-prefixed one of this app's own is what makes it look like the native desk comment
+	     box, not a coincidence of similar CSS. -->
+	<div ref="containerRef" class="comment-box"></div>
 </template>
