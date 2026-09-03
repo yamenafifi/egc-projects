@@ -29,6 +29,7 @@ import {
 } from "./documents_api";
 import { get_submittal_detail } from "./submittals_api";
 import { get_comments, add_comment } from "./comments_api";
+import { renderCommentHtml } from "./mention_render";
 import { openSubmitForReviewFlow } from "./submit_for_review_flow";
 import { useHubRoute } from "../composables/useHubRoute";
 import { openSubmittalIntent } from "../composables/useOpenSubmittalIntent";
@@ -40,6 +41,7 @@ import EmptyState from "./EmptyState.vue";
 import StatusPill from "./StatusPill.vue";
 import FilePreview from "./FilePreview.vue";
 import WorkflowStepper from "./WorkflowStepper.vue";
+import MentionCommentBox from "./MentionCommentBox.vue";
 
 const props = defineProps({
 	document: { type: String, required: true },
@@ -376,8 +378,9 @@ const workflow_stages = computed(() => {
 // as part of the unified timeline below, not a separate box. ------------------------------------
 
 const comments = ref([]);
-const new_comment = ref("");
 const posting_comment = ref(false);
+const commentBoxRef = ref(null);
+const comment_project = computed(() => data.value?.document?.project || null);
 
 async function load_comments() {
 	try {
@@ -388,12 +391,11 @@ async function load_comments() {
 }
 watch(() => props.document, load_comments, { immediate: true });
 
-async function do_post_comment() {
-	if (!new_comment.value.trim()) return;
+async function do_post_comment(content) {
 	posting_comment.value = true;
 	try {
-		await add_comment("EGC Project Document", props.document, new_comment.value);
-		new_comment.value = "";
+		await add_comment("EGC Project Document", props.document, content);
+		commentBoxRef.value?.clear();
 		await load_comments();
 	} catch (e) {
 		frappe.msgprint({ title: __("Could Not Post Comment"), message: e.message, indicator: "red" });
@@ -582,7 +584,7 @@ const timeline_events = computed(() => {
 										<strong>{{ event.comment.owner }}</strong> {{ __("commented") }}
 										<span class="submittal-timeline__when">{{ format_datetime(event.timestamp) }}</span>
 									</p>
-									<p class="submittal-timeline__remarks submittal-timeline__remarks--comment">{{ event.comment.content }}</p>
+									<p class="submittal-timeline__remarks submittal-timeline__remarks--comment" v-html="renderCommentHtml(event.comment.content)"></p>
 								</template>
 							</div>
 						</div>
@@ -590,20 +592,13 @@ const timeline_events = computed(() => {
 					</div>
 
 					<div class="submittal-composer">
-						<textarea
-							v-model="new_comment"
-							class="form-control"
-							rows="2"
-							:placeholder="__('Add a comment…')"
-						></textarea>
-						<button
-							type="button"
-							class="btn btn-sm btn-primary"
-							:disabled="posting_comment || !new_comment.trim()"
-							@click="do_post_comment"
-						>
-							{{ __("Post") }}
-						</button>
+						<MentionCommentBox
+							ref="commentBoxRef"
+							:project="comment_project"
+							:posting="posting_comment"
+							:placeholder="__('Add a comment… (@ to mention someone on this project)')"
+							@submit="do_post_comment"
+						/>
 					</div>
 				</div>
 

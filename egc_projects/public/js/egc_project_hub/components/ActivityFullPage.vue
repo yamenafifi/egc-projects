@@ -33,6 +33,7 @@ import {
 	organization_link_filter,
 } from "./directory_helpers";
 import { get_comments, add_comment } from "./comments_api";
+import { renderCommentHtml } from "./mention_render";
 import { useHubResource } from "../composables/useHubResource";
 import { useHubRoute } from "../composables/useHubRoute";
 import { DEPENDENCY_TYPES } from "../../shared_constants";
@@ -42,6 +43,7 @@ import LoadingState from "./LoadingState.vue";
 import ErrorState from "./ErrorState.vue";
 import EmptyState from "./EmptyState.vue";
 import StatusPill from "./StatusPill.vue";
+import MentionCommentBox from "./MentionCommentBox.vue";
 
 const props = defineProps({
 	activity: { type: String, required: true },
@@ -440,8 +442,8 @@ function confirm_remove_link(row) {
 // -- comments (generic thread — comments.py's only gate is read access to the Activity itself) --
 
 const comments = ref([]);
-const new_comment = ref("");
 const posting_comment = ref(false);
+const commentBoxRef = ref(null);
 
 async function load_comments() {
 	try {
@@ -452,12 +454,11 @@ async function load_comments() {
 }
 watch(() => props.activity, load_comments, { immediate: true });
 
-async function do_post_comment() {
-	if (!new_comment.value.trim()) return;
+async function do_post_comment(content) {
 	posting_comment.value = true;
 	try {
-		await add_comment("EGC Activity", props.activity, new_comment.value);
-		new_comment.value = "";
+		await add_comment("EGC Activity", props.activity, content);
+		commentBoxRef.value?.clear();
 		await load_comments();
 	} catch (e) {
 		frappe.msgprint({ title: __("Could Not Post Comment"), message: e.message, indicator: "red" });
@@ -662,17 +663,20 @@ const timeline_events = computed(() => {
 										<strong>{{ event.owner }}</strong> {{ __("commented") }}
 										<span class="activity-timeline__when">{{ format_datetime(event.timestamp) }}</span>
 									</p>
-									<p class="activity-timeline__remarks">{{ event.comment.content }}</p>
+									<p class="activity-timeline__remarks" v-html="renderCommentHtml(event.comment.content)"></p>
 								</template>
 							</div>
 						</div>
 					</div>
 
 					<div class="activity-composer">
-						<textarea v-model="new_comment" class="form-control" rows="2" :placeholder="__('Add a comment…')"></textarea>
-						<button type="button" class="btn btn-sm btn-primary" :disabled="posting_comment || !new_comment.trim()" @click="do_post_comment">
-							{{ __("Post") }}
-						</button>
+						<MentionCommentBox
+							ref="commentBoxRef"
+							:project="props.project"
+							:posting="posting_comment"
+							:placeholder="__('Add a comment… (@ to mention someone on this project)')"
+							@submit="do_post_comment"
+						/>
 					</div>
 				</div>
 
