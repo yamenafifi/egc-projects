@@ -164,7 +164,14 @@ def create_submittal(project: str, **kwargs) -> dict:
 	frappe.has_permission("EGC Submittal", "create", throw=True)
 
 	values = {field: kwargs.get(field) for field in _CREATE_FIELDS if kwargs.get(field) is not None}
-	for required in ("submittal_number", "title", "submittal_type"):
+	# submittal_number deliberately NOT required here — EGCSubmittal.before_insert() already
+	# fills it via code_naming.assign_submittal_code() when left blank, exactly like
+	# create_document() should also defer to EGCProjectDocument's own before_insert. This check
+	# used to demand it anyway, which is stricter than the doctype it's fronting: caught live via
+	# submit_for_review_flow.js's own "leave Type blank to auto-detect from the document" path —
+	# the number can only ever be blank there (nothing to preview a number from before the type
+	# is known), so this made that entire, explicitly-documented path unsubmittable.
+	for required in ("title", "submittal_type"):
 		if not values.get(required):
 			frappe.throw(_("{0} is required.").format(required), exc=frappe.ValidationError)
 

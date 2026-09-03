@@ -72,7 +72,13 @@ const currency_groups = computed(() => {
 });
 
 function format_money(value, currency) {
-	return frappe.format(value || 0, { fieldtype: "Currency", options: currency || undefined });
+	// Deliberately format_currency(), not frappe.format() — frappe.format() wraps a Currency
+	// value in a <div style="text-align:right">…</div> meant for v-html contexts, which renders
+	// as literal markup text in a plain {{ }} interpolation (caught live: real numbers showed up
+	// as "<div style='text-align: right'> 3,026,524.73</div>" verbatim on screen). format_currency()
+	// returns a plain string, matching FinancialsTab.vue's own format_amount()/format_contract_
+	// amount() exactly — see that file's own comment on this same pitfall.
+	return format_currency(value || 0, currency || undefined);
 }
 
 // -- health rollup --------------------------------------------------------------------------

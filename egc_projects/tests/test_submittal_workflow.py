@@ -620,6 +620,32 @@ class TestSubmittalWorkflow(IntegrationTestCase):
 		)
 		self.assertTrue(frappe.db.exists("EGC Submittal", result["name"]))
 
+	def test_create_submittal_with_blank_submittal_number_auto_assigns(self):
+		# Regression, caught live in the Hub: submit_for_review_flow.js's "New Submittal" dialog
+		# explicitly lets Type be left blank ("detect it from the document's own type"), which
+		# means its own live number preview can never fire (it needs Type to compute one) — the
+		# submittal_number sent to create_submittal() in that path is genuinely blank. This
+		# function's own required-field check used to demand it anyway, silently making that
+		# entire documented path unsubmittable. EGCSubmittal.before_insert() already auto-assigns
+		# via code_naming.assign_submittal_code() when blank; this endpoint must defer to that,
+		# not re-impose a stricter requirement in front of it.
+		frappe.set_user(self.manager_user)
+		result = submittals_api.create_submittal(
+			self.project,
+			title="Blank Number Test",
+			submittal_type=self.submittal_type,
+			discipline=self.discipline,
+		)
+		doc = frappe.get_doc("EGC Submittal", result["name"])
+		self.assertTrue(doc.submittal_number)
+
+	def test_create_submittal_still_requires_title_and_type(self):
+		frappe.set_user(self.manager_user)
+		with self.assertRaises(frappe.ValidationError):
+			submittals_api.create_submittal(self.project, submittal_type=self.submittal_type)
+		with self.assertRaises(frappe.ValidationError):
+			submittals_api.create_submittal(self.project, title="No Type")
+
 	def test_get_submittal_detail_includes_steps_and_documents(self):
 		submittal, submission, steps = self._build_submission_with_two_stage_workflow()
 		submission.submit()

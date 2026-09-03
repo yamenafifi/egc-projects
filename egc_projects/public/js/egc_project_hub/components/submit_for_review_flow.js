@@ -148,7 +148,15 @@ export async function openSubmitForReviewFlow({
 				fieldname: "submittal_number",
 				fieldtype: "Data",
 				label: __("Submittal Number"),
-				reqd: 1,
+				// Deliberately NOT reqd — create_submittal()'s own server-side contract already
+				// treats a blank submittal_number as "auto-assign one" (EGCSubmittal.before_insert
+				// -> code_naming.assign_submittal_code), and the live preview below can only ever
+				// populate this when Type is picked directly: it has no way to preview a number
+				// from a Type that's deliberately left blank for server-side auto-detection from
+				// the document's own type. Marking this reqd on a read-only field made "leave Type
+				// blank" — the exact behavior this field's own description invites — permanently
+				// unsubmittable. Caught live: the dialog blocked on "Submittal Number" with no way
+				// to clear it, for every submittal created this way.
 				read_only: 1,
 				default: defaults.submittal_number,
 				description: __(
