@@ -35,6 +35,10 @@ export function remove_stakeholder(project, row_name) {
 	return call(`${PROFILE_MODULE}.remove_stakeholder`, { project, row_name });
 }
 
+export function update_stakeholder(project, row_name, values) {
+	return call(`${PROFILE_MODULE}.update_stakeholder`, { project, row_name, values });
+}
+
 export function add_equipment_item(project, values) {
 	return call(`${PROFILE_MODULE}.add_equipment_item`, { project, values });
 }

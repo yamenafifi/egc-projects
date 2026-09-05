@@ -12,7 +12,13 @@ from frappe.tests import IntegrationTestCase
 
 from egc_projects.api import directory
 from egc_projects.egc_projects import constants as c
-from egc_projects.egc_projects import project_profile
+from egc_projects.egc_projects import project_profile, submittal_control
+from egc_projects.tests.test_submittal_workflow import (
+	_get_or_create_discipline,
+	_get_or_create_document_type,
+	_get_or_create_stakeholder_role,
+	_get_or_create_submittal_type,
+)
 
 
 def _make_company():
@@ -379,3 +385,247 @@ class TestDirectoryHub(IntegrationTestCase):
 			directory.grant_portal_access(self.project, row_name, email="egc-dh-z@example.com")
 		with self.assertRaises(frappe.PermissionError):
 			directory.update_stakeholder_role(self.project, row_name, self.role_internal)
+
+
+class TestDirectoryPersonProfile(IntegrationTestCase):
+	"""Tests for get_person_profile (the Hub's Directory Person page — replaces routing a row
+	click to the raw native User form) and project_profile.update_stakeholder (that page's own
+	fuller edit, everything add_stakeholder accepts except `person`). Builds real Submittal/
+	Document/Assignment fixtures — reusing test_submittal_workflow.py's own free helper
+	functions, same precedent test_submittal_forwarding.py already sets — to prove the "what
+	they've done on this project" sections aren't just empty-state placeholders."""
+
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		frappe.set_user("Administrator")
+		cls.company = frappe.db.get_value("Company", {}, "name") or frappe.get_all("Company", limit=1, pluck="name")[0]
+		cls.document_type = _get_or_create_document_type()
+		cls.discipline = _get_or_create_discipline()
+		cls.submittal_type = _get_or_create_submittal_type()
+		cls.role_engineer = _get_or_create_stakeholder_role("EGC-DPP-Engineer Role", is_egc_internal=1)
+		cls.manager_user = _get_or_create_user("egc-dpp-manager@example.com", ["Projects User", c.ROLE_PROJECT_MANAGER])
+		cls.reviewer = _get_or_create_user("egc-dpp-reviewer@example.com", ["Projects User", c.ROLE_PROJECT_VIEWER])
+
+	def setUp(self):
+		self.project = _make_project(self.company)
+
+	def tearDown(self):
+		frappe.set_user("Administrator")
+
+	def _add_stakeholder(self, party_name, person=None):
+		frappe.set_user(self.manager_user)
+		row_name = project_profile.add_stakeholder(
+			self.project, {"role": self.role_engineer, "party_name": party_name, "person": person}
+		)
+		frappe.set_user("Administrator")
+		return row_name
+
+	def _make_document(self, document_number, originator_person=None):
+		doc = frappe.get_doc(
+			{
+				"doctype": "EGC Project Document",
+				"project": self.project,
+				"document_number": document_number,
+				"title": document_number,
+				"document_type": self.document_type,
+				"discipline": self.discipline,
+				"originator_person": originator_person,
+			}
+		)
+		doc.insert(ignore_permissions=True)
+		return doc
+
+	def _make_private_file(self):
+		f = frappe.get_doc(
+			{"doctype": "File", "file_name": f"{frappe.generate_hash(length=6)}.txt", "is_private": 1, "content": "x"}
+		)
+		f.insert(ignore_permissions=True)
+		return f.file_url
+
+	def _make_responded_review_step(self, reviewer_user):
+		"""A real Submittal -> Revision -> Review Step chain, responded, so
+		_get_review_activity has something genuine to join across three doctypes for."""
+		document = self._make_document(f"DOC-DPP-{frappe.generate_hash(length=6)}")
+		revision = frappe.get_doc(
+			{
+				"doctype": "EGC Project Document Revision",
+				"document": document.name,
+				"revision": "00",
+				"file": self._make_private_file(),
+				"revision_date": frappe.utils.today(),
+			}
+		)
+		revision.insert(ignore_permissions=True)
+		revision.submit()
+
+		submittal = frappe.get_doc(
+			{
+				"doctype": "EGC Submittal",
+				"project": self.project,
+				"submittal_number": f"SUB-DPP-{frappe.generate_hash(length=6)}",
+				"title": "Test Submittal",
+				"submittal_type": self.submittal_type,
+				"discipline": self.discipline,
+			}
+		)
+		submittal.insert(ignore_permissions=True)
+
+		submission = frappe.get_doc(
+			{
+				"doctype": "EGC Submittal Revision",
+				"submittal": submittal.name,
+				"revision_label": "00",
+				"date_submitted": frappe.utils.today(),
+			}
+		)
+		submission.append("documents", {"document_revision": revision.name})
+		submission.insert(ignore_permissions=True)
+
+		step = frappe.get_doc(
+			{
+				"doctype": "EGC Submittal Review Step",
+				"submittal_revision": submission.name,
+				"sequence": 0,
+				"reviewer_user": reviewer_user,
+				"reviewer_label": reviewer_user,
+				"is_required": 1,
+			}
+		)
+		step.insert(ignore_permissions=True)
+		submission.submit()
+
+		# Not a hand-set status/response — that's blocked outright ("Status is controlled by the
+		# review workflow and cannot be set directly", confirmed live running this test before this
+		# fix), by design (this app's own no-fake-review principle). Goes through the real engine,
+		# same as every actual response in this app does; Administrator carries the "internal
+		# override" record_step_response's own docstring mentions, no need to switch session user.
+		submittal_control.record_step_response(step.name, c.RESPONSE_APPROVED, remarks="Looks good")
+		step.reload()
+		return submittal, step
+
+	# -- get_person_profile -------------------------------------------------------------------------
+
+	def test_get_person_profile_for_a_login_less_party_has_empty_activity(self):
+		row_name = self._add_stakeholder("No Login Yet")
+
+		frappe.set_user(self.manager_user)
+		result = directory.get_person_profile(self.project, row_name)
+
+		self.assertEqual(result["row"]["party_name"], "No Login Yet")
+		self.assertIsNone(result["row"]["person"])
+		self.assertEqual(result["activity"], {"reviews": [], "documents": [], "assignments": []})
+
+	def test_get_person_profile_includes_review_documents_and_assignments(self):
+		row_name = self._add_stakeholder("Real Reviewer", person=self.reviewer)
+		submittal, step = self._make_responded_review_step(self.reviewer)
+		document = self._make_document(f"DOC-DPP-ORIG-{frappe.generate_hash(length=6)}", originator_person=self.reviewer)
+		frappe.get_doc(
+			{
+				"doctype": "EGC Assignment",
+				"parent_doctype": "EGC Submittal",
+				"parent_name": submittal.name,
+				"project": self.project,
+				"assignment_role": "Reviewer",
+				"person": self.reviewer,
+			}
+		).insert(ignore_permissions=True)
+
+		frappe.set_user(self.manager_user)
+		result = directory.get_person_profile(self.project, row_name)
+
+		self.assertEqual(len(result["activity"]["reviews"]), 1)
+		review = result["activity"]["reviews"][0]
+		self.assertEqual(review["response"], c.RESPONSE_APPROVED)
+		self.assertEqual(review["submittal"], submittal.name)
+		self.assertEqual(review["submittal_number"], submittal.submittal_number)
+
+		self.assertEqual(len(result["activity"]["documents"]), 1)
+		self.assertEqual(result["activity"]["documents"][0]["name"], document.name)
+
+		self.assertEqual(len(result["activity"]["assignments"]), 1)
+		assignment = result["activity"]["assignments"][0]
+		self.assertEqual(assignment["parent_name"], submittal.name)
+		self.assertEqual(assignment["parent_title"], submittal.title)
+
+	def test_get_person_profile_denies_a_user_with_no_project_access(self):
+		row_name = self._add_stakeholder("Fenced Target")
+		other_project = _make_project(self.company)
+		fenced_user = _get_or_create_user("egc-dpp-fenced@example.com", ["Projects User", c.ROLE_PROJECT_VIEWER])
+		frappe.get_doc(
+			{"doctype": "User Permission", "user": fenced_user, "allow": "Project", "for_value": other_project}
+		).insert(ignore_permissions=True)
+
+		frappe.set_user(fenced_user)
+		self.assertRaises(frappe.PermissionError, directory.get_person_profile, self.project, row_name)
+
+	def test_get_person_profile_rejects_a_row_from_another_project(self):
+		row_name = self._add_stakeholder("Wrong Project Target")
+		other_project = _make_project(self.company)
+
+		frappe.set_user(self.manager_user)
+		self.assertRaises(frappe.PermissionError, directory.get_person_profile, other_project, row_name)
+
+	# -- project_profile.update_stakeholder ----------------------------------------------------------
+
+	def test_update_stakeholder_edits_fields_and_resyncs_role_on_change(self):
+		# party_name/email are intentionally NOT independently editable once `person` is set —
+		# EGCProjectStakeholder.fetch_from_person() (validate()) re-derives them from the linked
+		# User on every save "so this row's own display fields always mirror the Directory record
+		# rather than drifting into an independent copy" (that doctype's own docstring). Confirmed
+		# live before writing this test: an attempted party_name/email edit here is silently
+		# discarded, not applied then overwritten by something else — role and is_primary are the
+		# fields actually under this app's own control for a person-linked row.
+		row_name = self._add_stakeholder("Edit Target", person=self.reviewer)
+		new_role = _get_or_create_stakeholder_role("EGC-DPP-New Role", is_egc_internal=0)
+
+		frappe.set_user(self.manager_user)
+		project_profile.update_stakeholder(
+			self.project, row_name, {"party_name": "Edited Name", "email": "edited@example.com", "role": new_role, "is_primary": 1}
+		)
+
+		updated = frappe.db.get_value(
+			"EGC Project Stakeholder", row_name, ["party_name", "email", "role", "is_primary"], as_dict=True
+		)
+		self.assertEqual(updated.role, new_role)
+		self.assertEqual(updated.is_primary, 1)
+		self.assertEqual(updated.party_name, frappe.utils.get_fullname(self.reviewer))
+		self.assertEqual(updated.email, self.reviewer)
+
+	def test_update_stakeholder_edits_free_text_fields_for_a_login_less_party(self):
+		# The mirror case: with no `person` to derive from, fetch_from_person() is a no-op
+		# (`if not self.person: return`) — party_name/email/phone genuinely are this row's own
+		# data for a one-off party, and update_stakeholder's edit actually sticks.
+		row_name = self._add_stakeholder("Login-less Edit Target")
+
+		frappe.set_user(self.manager_user)
+		project_profile.update_stakeholder(
+			self.project, row_name, {"party_name": "Edited Name", "email": "edited@example.com", "phone": "555-0100"}
+		)
+
+		updated = frappe.db.get_value(
+			"EGC Project Stakeholder", row_name, ["party_name", "email", "phone"], as_dict=True
+		)
+		self.assertEqual(updated.party_name, "Edited Name")
+		self.assertEqual(updated.email, "edited@example.com")
+		self.assertEqual(updated.phone, "555-0100")
+
+	def test_update_stakeholder_never_changes_person(self):
+		row_name = self._add_stakeholder("Person Lock Target", person=self.reviewer)
+		other_user = _get_or_create_user("egc-dpp-other@example.com", ["Projects User"])
+
+		frappe.set_user(self.manager_user)
+		project_profile.update_stakeholder(self.project, row_name, {"person": other_user, "is_primary": 1})
+
+		updated = frappe.db.get_value("EGC Project Stakeholder", row_name, ["person", "is_primary"], as_dict=True)
+		self.assertEqual(updated.person, self.reviewer)
+		self.assertEqual(updated.is_primary, 1)
+
+	def test_update_stakeholder_denies_a_user_with_no_write_access(self):
+		row_name = self._add_stakeholder("Write-Denied Target")
+		viewer_only = _get_or_create_user("egc-dpp-viewer@example.com", [])
+
+		frappe.set_user(viewer_only)
+		self.assertRaises(
+			frappe.PermissionError, project_profile.update_stakeholder, self.project, row_name, {"party_name": "Hacked"}
+		)

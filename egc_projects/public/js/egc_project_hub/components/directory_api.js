@@ -31,3 +31,7 @@ export function revoke_portal_access(project, user) {
 export function update_stakeholder_role(project, row_name, role) {
 	return call(`${DIRECTORY_MODULE}.update_stakeholder_role`, { project, row_name, role });
 }
+
+export function get_person_profile(project, row_name) {
+	return call(`${DIRECTORY_MODULE}.get_person_profile`, { project, row_name });
+}

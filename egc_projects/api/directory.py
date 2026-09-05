@@ -259,6 +259,139 @@ def revoke_portal_access(project: str, user: str) -> None:
 
 
 @frappe.whitelist()
+def get_person_profile(project: str, row_name: str) -> dict:
+	"""One Directory row's full detail — its own fields plus "what they've done on this
+	project" — for the Hub's Person profile page (replaces routing a row click to the raw native
+	User form, which showed nothing project-specific and wasn't editable from here at all).
+
+	Activity sections only populate when the row has a real login (`person`) to correlate
+	against — a login-less party has directory facts to show/edit but no activity of its own to
+	list yet."""
+	validators.require_project_permission(project)
+
+	stakeholder = frappe.get_doc("EGC Project Stakeholder", row_name)
+	if stakeholder.parenttype != "Project" or stakeholder.parent != project:
+		frappe.throw(_("That Directory entry does not belong to this project."), exc=frappe.PermissionError)
+
+	row = {field: stakeholder.get(field) for field in project_profile.STAKEHOLDER_ROW_FIELDS}
+	row["name"] = stakeholder.name
+
+	is_internal = bool(frappe.db.get_value("EGC Stakeholder Role", row["role"], "is_egc_internal")) if row["role"] else False
+	row["is_egc_internal"] = is_internal
+
+	if row["organization_type"] == "Other":
+		row["organization_name"] = row["organization_label"]
+	elif row["organization"]:
+		name_field = "supplier_name" if row["organization_type"] == "Supplier" else "customer_name"
+		row["organization_name"] = frappe.db.get_value(row["organization_type"], row["organization"], name_field)
+	else:
+		row["organization_name"] = None
+
+	person = row.get("person")
+	row["is_admin_bypass"] = _has_bypass_role(person)
+	row["is_internal_unscoped"] = bool(
+		is_internal
+		and person
+		and not row["is_admin_bypass"]
+		and frappe.db.exists("Has Role", {"parent": person, "role": ("in", list(c.EGC_ROLES))})
+	)
+	row["has_portal_access"] = bool(person) and _has_portal_access(person, project, row["role"])
+
+	activity = {"reviews": [], "documents": [], "assignments": []}
+	if person:
+		activity["reviews"] = _get_review_activity(project, person)
+		activity["documents"] = frappe.get_all(
+			"EGC Project Document",
+			filters={"project": project, "originator_person": person},
+			fields=["name", "document_number", "title", "document_status", "approval_status", "creation"],
+			order_by="creation desc",
+		)
+		activity["assignments"] = _get_assignment_activity(project, person)
+
+	return {"row": row, "activity": activity}
+
+
+def _get_review_activity(project: str, person: str) -> list[dict]:
+	"""This person's own responded review steps on this project — the direct, real answer to
+	"what has this reviewer actually done" (their verdict history), not a generic audit log."""
+	steps = frappe.get_all(
+		"EGC Submittal Review Step",
+		filters={"project": project, "reviewer_user": person, "status": "Responded"},
+		fields=["name", "submittal_revision", "sequence", "response", "response_date", "response_remarks"],
+		order_by="response_date desc",
+	)
+	if not steps:
+		return []
+
+	revision_names = list({s.submittal_revision for s in steps if s.submittal_revision})
+	revisions = {
+		r.name: r
+		for r in frappe.get_all(
+			"EGC Submittal Revision",
+			filters={"name": ("in", revision_names)},
+			fields=["name", "submittal", "revision_label"],
+		)
+	}
+	submittal_names = list({r.submittal for r in revisions.values() if r.submittal})
+	submittals = {
+		s.name: s
+		for s in frappe.get_all(
+			"EGC Submittal", filters={"name": ("in", submittal_names)}, fields=["name", "submittal_number", "title"]
+		)
+	}
+
+	rows = []
+	for step in steps:
+		revision = revisions.get(step.submittal_revision)
+		submittal = submittals.get(revision.submittal) if revision else None
+		rows.append(
+			{
+				**step,
+				"submittal": submittal.name if submittal else None,
+				"submittal_number": submittal.submittal_number if submittal else None,
+				"submittal_title": submittal.title if submittal else None,
+				"revision_label": revision.revision_label if revision else None,
+			}
+		)
+	return rows
+
+
+#: parent_doctype -> the field on it that reads as a human title, for _get_assignment_activity's
+#: own batched-per-doctype title lookup.
+_ASSIGNMENT_TITLE_FIELD = {
+	"EGC Submittal": "title",
+	"EGC Project Document": "title",
+	"EGC Activity": "activity_name",
+}
+
+
+def _get_assignment_activity(project: str, person: str) -> list[dict]:
+	rows = frappe.get_all(
+		"EGC Assignment",
+		filters={"project": project, "person": person},
+		fields=["name", "parent_doctype", "parent_name", "assignment_role", "is_primary"],
+	)
+	if not rows:
+		return []
+
+	names_by_doctype: dict[str, list[str]] = {}
+	for row in rows:
+		names_by_doctype.setdefault(row.parent_doctype, []).append(row.parent_name)
+
+	titles: dict[tuple[str, str], str] = {}
+	for doctype, names in names_by_doctype.items():
+		title_field = _ASSIGNMENT_TITLE_FIELD.get(doctype)
+		if not title_field:
+			continue
+		for record in frappe.get_all(doctype, filters={"name": ("in", names)}, fields=["name", title_field]):
+			titles[(doctype, record.name)] = record.get(title_field)
+
+	for row in rows:
+		row["parent_title"] = titles.get((row.parent_doctype, row.parent_name))
+	return rows
+
+
+@frappe.whitelist()
 def update_stakeholder_role(project: str, row_name: str, role: str) -> None:
 	validators.require_project_permission(project, "write")
 	doc = frappe.get_doc("Project", project)

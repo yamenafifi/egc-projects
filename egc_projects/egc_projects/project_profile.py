@@ -196,6 +196,39 @@ def remove_stakeholder(project: str, row_name: str) -> None:
 	doc.save()
 
 
+#: Editable from the Directory's own Person profile page — everything add_stakeholder accepts
+#: except `person`, which is deliberately not editable here: it's set once, either at Add time or
+#: by directory.grant_portal_access (creating a login for an email-only row), never reassigned to
+#: a different User afterward — that's a different operation than "correct this row's own
+#: details", and silently repointing an existing row's login would be a much bigger, riskier
+#: change to fold into a plain field edit.
+STAKEHOLDER_EDITABLE_FIELDS = tuple(f for f in STAKEHOLDER_ROW_FIELDS if f != "person")
+
+
+@frappe.whitelist()
+def update_stakeholder(project: str, row_name: str, values: dict | str) -> None:
+	"""Full-field edit of an existing Directory row (party_name/organization/email/phone/role/
+	is_primary) — the fuller counterpart to directory.update_stakeholder_role's role-only edit,
+	reachable from the Hub's own Directory Person profile page."""
+	_require_profile_edit_access(project)
+	if isinstance(values, str):
+		values = frappe.parse_json(values)
+
+	doc = frappe.get_doc("Project", project)
+	row = next((r for r in doc.custom_egc_stakeholders if r.name == row_name), None)
+	if not row:
+		frappe.throw(frappe._("Stakeholder row not found."), exc=frappe.DoesNotExistError)
+
+	old_role = row.role
+	for field in STAKEHOLDER_EDITABLE_FIELDS:
+		if field in values:
+			row.set(field, values[field])
+	doc.save()
+
+	if row.role != old_role:
+		sync_roles_from_stakeholder_role(row.person, row.role)
+
+
 @frappe.whitelist()
 def add_equipment_item(project: str, values: dict | str) -> str:
 	_require_profile_edit_access(project)

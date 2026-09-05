@@ -18,6 +18,7 @@ import LoadingState from "./LoadingState.vue";
 import ErrorState from "./ErrorState.vue";
 import EmptyState from "./EmptyState.vue";
 import BulkActionsBar from "./BulkActionsBar.vue";
+import DirectoryPersonDetail from "./DirectoryPersonDetail.vue";
 
 const props = defineProps({
 	project: { type: String, required: true },
@@ -109,8 +110,19 @@ function report_error(title, e) {
 	frappe.msgprint({ title, message: e.message, indicator: "red" });
 }
 
+// Opens the Hub's own Person profile (below) instead of routing to the raw native User form —
+// direct instruction: nothing project-specific showed there, and it wasn't editable from here at
+// all. Works regardless of login state (previously gated on `row.person`) — a login-less party
+// still has a real profile to view/edit, just no activity section to show yet.
+const selected_row = ref(null);
 function open_record(row) {
-	if (row.person) frappe.set_route("Form", "User", row.person);
+	selected_row.value = row.name;
+}
+function close_detail() {
+	selected_row.value = null;
+}
+function on_detail_changed() {
+	reload();
 }
 
 // -- add to directory (same "pick a User or type a one-off party" pattern already used
@@ -297,6 +309,16 @@ function confirm_revoke_access(row) {
 
 <template>
 	<div class="hub-directory">
+		<DirectoryPersonDetail
+			v-if="selected_row"
+			:row-name="selected_row"
+			:project="project"
+			:can-write="can_write"
+			@close="close_detail"
+			@changed="on_detail_changed"
+		/>
+
+		<template v-else>
 		<LoadingState v-if="loading" :rows="8" />
 		<ErrorState v-else-if="error" :message="error" @retry="reload" />
 		<EmptyState
@@ -373,7 +395,7 @@ function confirm_revoke_access(row) {
 							</tr>
 						</tbody>
 						<tbody v-if="!collapsed_groups.has(group.name)">
-						<tr v-for="row in group.rows" :key="row.name" :class="{ 'hub-table__row--clickable': row.person }" @click="open_record(row)">
+						<tr v-for="row in group.rows" :key="row.name" class="hub-table__row--clickable" @click="open_record(row)">
 							<td class="hub-table__check-col" @click.stop>
 								<input type="checkbox" :checked="is_selected(row)" @change="toggle(row)" />
 							</td>
@@ -426,6 +448,7 @@ function confirm_revoke_access(row) {
 					</template>
 				</table>
 			</div>
+		</template>
 		</template>
 	</div>
 </template>
